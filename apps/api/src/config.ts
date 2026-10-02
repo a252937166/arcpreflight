@@ -1,9 +1,11 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { ARC, type ArcNet } from "@arcpreflight/client";
 
-const ROOT = process.env.ARCPREFLIGHT_ROOT ?? resolve(process.cwd(), "../..");
+// repo root: apps/api/src/config.ts and apps/api/dist/server.mjs are both three levels below it
+const ROOT = process.env.ARCPREFLIGHT_ROOT ?? fileURLToPath(new URL("../../..", import.meta.url));
 function keyFromFile(role: string): `0x${string}` | null {
   const f = resolve(process.env.KEYS_DIR ?? resolve(ROOT, "keys"), `${role}.json`);
   if (!existsSync(f)) return null;
