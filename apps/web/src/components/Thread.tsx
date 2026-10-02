@@ -64,12 +64,12 @@ export function Thread({ container, anchors }: { container: RefObject<HTMLElemen
   return (
     <svg className="thread" width={geom.w} height={geom.h} viewBox={`0 0 ${geom.w} ${geom.h}`} aria-hidden>
       <defs>
-        <filter id="thread-sketch" x="-2%" y="-2%" width="104%" height="104%"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="2" seed="3" result="n" /><feDisplacementMap in="SourceGraphic" in2="n" scale="2.4" /></filter>
+        <filter id="thread-sketch" x="-2%" y="-2%" width="104%" height="104%"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="2" seed="3" result="n" /><feDisplacementMap in="SourceGraphic" in2="n" scale="1.2" /></filter>
       </defs>
       <path d={d} className="thread-ghost" />
       <path ref={pathRef} d={d} className="thread-ink" filter="url(#thread-sketch)" style={{ strokeDasharray: len, strokeDashoffset: len * (1 - progress) }} />
       {geom.pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="6" className={`thread-knot ${progress * geom.pts.length > i + 0.2 ? "on" : ""}`} />)}
-      {[0, 1, 2].map((i) => (
+      {[0, 1].map((i) => (
         <rect key={i} width="9" height="9" rx="2" className="thread-block" x="-4.5" y="-4.5"><animateMotion dur={`${28 + i * 8}s`} begin={`${-i * 11}s`} repeatCount="indefinite" path={d} rotate="auto" /></rect>
       ))}
     </svg>

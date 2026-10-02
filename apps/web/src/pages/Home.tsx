@@ -75,7 +75,7 @@ export default function Home() {
           <div className="along left w-880" ref={o1}>
             <div className="cols" style={{ gap: 28 }}>
               <div className="stack" style={{ gap: 10 }}>
-                <p className="hand">① the implementation moved</p>
+                <p className="kicker">① the implementation moved</p>
                 <h2 style={{ fontSize: "1.9rem" }}>Review required.</h2>
                 <p className="muted">The merchant proxy was approved on implementation A and silently upgraded to B. Same ABI, same calldata, same price. The pinned report sees the new code hash; the agent refuses to sign until a human re-approves the baseline.</p>
                 <p className="row" style={{ gap: 10 }}><DecisionBadge decision="REVIEW_REQUIRED" size="sm" />{fx("CHANGED_IMPLEMENTATION")?.merchant && <span className="tiny dim">proxy <Hex value={fx("CHANGED_IMPLEMENTATION")!.merchant} n={4} /></span>}<Link to="/demo?fixture=CHANGED_IMPLEMENTATION" className="small">run this one →</Link></p>
@@ -87,7 +87,7 @@ export default function Home() {
             <div className="cols rev" style={{ gap: 28 }}>
               <TwoFaces />
               <div className="stack" style={{ gap: 10 }}>
-                <p className="hand rose">② the amount is in the wrong units</p>
+                <p className="kicker" style={{ color: "var(--rose)" }}>② the amount is in the wrong units</p>
                 <h2 style={{ fontSize: "1.9rem" }}>Blocked.</h2>
                 <p className="muted">USDC is Arc's gas. Native value has 18 decimals, the ERC-20 face has 6, one balance behind both. The order is 0.05 USDC; the calldata carries <code>value = 50000</code>. AMOUNT_SEMANTICS blocks it before a signature exists — and the pinned simulation decodes the contract's own <code>WrongAmount(...)</code>.</p>
                 <p className="row" style={{ gap: 10 }}><DecisionBadge decision="BLOCKED" size="sm" /><Link to="/demo?fixture=AMOUNT_UNIT_MISMATCH" className="small">run this one →</Link></p>
@@ -97,7 +97,7 @@ export default function Home() {
           <div className="along left w-880" ref={o3}>
             <div className="cols" style={{ gap: 28 }}>
               <div className="stack" style={{ gap: 10 }}>
-                <p className="hand mint">③ nothing fired</p>
+                <p className="kicker" style={{ color: "var(--mint)" }}>③ nothing fired</p>
                 <h2 style={{ fontSize: "1.9rem" }}>Paid, and proven.</h2>
                 <p className="muted">Baseline matches, the order is payable, the simulation passes. The agent re-validates at a new block after paying the service fee, signs exactly the validated plan, decodes its own signed bytes against the plan, broadcasts, and reads the order back: paid, by this payer, for this amount.</p>
                 <p className="row" style={{ gap: 10 }}><DecisionBadge decision="CONFIRMED" size="sm" /><Link to="/demo?fixture=APPROVED_PAYMENT" className="small">run this one →</Link></p>
@@ -117,16 +117,16 @@ export default function Home() {
             <div className="stack" style={{ marginTop: 18, gap: 10 }}>
               <p className="margin-note" style={{ maxWidth: "none" }}>reads are pinned by block hash and re-verified by number — a few blocks behind head, because the public RPC is load-balanced</p>
               <p className="margin-note" style={{ maxWidth: "none", color: "var(--violet)" }}>fee floor is 20 gwei: lower transactions are silently dropped, so final validation re-estimates before signing</p>
-              <p className="margin-note" style={{ maxWidth: "none", color: "var(--rose)" }}>PREVRANDAO is 0, value-transfer rules differ, SELFDESTRUCT moves USDC — surfaced as documentation-backed advisories, never as target findings</p>
+              <p className="muted small">PREVRANDAO is 0, value-transfer rules differ, SELFDESTRUCT moves USDC — surfaced as documentation-backed advisories, never as target findings.</p>
             </div>
           </div>
           <div className="along left w-760" ref={fee}>
-            <p className="hand teal">the service fee is x402, settled by the Circle Facilitator on Arc</p>
+            <h3>The service fee is x402, settled by the Circle Facilitator on Arc</h3>
             <p className="muted" style={{ marginTop: 8 }}>One EIP-3009 <code>TransferWithAuthorization</code> for exactly the quoted 0.01 USDC, forwarded with a seller proof. The buyer needs no allowance and pays no gas; the settlement is a real transaction on Arc and the report is delivered only after it.</p>
             <FacilitatorFlow />
           </div>
           <div className="along right w-760" ref={chain}>
-            <p className="hand violet">every receipt carries the receipts before it</p>
+            <h3>Every receipt carries the receipts before it</h3>
             <p className="muted" style={{ marginTop: 8 }}>Intent, report, decision, final validation, plan and execution are each digested over canonical JSON. Anyone with the raw RPC evidence can replay the chain and arrive at the same bytes. Circle's own proxies on Arc — GatewayWallet, FxEscrow, the ERC-8004 registries — are the public test objects: <Link to="/inspect">look at one</Link>.</p>
             <ReceiptChain />
           </div>
