@@ -3,7 +3,7 @@ const Sketch = ({ id = "sketch" }: { id?: string }) => (
   <defs>
     <filter id={id} x="-5%" y="-5%" width="110%" height="110%">
       <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="7" result="n" />
-      <feDisplacementMap in="SourceGraphic" in2="n" scale="1.6" xChannelSelector="R" yChannelSelector="G" />
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="0.9" xChannelSelector="R" yChannelSelector="G" />
     </filter>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></marker>
   </defs>
@@ -31,7 +31,7 @@ export function HeroScene() {
           <circle cx="66" cy="184" r="5" className="fill-teal" /><circle cx="106" cy="184" r="5" className="fill-teal" />
           <path d="M70 206 Q86 216 102 206" className="ink teal draw d1" />
           <path d="M86 150 L86 128 M78 128 L94 128" className="ink draw d1" />
-          <text x="86" y="252" textAnchor="middle" fontSize="18">agent</text>
+          <text x="86" y="252" textAnchor="middle" fontSize="12">agent</text>
         </g>
         {/* lens */}
         <g>
@@ -42,7 +42,7 @@ export function HeroScene() {
             <rect x="214" y="100" width="172" height="12" className="fill-teal pulse" opacity="0.18" />
             <g className="scan"><rect x="214" y="186" width="172" height="2" className="fill-teal" opacity="0.6" /></g>
           </g>
-          <text x="300" y="300" textAnchor="middle" fontSize="18" className="fill-teal">pinned at block #N</text>
+          <text x="300" y="300" textAnchor="middle" fontSize="12" className="fill-teal">pinned at block #N</text>
           <text x="300" y="322" textAnchor="middle" fontSize="13" className="mono">by hash · EIP-1898</text>
         </g>
         {/* contract inside the lens */}
@@ -61,16 +61,16 @@ export function HeroScene() {
           <rect x="474" y="240" width="118" height="44" rx="8" className="ink amber dashed draw d3" />
           <text x="533" y="258" textAnchor="middle" fontSize="12" className="lbl">implementation B</text>
           <text x="533" y="274" textAnchor="middle" className="mono">upgraded? · 0x430c…9ac5</text>
-          <text x="548" y="306" textAnchor="middle" fontSize="17" className="fill-amber">same ABI, same calldata…</text>
+          <text x="548" y="306" textAnchor="middle" fontSize="17" className="fill-amber note">same ABI, same calldata…</text>
         </g>
         {/* agent -> lens arrow + coin */}
         <path d="M142 186 C 170 176, 190 176, 212 186" className="ink soft draw d1" markerEnd="url(#arrow)" style={{ color: "var(--ink-3)" }} />
         <g className="float">
           <circle cx="150" cy="86" r="26" className="ink amber draw d2" />
-          <text x="150" y="92" textAnchor="middle" fontSize="18" className="fill-amber">$</text>
-          <text x="150" y="46" textAnchor="middle" fontSize="16">0.01 USDC via x402</text>
+          <text x="150" y="92" textAnchor="middle" fontSize="12" className="fill-amber">$</text>
+          <text className="note" x="150" y="46" textAnchor="middle" fontSize="16">0.01 USDC via x402</text>
         </g>
-        <text x="40" y="330" fontSize="17" className="fill-ink">nothing is signed until the lens says "still A"</text>
+        <text className="note" x="40" y="330" fontSize="17">nothing is signed until the lens says "still A"</text>
       </g>
     </svg>
   );
@@ -84,17 +84,17 @@ export function TwoFaces() {
       <g filter="url(#sk2)">
         <ellipse cx="150" cy="110" rx="78" ry="78" className="ink amber draw" />
         <ellipse cx="150" cy="110" rx="78" ry="20" className="ink amber soft draw d1" opacity="0.5" />
-        <text x="150" y="98" textAnchor="middle" fontSize="20" className="fill-amber">native</text>
+        <text x="150" y="98" textAnchor="middle" fontSize="12" className="fill-amber">native</text>
         <text x="150" y="124" textAnchor="middle" className="mono">18 decimals · pays gas</text>
         <text x="150" y="142" textAnchor="middle" className="mono">msg.value</text>
         <ellipse cx="410" cy="110" rx="78" ry="78" className="ink sky draw d1" />
-        <text x="410" y="98" textAnchor="middle" fontSize="20" className="fill-ink" style={{ fill: "var(--sky)" }}>ERC-20 face</text>
+        <text x="410" y="98" textAnchor="middle" fontSize="12" className="fill-ink" style={{ fill: "var(--sky)" }}>ERC-20 face</text>
         <text x="410" y="124" textAnchor="middle" className="mono">6 decimals · 0x3600…0000</text>
         <text x="410" y="142" textAnchor="middle" className="mono">transfer(to, amount)</text>
         <path d="M232 110 C 260 100, 300 120, 328 110" className="ink draw d2" markerEnd="url(#arrow)" markerStart="url(#arrow)" style={{ color: "var(--ink-2)" }} />
-        <text x="280" y="92" textAnchor="middle" fontSize="18">one balance</text>
-        <text x="280" y="206" textAnchor="middle" fontSize="19" className="fill-rose">50000 ≠ 50 000 000 000 000 000</text>
-        <text x="280" y="230" textAnchor="middle" fontSize="15" className="fill-dim" style={{ fontFamily: "var(--hand)" }}>a 10¹² underpayment that looks like 0.05 USDC — AMOUNT_SEMANTICS blocks it before a signature exists</text>
+        <text x="280" y="92" textAnchor="middle" fontSize="12">one balance</text>
+        <text x="280" y="206" textAnchor="middle" fontSize="19" className="fill-rose note">50000 ≠ 50 000 000 000 000 000</text>
+        <text x="280" y="230" textAnchor="middle" fontSize="15" className="fill-dim note">a 10¹² underpayment that looks like 0.05 USDC — AMOUNT_SEMANTICS blocks it before a signature exists</text>
       </g>
     </svg>
   );
@@ -111,12 +111,12 @@ export function PinnedBlocks() {
         {blocks.map((i) => <rect key={i} x={30 + i * 48} y="82" width="34" height="36" rx="6" className={`ink draw ${i === 3 ? "teal" : i === 7 ? "mint" : i === 10 ? "amber" : "soft"}`} />)}
         <path d="M47 76 L47 46" className="ink teal draw d1" /><circle cx="47" cy="40" r="5" className="fill-teal" transform="translate(126 0)" />
         <path d="M173 76 L173 46" className="ink teal draw d1" />
-        <text x="173" y="34" textAnchor="middle" fontSize="17" className="fill-teal">report pinned here (#N, by hash)</text>
+        <text x="173" y="34" textAnchor="middle" fontSize="12" className="fill-teal">report pinned here (#N, by hash)</text>
         <path d="M365 76 L365 46" className="ink mint draw d2" />
-        <text x="365" y="34" textAnchor="middle" fontSize="17" className="fill-mint">final validation re-reads at #N+k</text>
-        <text x="527" y="150" textAnchor="middle" fontSize="16" className="fill-amber">head</text>
+        <text x="365" y="34" textAnchor="middle" fontSize="12" className="fill-mint">final validation re-reads at #N+k</text>
+        <text x="527" y="150" textAnchor="middle" fontSize="12" className="fill-amber">head</text>
         <path d="M470 100 C 490 70, 505 70, 520 96" className="ink amber dashed draw d3" />
-        <text x="300" y="160" textAnchor="middle" fontSize="15" className="fill-dim" style={{ fontFamily: "var(--hand)" }}>a few blocks behind head on purpose: Arc's public RPC is load-balanced, and the hash is what gets verified</text>
+        <text x="300" y="160" textAnchor="middle" fontSize="15" className="fill-dim note">a few blocks behind head on purpose: Arc's public RPC is load-balanced, and the hash is what gets verified</text>
       </g>
     </svg>
   );
@@ -136,7 +136,7 @@ export function ReceiptChain() {
             {i < links.length - 1 && <path d={`M${100 + i * 104} 54 L${118 + i * 104} 54`} className="ink soft draw" markerEnd="url(#arrow)" style={{ color: "var(--ink-3)" }} />}
           </g>
         ))}
-        <text x="320" y="104" textAnchor="middle" fontSize="16" className="fill-violet">every arrow = the next receipt carries the previous digests · keccak256 over canonical JSON</text>
+        <text x="320" y="104" textAnchor="middle" fontSize="16" className="fill-violet note">every arrow = the next receipt carries the previous digests · keccak256 over canonical JSON</text>
       </g>
     </svg>
   );
@@ -151,12 +151,12 @@ export function FacilitatorFlow() {
         <rect x="20" y="70" width="110" height="56" rx="12" className="ink draw" /><text x="75" y="94" textAnchor="middle" fontSize="12" className="lbl">agent (buyer)</text><text x="75" y="112" textAnchor="middle" className="mono">signs EIP-3009</text>
         <rect x="225" y="70" width="110" height="56" rx="12" className="ink teal draw d1" /><text x="280" y="94" textAnchor="middle" fontSize="12" className="lbl">ArcPreflight</text><text x="280" y="112" textAnchor="middle" className="mono">seller proof</text>
         <rect x="430" y="70" width="110" height="56" rx="12" className="ink violet draw d2" /><text x="485" y="94" textAnchor="middle" fontSize="12" className="lbl">Circle Facilitator</text><text x="485" y="112" textAnchor="middle" className="mono">/settle on Arc</text>
-        <path d="M132 98 L220 98" className="ink draw d1" markerEnd="url(#arrow)" style={{ color: "var(--ink-2)" }} /><text x="176" y="88" textAnchor="middle" fontSize="15">authorization</text>
-        <path d="M337 98 L425 98" className="ink draw d2" markerEnd="url(#arrow)" style={{ color: "var(--ink-2)" }} /><text x="381" y="88" textAnchor="middle" fontSize="15">settle</text>
+        <path d="M132 98 L220 98" className="ink draw d1" markerEnd="url(#arrow)" style={{ color: "var(--ink-2)" }} /><text x="176" y="88" textAnchor="middle" fontSize="12">authorization</text>
+        <path d="M337 98 L425 98" className="ink draw d2" markerEnd="url(#arrow)" style={{ color: "var(--ink-2)" }} /><text x="381" y="88" textAnchor="middle" fontSize="12">settle</text>
         <path d="M485 128 C 485 160, 300 160, 280 180" className="ink mint dashed draw d3" markerEnd="url(#arrow)" style={{ color: "var(--mint)" }} />
-        <text x="420" y="178" textAnchor="middle" fontSize="15" className="fill-mint">tx on Arc → report delivered</text>
-        <text x="75" y="160" textAnchor="middle" fontSize="15" className="fill-amber">0.01 USDC, 6-dec</text>
-        <text x="75" y="180" textAnchor="middle" fontSize="14" className="fill-dim" style={{ fontFamily: "var(--hand)" }}>no allowance, no gas</text>
+        <text x="420" y="178" textAnchor="middle" fontSize="12" className="fill-mint">tx on Arc → report delivered</text>
+        <text x="75" y="160" textAnchor="middle" fontSize="15" className="fill-amber note">0.01 USDC, 6-dec</text>
+        <text x="75" y="180" textAnchor="middle" fontSize="14" className="fill-dim note">no allowance, no gas</text>
       </g>
     </svg>
   );

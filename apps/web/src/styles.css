@@ -35,7 +35,7 @@ h1 { font-family: var(--serif); font-size: clamp(2.6rem, 6vw, 4.6rem); line-heig
 h2 { font-family: var(--serif); font-size: clamp(1.8rem, 3.4vw, 2.6rem); line-height: 1.12; }
 h3 { font-family: var(--grotesk); font-size: 1.05rem; font-weight: 600; letter-spacing: 0.01em; }
 em, .it { font-style: italic; font-family: var(--serif); font-weight: 400; }
-.hand { font-family: var(--hand); font-size: 1.25rem; color: var(--amber); line-height: 1.2; }
+.hand { font-family: var(--hand); font-size: 1.15rem; color: var(--amber); line-height: 1.2; }
 .hand.teal { color: var(--teal); } .hand.violet { color: var(--violet); } .hand.rose { color: var(--rose); } .hand.mint { color: var(--mint); } .hand.sky { color: var(--sky); }
 .kicker { font-family: var(--grotesk); font-size: 0.74rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--teal); }
 .lead { font-size: 1.18rem; line-height: 1.6; color: var(--ink-2); max-width: 680px; }
@@ -45,7 +45,7 @@ em, .it { font-style: italic; font-family: var(--serif); font-weight: 400; }
 .grotesk { font-family: var(--grotesk); }
 .underline-squiggle { position: relative; white-space: nowrap; }
 .underline-squiggle svg { position: absolute; left: 0; right: 0; bottom: -0.12em; width: 100%; height: 0.32em; overflow: visible; }
-.underline-squiggle path { fill: none; stroke: var(--amber); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 600; stroke-dashoffset: 600; animation: draw 1.4s 0.4s ease forwards; }
+.underline-squiggle path { fill: none; stroke: var(--amber); stroke-width: 2; opacity: 0.85; stroke-linecap: round; stroke-dasharray: 600; stroke-dashoffset: 600; animation: draw 1.4s 0.4s ease forwards; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
 
 /* ---- backdrop ---- */
@@ -73,14 +73,14 @@ em, .it { font-style: italic; font-family: var(--serif); font-weight: 400; }
 .rule { height: 1px; background: linear-gradient(90deg, transparent, var(--line-2), transparent); margin: 8px 0; }
 .rule.hand { height: 6px; background: none; }
 .rule.hand svg { width: 100%; height: 6px; display: block; }
-.margin-note { font-family: var(--hand); font-size: 1.2rem; color: var(--amber); line-height: 1.15; max-width: 240px; }
+.margin-note { font-family: var(--hand); font-size: 1.1rem; color: var(--amber); line-height: 1.15; max-width: 240px; }
 
 /* ---- nav ---- */
 .nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(12px); background: rgba(7, 9, 15, 0.66); }
 .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 16px; }
 .brand { display: flex; align-items: baseline; gap: 8px; color: var(--ink); font-family: var(--serif); font-size: 1.45rem; font-weight: 500; }
 .brand:hover { text-decoration: none; }
-.brand .mark { font-family: var(--hand); color: var(--teal); font-size: 1.1rem; }
+.brand .mark { font-family: var(--grotesk); color: var(--ink-3); font-size: 0.82rem; }
 .nav-links { display: flex; gap: 2px; align-items: center; }
 .nav-links a { color: var(--ink-2); padding: 6px 11px; font-family: var(--grotesk); font-size: 0.92rem; border-bottom: 2px solid transparent; }
 .nav-links a.active { color: var(--ink); border-bottom-color: var(--amber); }
@@ -119,7 +119,7 @@ em, .it { font-style: italic; font-family: var(--serif); font-weight: 400; }
 .chip.info { border-color: rgba(125,211,252,0.5); color: var(--sky); }
 .chip.violet { border-color: rgba(196,181,253,0.5); color: var(--violet); }
 .badge { display: inline-flex; align-items: baseline; gap: 10px; font-family: var(--serif); font-style: italic; font-size: 2rem; line-height: 1; }
-.badge .mk { font-family: var(--hand); font-style: normal; font-size: 1.6rem; }
+.badge .mk { font-family: var(--grotesk); font-style: normal; font-size: 1.3rem; }
 .badge.ok { color: var(--mint); } .badge.warn { color: var(--amber); } .badge.bad { color: var(--rose); } .badge.neutral { color: var(--ink-2); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); display: inline-block; }
 .dot.live { background: var(--mint); animation: ping 1.8s infinite; }
@@ -149,7 +149,8 @@ table.t tr:last-child td { border-bottom: none; }
 
 /* ---- illustrations ---- */
 .ill { width: 100%; height: auto; display: block; overflow: visible; }
-.ill text { font-family: var(--hand); fill: var(--ink-2); }
+.ill text { font-family: var(--grotesk); font-size: 12px; fill: var(--ink-2); }
+.ill text.note { font-family: var(--hand); }
 .ill .lbl { font-family: var(--grotesk); font-size: 11px; fill: var(--ink-2); letter-spacing: 0.04em; }
 .ill .mono { font-family: var(--mono); font-size: 10px; fill: var(--ink-3); }
 .ill .ink { stroke: var(--ink-2); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -179,10 +180,10 @@ table.t tr:last-child td { border-bottom: none; }
 .loop .node.skipped { opacity: 0.3; }
 .loop .nlabel { font-family: var(--grotesk); font-size: 11.5px; fill: var(--ink-2); text-anchor: middle; }
 .loop .nlabel.skipped { opacity: 0.35; }
-.loop .nnum { font-family: var(--hand); font-size: 15px; fill: var(--ink-2); text-anchor: middle; dominant-baseline: central; }
+.loop .nnum { font-family: var(--grotesk); font-size: 12px; fill: var(--ink-2); text-anchor: middle; dominant-baseline: central; }
 .loop .nnum.on { fill: var(--amber); } .loop .nnum.ok { fill: var(--mint); } .loop .nnum.stop { fill: var(--rose); } .loop .nnum.done { fill: var(--teal); }
 .loop .runner { fill: var(--amber); filter: drop-shadow(0 0 6px rgba(251,191,36,0.8)); }
-.loop .note { font-family: var(--hand); font-size: 14px; fill: var(--amber); }
+.loop .note { font-family: var(--grotesk); font-size: 12px; fill: var(--amber); }
 @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.12); } }
 
 /* ---- step log ---- */
@@ -190,12 +191,12 @@ table.t tr:last-child td { border-bottom: none; }
 .step { display: grid; grid-template-columns: 26px 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px dashed var(--line); animation: rise 0.35s ease both; }
 .step:last-child { border-bottom: none; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.step .pip { font-family: var(--hand); font-size: 1.15rem; color: var(--ink-3); line-height: 1.3; }
+.step .pip { font-family: var(--grotesk); font-size: 0.8rem; color: var(--ink-3); line-height: 1.6; }
 .step.ok .pip { color: var(--mint); } .step.warn .pip { color: var(--amber); } .step.bad .pip { color: var(--rose); }
 .step .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .step .title { font-family: var(--grotesk); font-weight: 600; }
 .step .t { font-family: var(--mono); font-size: 0.72rem; color: var(--ink-3); }
-.step .who { font-family: var(--hand); font-size: 1.05rem; color: var(--sky); }
+.step .who { font-family: var(--grotesk); font-size: 0.8rem; color: var(--sky); }
 .step .why { font-size: 0.9rem; color: var(--ink-2); margin-top: 2px; max-width: 70ch; }
 .step .facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 
@@ -225,7 +226,7 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 0.88rem; us
 .runs-list li:last-child { border-bottom: none; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #11162a; border: 1px solid var(--line-2); padding: 10px 16px; border-radius: 12px; z-index: 50; font-size: 0.88rem; }
 .bigq { font-family: var(--serif); font-style: italic; font-size: clamp(1.3rem, 2.4vw, 1.8rem); line-height: 1.35; color: var(--ink); max-width: 760px; }
-.caption { font-family: var(--hand); font-size: 1.15rem; color: var(--ink-3); }
+.caption { font-family: var(--grotesk); font-size: 0.86rem; color: var(--ink-3); letter-spacing: 0.01em; }
 
 /* ---- monologue / typewriter ---- */
 .monologue { display: flex; flex-direction: column; gap: 6px; }
@@ -240,21 +241,21 @@ details > summary { cursor: pointer; color: var(--ink-2); font-size: 0.88rem; us
 .home > section { position: relative; z-index: 1; }
 .thread { position: absolute; top: 0; left: 0; z-index: 0; pointer-events: none; overflow: visible; }
 .thread-ghost { fill: none; stroke: rgba(174,184,200,0.10); stroke-width: 1.5; stroke-dasharray: 3 8; stroke-linecap: round; }
-.thread-ink { fill: none; stroke: var(--amber); stroke-width: 2; stroke-linecap: round; opacity: 0.75; transition: stroke-dashoffset 0.25s linear; }
+.thread-ink { fill: none; stroke: var(--amber); stroke-width: 1.6; stroke-linecap: round; opacity: 0.6; transition: stroke-dashoffset 0.25s linear; }
 .thread-knot { fill: var(--bg); stroke: rgba(174,184,200,0.35); stroke-width: 1.5; transition: all 0.4s ease; }
 .thread-knot.on { stroke: var(--amber); fill: rgba(251,191,36,0.25); }
-.thread-block { fill: var(--teal); opacity: 0.8; filter: drop-shadow(0 0 5px rgba(94,234,212,0.9)); }
+.thread-block { fill: var(--teal); opacity: 0.6; filter: drop-shadow(0 0 5px rgba(94,234,212,0.9)); }
 .thread-head { font-family: var(--mono); font-size: 11px; fill: var(--ink-3); letter-spacing: 0.06em; }
 .along { position: relative; }
 .along.left { margin-right: auto; }
-.along.right { margin-left: auto; }
+.along.right { margin-left: clamp(40px, 10%, 120px); margin-right: auto; }
 .w-640 { max-width: 640px; } .w-760 { max-width: 760px; } .w-880 { max-width: 880px; }
 @media (max-width: 860px) { .along.left, .along.right { margin: 0; max-width: none; } .thread { display: none; } }
 
 /* ---- Arc presence ---- */
 .arc-lockup { display: flex; align-items: flex-end; gap: 22px; flex-wrap: wrap; }
 .arc-logo-big { height: clamp(96px, 14vw, 150px); width: auto; display: block; filter: drop-shadow(0 12px 40px rgba(223,33,39,0.25)); }
-.arc-logo-note { font-family: var(--hand); font-size: 1.5rem; color: var(--ink-2); line-height: 1.1; max-width: 300px; padding-bottom: 10px; }
+.arc-logo-note { font-family: var(--grotesk); font-size: 1rem; color: var(--ink-2); line-height: 1.45; max-width: 320px; padding-bottom: 12px; }
 .arc-logo-note b { color: var(--ink); font-weight: 600; }
 .arc-icon { height: 1em; width: auto; vertical-align: -0.12em; }
 .chain-strip { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-family: var(--mono); font-size: 0.8rem; color: var(--ink-3); }
