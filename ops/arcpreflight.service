@@ -1,0 +1,17 @@
+[Unit]
+Description=ArcPreflight API (restricted profile)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/arcpreflight/arcpreflight.env
+ExecStart=/usr/local/bin/node /opt/arcpreflight/dist/server.mjs
+Restart=always
+RestartSec=3
+WorkingDirectory=/opt/arcpreflight
+StandardOutput=append:/var/log/arcpreflight.log
+StandardError=append:/var/log/arcpreflight.log
+MemoryLimit=200M
+
+[Install]
+WantedBy=multi-user.target
