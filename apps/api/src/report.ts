@@ -1,4 +1,4 @@
-import { createPublicClient, http, encodeFunctionData, decodeFunctionResult, getAddress, type Hex, type PublicClient } from "viem";
+import { createPublicClient, http, encodeFunctionData, decodeFunctionResult, decodeErrorResult, getAddress, type Hex, type PublicClient } from "viem";
 import { ReportCore, reportDigest, type IntentCore, type BaselineCore, type Signal, type ExecutionDependency } from "@arcpreflight/schema";
 import { captureSnapshot, observeProxy, readCall, type RpcEvidence } from "@arcpreflight/observer";
 import { cfg } from "./config.js";
@@ -76,9 +76,10 @@ export async function buildIntentReport(intent: IntentCore, intentDigest: Hex, b
   // CALL_SIMULATION of the exact candidate call (from/to/data/value) at the pinned block
   const sim = await readCall(client, subject, intent.data as Hex, snapshot, intent.from as Hex, BigInt(intent.valueNativeAtomic));
   evidence.push({ evidence: sim.evidence, digest: sim.evidenceDigest });
+  const simError = sim.value.ok ? null : describeRevert(sim.value.revertData, sim.value.error);
   signals.push({ id: "CALL_SIMULATION", state: sim.value.ok ? "observed" : "not_observed", basis: "simulation",
     scope: "eth_call with the exact sender, target, calldata and value at the pinned block", evidenceDigests: [sim.evidenceDigest],
-    limitations: sim.value.ok ? ["simulation success is not a guarantee of future inclusion or success"] : [`revert: ${sim.value.error}`], sourceIds: ["https://ethereum.org/developers/docs/apis/json-rpc/"] });
+    limitations: sim.value.ok ? ["simulation success is not a guarantee of future inclusion or success"] : [`revert: ${simError}`], sourceIds: ["https://ethereum.org/developers/docs/apis/json-rpc/"] });
   signals.push(...arcAdvisorySignals);
 
   const report = ReportCore.parse({
@@ -87,5 +88,16 @@ export async function buildIntentReport(intent: IntentCore, intentDigest: Hex, b
     exclusions: [...exclusions, "external oracles, delegatecall targets beyond two levels, and full storage are not covered"],
     expiresAt: addSeconds(snapshot.observedAt, cfg.reportTtlSeconds),
   });
-  return { report, digest: reportDigest(report), evidence, simulation: { ok: sim.value.ok, error: sim.value.error } };
+  return { report, digest: reportDigest(report), evidence, simulation: { ok: sim.value.ok, error: simError } };
+}
+
+/** Decode a DemoMerchant custom error when the revert payload matches the template ABI; otherwise keep the node's message. */
+function describeRevert(revertData: Hex | null, fallback: string | null): string {
+  if (revertData && revertData.length >= 10) {
+    try {
+      const d = decodeErrorResult({ abi: DEMO_MERCHANT_TEMPLATE_ABI, data: revertData });
+      return `${d.errorName}(${(d.args ?? []).map((a) => (typeof a === "bigint" ? a.toString() : String(a))).join(", ")})`;
+    } catch { return `${fallback ?? "reverted"} [data=${revertData.slice(0, 10)}…]`; }
+  }
+  return fallback ?? "reverted";
 }

@@ -16,6 +16,9 @@ export const DEMO_MERCHANT_TEMPLATE_ABI = parseAbi([
   "function version() view returns (string)",
   "function owner() view returns (address)",
   "function getOrder(bytes32 orderId) view returns (address payer, uint256 amountNativeAtomic, bool paid, uint64 createdAtBlock, uint64 paidAtBlock)",
+  "error OrderExists(bytes32 orderId)", "error OrderUnknown(bytes32 orderId)", "error OrderAlreadyPaid(bytes32 orderId)",
+  "error WrongPayer(bytes32 orderId, address expected, address actual)", "error WrongAmount(bytes32 orderId, uint256 expected, uint256 actual)",
+  "error ZeroAmount()", "error ZeroAddress()", "error DirectSendRejected()", "error EnforcedPause()", "error ExpectedPause()",
 ]);
 
 /** Methodology descriptor — digested so every report states which rule set produced it. */

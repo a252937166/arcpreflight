@@ -32,10 +32,20 @@ export function openDb(path: string) {
     CREATE TABLE IF NOT EXISTS usage (principal TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(principal, day));
     CREATE TABLE IF NOT EXISTS demo_runs (
       run_id TEXT PRIMARY KEY, fixture TEXT NOT NULL, state TEXT NOT NULL, steps_json TEXT NOT NULL, labels_json TEXT NOT NULL,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, client_key TEXT, result_json TEXT
+    );
+    CREATE TABLE IF NOT EXISTS demo_orders (
+      order_id TEXT PRIMARY KEY, payer TEXT NOT NULL, merchant TEXT NOT NULL, amount_atomic TEXT NOT NULL, tx_hash TEXT NOT NULL, block TEXT NOT NULL,
+      client_key TEXT, created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS budget (key TEXT PRIMARY KEY, window_start TEXT NOT NULL, used_atomic TEXT NOT NULL);
   `);
+  // additive migrations for databases created by earlier releases
+  for (const sql of ["ALTER TABLE demo_runs ADD COLUMN client_key TEXT", "ALTER TABLE demo_runs ADD COLUMN result_json TEXT"]) {
+    try { db.exec(sql); } catch (e: any) { if (!/duplicate column/i.test(String(e?.message ?? e))) throw e; }
+  }
+  // demo runs interrupted by a restart can never finish
+  db.exec("UPDATE demo_runs SET state = 'FAILED', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE state = 'RUNNING'");
   return db;
 }
 export type Db = ReturnType<typeof openDb>;

@@ -1,2 +1,14 @@
-{ "name": "@arcpreflight/merchant-agent", "version": "0.1.0", "private": true, "type": "module",
-  "dependencies": { "@arcpreflight/client": "workspace:*", "@arcpreflight/observer": "workspace:*", "@arcpreflight/policy": "workspace:*", "@arcpreflight/schema": "workspace:*", "viem": "^2.57.2" } }
+{
+  "name": "@arcpreflight/merchant-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@arcpreflight/client": "workspace:*",
+    "@arcpreflight/observer": "workspace:*",
+    "@arcpreflight/policy": "workspace:*",
+    "@arcpreflight/schema": "workspace:*",
+    "viem": "^2.57.2",
+    "@arcpreflight/runner": "workspace:*"
+  }
+}

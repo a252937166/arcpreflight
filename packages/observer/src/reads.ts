@@ -20,17 +20,23 @@ export async function readSlot(client: PublicClient, address: Hex, slot: Hex, s:
   return { value: v, evidence: ev.evidence, evidenceDigest: ev.digest };
 }
 
-export async function readCall(client: PublicClient, to: Hex, data: Hex, s: Snapshot, from?: Hex, valueNativeAtomic?: bigint): Promise<Read<{ ok: boolean; data: Hex | null; error: string | null }>> {
+export async function readCall(client: PublicClient, to: Hex, data: Hex, s: Snapshot, from?: Hex, valueNativeAtomic?: bigint): Promise<Read<{ ok: boolean; data: Hex | null; error: string | null; revertData: Hex | null }>> {
   try {
     const r = await client.call({ to, data, account: from, value: valueNativeAtomic, ...blockTag(s) });
     const out = (r.data ?? "0x") as Hex;
     const ev = makeEvidence("eth_call", [{ to, data, from: from ?? null, value: valueNativeAtomic?.toString() ?? null }, { blockHash: s.blockHash }], s, out, null);
-    return { value: { ok: true, data: out, error: null }, evidence: ev.evidence, evidenceDigest: ev.digest };
+    return { value: { ok: true, data: out, error: null, revertData: null }, evidence: ev.evidence, evidenceDigest: ev.digest };
   } catch (e: any) {
     const msg = String(e?.shortMessage ?? e?.message ?? e);
-    const ev = makeEvidence("eth_call", [{ to, data, from: from ?? null, value: valueNativeAtomic?.toString() ?? null }, { blockHash: s.blockHash }], s, null, msg);
-    return { value: { ok: false, data: null, error: msg }, evidence: ev.evidence, evidenceDigest: ev.digest };
+    const revertData = revertDataOf(e);
+    const ev = makeEvidence("eth_call", [{ to, data, from: from ?? null, value: valueNativeAtomic?.toString() ?? null }, { blockHash: s.blockHash }], s, revertData, msg);
+    return { value: { ok: false, data: null, error: msg, revertData }, evidence: ev.evidence, evidenceDigest: ev.digest };
   }
+}
+/** Raw revert payload (custom error selector + args) if the node returned one; kept verbatim as evidence. */
+function revertDataOf(e: any): Hex | null {
+  let c = e; for (let i = 0; i < 6 && c; i++) { const d = c.data ?? c.raw; if (typeof d === "string" && /^0x[0-9a-fA-F]*$/.test(d) && d.length > 2) return d as Hex; c = c.cause; }
+  return null;
 }
 
 export const SLOTS = {

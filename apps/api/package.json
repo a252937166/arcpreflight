@@ -14,6 +14,7 @@
     "@arcpreflight/observer": "workspace:*",
     "@arcpreflight/policy": "workspace:*",
     "@arcpreflight/schema": "workspace:*",
-    "viem": "^2.57.2"
+    "viem": "^2.57.2",
+    "@arcpreflight/runner": "workspace:*"
   }
 }
