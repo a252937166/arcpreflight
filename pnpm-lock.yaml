@@ -126,6 +126,15 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@22.20.4)(tsx@4.23.15)
 
+  packages/observer:
+    dependencies:
+      '@arcpreflight/schema':
+        specifier: workspace:*
+        version: link:../schema
+      viem:
+        specifier: ^2.57.2
+        version: 2.57.2(typescript@5.9.3)(zod@3.25.76)
+
   packages/schema:
     dependencies:
       viem:
