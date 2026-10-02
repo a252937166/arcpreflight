@@ -5,6 +5,7 @@ import { useNet } from "../App";
 import { api, explorerAddr, type Report } from "../lib/api";
 import { Chip, Hex, Spinner } from "../components/Badges";
 import { ReportView } from "../components/Report";
+import { HandRule, ProxySwap } from "../components/Illustrations";
 
 const OFFICIAL: Record<string, { name: string; address: string; note: string }[]> = {
   mainnet: [
@@ -14,9 +15,7 @@ const OFFICIAL: Record<string, { name: string; address: string; note: string }[]
     { name: "CCTP TokenMessengerV2", address: "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d", note: "ERC-1967 impl + admin" },
     { name: "ERC-8004 IdentityRegistry", address: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432", note: "minimal ERC-1967 proxy" },
   ],
-  testnet: [
-    { name: "USDC (ERC-20 face)", address: "0x3600000000000000000000000000000000000000", note: "FiatToken proxy, ZeppelinOS slots" },
-  ],
+  testnet: [{ name: "USDC (ERC-20 face)", address: "0x3600000000000000000000000000000000000000", note: "FiatToken proxy, ZeppelinOS slots" }],
 };
 
 export default function Inspect() {
@@ -32,30 +31,43 @@ export default function Inspect() {
     setInput(address); setBusy(true); setErr(null); setData(null);
     api.subject(address).then(setData).catch((e) => setErr(e?.message ?? String(e))).finally(() => setBusy(false));
   }, [address]);
-  const go = (a: string) => { const v = a.trim(); if (!isAddress(v, { strict: false })) { setErr("not a 20-byte address"); return; } nav(`/subjects/${v}`); };
+  const go = (a: string) => { const v = a.trim(); if (!isAddress(v, { strict: false })) { setErr("that is not a 20-byte address"); return; } nav(`/subjects/${v}`); };
   const picks = [...(net?.fixtures.filter((f) => f.merchant).map((f) => ({ name: `DemoMerchant ${f.proxy} proxy`, address: f.merchant!, note: f.proxy === "CHANGED" ? "upgraded A→B after approval" : "approved implementation A" })) ?? []), ...(OFFICIAL[net?.network ?? "mainnet"] ?? [])]
     .filter((p, i, arr) => arr.findIndex((q) => q.address.toLowerCase() === p.address.toLowerCase()) === i);
+  const impl = data?.report.dependencies.find((d) => d.role === "IMPLEMENTATION");
   return (
     <section className="section">
-      <div className="container stack" style={{ gap: 18 }}>
-        <div><span className="kicker">Inspect · OBJECT_OBSERVATION</span><h2 style={{ marginTop: 6 }}>Raw, pinned facts about any Arc address</h2><p className="muted" style={{ marginTop: 6 }}>Proxy slots are read raw at a verified block hash, then matched against a known template. No intent, no decision — object observation is never decision-eligible.</p></div>
-        <form className="card row" onSubmit={(e) => { e.preventDefault(); go(input); }}>
-          <input className="input mono" placeholder="0x… contract address on Arc" value={input} onChange={(e) => setInput(e.target.value)} style={{ flex: 1, minWidth: 260 }} />
-          <button className="btn primary" type="submit" disabled={busy}>{busy ? <Spinner /> : "Observe"}</button>
-        </form>
-        <div className="row" style={{ gap: 8 }}>
-          {picks.map((p) => <button key={p.address} className="btn sm" title={`${p.address} · ${p.note}`} onClick={() => go(p.address)}>{p.name}</button>)}
-        </div>
-        {err && <div className="banner bad">{err}</div>}
-        {data && (
-          <div className="card glow stack">
-            <div className="row between">
-              <div className="row" style={{ gap: 8 }}><h3>Subject <Hex value={address!} n={8} link={explorerAddr(net, address!)} /></h3>{data.supported ? <Chip tone="ok">supported intent target</Chip> : <Chip>object observation only</Chip>}<Chip tone="info">{data.evidenceCount} raw RPC evidence items</Chip></div>
-              <a className="btn sm" href={`/v1/public-reports/${data.reportDigest}`} target="_blank" rel="noreferrer">report + evidence JSON ↗</a>
-            </div>
-            <ReportView report={data.report} digest={data.reportDigest} net={net} />
-            {!data.supported && <div className="banner info">Decision-eligible SUPPORTED_INTENT reports exist only for the DemoMerchant fixtures in this release (SUBMISSION_RESTRICTED). Everything else is observed, never judged.</div>}
+      <div className="container stack" style={{ gap: 26 }}>
+        <div className="cols" style={{ alignItems: "start" }}>
+          <div className="stack" style={{ gap: 14 }}>
+            <div className="kicker">Inspect · object observation</div>
+            <h2>What is behind that address, <em>right now?</em></h2>
+            <p className="muted">Proxy slots are read raw at a verified block hash, then matched against a known template. No intent, no decision — an object observation is never decision-eligible. It is the same observer the paid reports use, pointed at anything.</p>
+            <form className="row" onSubmit={(e) => { e.preventDefault(); go(input); }} style={{ gap: 14 }}>
+              <input className="input mono" placeholder="0x… any contract on Arc" value={input} onChange={(e) => setInput(e.target.value)} style={{ flex: 1, minWidth: 260 }} />
+              <button className="btn primary" type="submit" disabled={busy}>{busy ? <Spinner /> : "observe"}</button>
+            </form>
+            <p className="small dim row" style={{ gap: 10 }}>
+              <span className="hand" style={{ fontSize: "1.1rem" }}>try one →</span>
+              {picks.map((p) => <button key={p.address} className="btn sm ghost" title={`${p.address} · ${p.note}`} onClick={() => go(p.address)}>{p.name}</button>)}
+            </p>
+            {err && <div className="banner bad">{err}</div>}
           </div>
+          <ProxySwap changed={data?.report.baselineResult === "IMPLEMENTATION_CHANGED"} />
+        </div>
+        {data && (
+          <>
+            <HandRule />
+            <div className="stack fade" style={{ gap: 14 }}>
+              <div className="row between" style={{ alignItems: "baseline" }}>
+                <div className="row" style={{ gap: 10, alignItems: "baseline" }}><span className="serif" style={{ fontSize: "1.5rem" }}>subject</span> <Hex value={address!} n={8} link={explorerAddr(net, address!)} />{data.supported ? <Chip tone="ok">supported intent target</Chip> : <Chip>object observation only</Chip>}<Chip tone="info">{data.evidenceCount} raw RPC evidence items</Chip></div>
+                <a className="small" href={`/v1/public-reports/${data.reportDigest}`} target="_blank" rel="noreferrer">report + evidence JSON ↗</a>
+              </div>
+              {impl && <p className="caption">it resolves to implementation {impl.address.slice(0, 10)}… with code hash {impl.codeHash?.slice(0, 12)}… — that pair is what a baseline would pin</p>}
+              <ReportView report={data.report} digest={data.reportDigest} net={net} />
+              {!data.supported && <p className="small dim">Decision-eligible reports exist only for the DemoMerchant fixtures in this release (SUBMISSION_RESTRICTED). Everything else is observed, never judged.</p>}
+            </div>
+          </>
         )}
       </div>
     </section>

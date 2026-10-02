@@ -4,6 +4,7 @@ import { useNet } from "../App";
 import { api, type Fixture, type Run, type RunSummary } from "../lib/api";
 import { Chip, DecisionBadge, Hex, Spinner } from "../components/Badges";
 import { RunPanel } from "../components/RunPanel";
+import { HandRule } from "../components/Illustrations";
 import { ago, ms } from "../lib/format";
 
 export default function Demo() {
@@ -21,7 +22,6 @@ export default function Demo() {
   const loadRuns = useCallback(() => api.runs(12).then((r) => setRuns(r.runs)).catch(() => {}), []);
   useEffect(() => { loadRuns(); }, [loadRuns]);
   useEffect(() => () => { if (timer.current) window.clearInterval(timer.current); }, []);
-
   const poll = useCallback((id: string) => {
     if (timer.current) window.clearInterval(timer.current);
     const tick = async () => {
@@ -30,54 +30,51 @@ export default function Demo() {
     };
     tick(); timer.current = window.setInterval(tick, 1500);
   }, [loadRuns, refresh]);
-
   const start = async () => {
     setBusy(true); setNotice(null); setSample(false); setRun(null);
     try {
       const r = await api.startRun(fixture);
-      if (r.runId) { setNotice({ tone: "info", text: "Live run started — the project's own runner is executing on-chain right now." }); poll(r.runId); return; }
+      if (r.runId) { setNotice({ tone: "info", text: "Started. The project's own runner is doing this on-chain right now." }); poll(r.runId); return; }
       setBusy(false);
       const why = `${r.error}: ${r.reason}`;
-      if (r.sampleRunId) { setNotice({ tone: "warn", text: `${why}. Showing the latest recorded run instead (labelled RECORDED_SAMPLE).` }); setSample(true); setRun(await api.run(r.sampleRunId)); }
+      if (r.sampleRunId) { setNotice({ tone: "warn", text: `${why}. Showing the latest recorded run instead — labelled RECORDED_SAMPLE.` }); setSample(true); setRun(await api.run(r.sampleRunId)); }
       else setNotice({ tone: "bad", text: why });
     } catch (e: any) { setBusy(false); setNotice({ tone: "bad", text: e?.message ?? String(e) }); }
   };
   const open = async (id: string) => { setSample(false); setNotice(null); try { const r = await api.run(id); setRun(r); if (r.state === "RUNNING") { setBusy(true); poll(id); } } catch { /* ignore */ } };
 
   const f = net?.fixtures.find((x) => x.id === fixture);
-  const cooldown = net?.budget.clientCooldownSeconds ?? 45;
   return (
     <section className="section">
-      <div className="container stack" style={{ gap: 20 }}>
-        <div className="row between">
-          <div><span className="kicker">Live demo · {net?.network === "mainnet" ? "Arc mainnet" : "Arc testnet"}</span><h2 style={{ marginTop: 6 }}>Pick a fixture, watch the loop run on-chain</h2></div>
-          {net && <div className="ticker"><span>live runs today <b>{net.budget.usedToday}/{net.budget.maxRunsPerDay}</b></span><span>cooldown <b>{cooldown}s</b></span><span>business payment <b>0.05 USDC</b></span>{net.budget.activeRun && <span><b>a run is in progress</b></span>}</div>}
+      <div className="container stack" style={{ gap: 28 }}>
+        <div className="cols" style={{ alignItems: "end" }}>
+          <div><div className="kicker">Live demo · {net?.network === "mainnet" ? "Arc mainnet" : "Arc testnet"}</div><h2 style={{ marginTop: 8 }}>Pick a situation. <em>Watch the agent handle it, on-chain.</em></h2></div>
+          {net && <p className="ticker" style={{ justifyContent: "flex-end" }}><span>live runs today <b>{net.budget.usedToday}/{net.budget.maxRunsPerDay}</b></span><span>cooldown <b>{net.budget.clientCooldownSeconds}s</b></span><span>business payment <b>0.05 USDC</b></span>{net.budget.activeRun && <span><b>a run is in progress</b></span>}</p>}
         </div>
-        <div className="grid-3">
+
+        <div className="three" style={{ gap: 14 }}>
           {(net?.fixtures ?? []).map((x) => (
-            <div key={x.id} className={`card clickable stack ${fixture === x.id ? "selected" : ""}`} style={{ gap: 8 }} onClick={() => { setFixture(x.id); setParams({ fixture: x.id }); }}>
-              <div className="row between"><span className="kicker">{x.id.replace(/_/g, " ")}</span><DecisionBadge decision={x.headline} size="sm" /></div>
-              <h3>{x.title}</h3>
+            <div key={x.id} className={`pick stack ${fixture === x.id ? "on" : ""}`} style={{ gap: 6 }} onClick={() => { setFixture(x.id); setParams({ fixture: x.id }); }}>
+              <div className="row between" style={{ alignItems: "baseline" }}><span className="pick-title serif">{fixture === x.id ? <span className="hand" style={{ marginRight: 8 }}>☞</span> : null}{x.title}</span><DecisionBadge decision={x.headline} size="sm" /></div>
               <p className="small muted">{x.blurb}</p>
-              <div className="tiny dim row" style={{ gap: 6 }}><span>proxy {x.proxy}</span>{x.merchant && <Hex value={x.merchant} n={4} />}{x.baselineDigest ? <Chip tone="ok">baseline approved</Chip> : <Chip tone="warn">no baseline</Chip>}</div>
+              <p className="tiny dim row" style={{ gap: 6 }}><span>proxy {x.proxy}</span>{x.merchant && <Hex value={x.merchant} n={4} />}{x.baselineDigest ? <Chip tone="ok">baseline approved</Chip> : <Chip tone="warn">no baseline</Chip>}</p>
             </div>
           ))}
         </div>
-        <div className="card row between">
-          <div className="stack" style={{ gap: 4 }}>
-            <div><b>{f?.title ?? "…"}</b> <span className="muted small">— expected outcome</span> <DecisionBadge decision={f?.headline} size="sm" /></div>
-            <div className="small dim">Runner <code>{net?.accounts.demoRunner ? `${net.accounts.demoRunner.slice(0, 10)}…` : "…"}</code> buys the report (0.01 USDC via Circle Facilitator), decides locally, and only signs the business call when nothing fired. Service fees are paid even for negative results — a negative is a delivered result.</div>
-          </div>
-          <button className="btn primary" disabled={busy || !net || !f?.merchant} onClick={start}>{busy ? <><Spinner /> running…</> : "▶ Run live on-chain"}</button>
+
+        <div className="row between" style={{ alignItems: "center" }}>
+          <p className="muted small" style={{ maxWidth: 720 }}>The runner <code>{net?.accounts.demoRunner ? `${net.accounts.demoRunner.slice(0, 10)}…` : "…"}</code> buys the report for 0.01 USDC through the Circle Facilitator, decides locally, and only signs the business call when nothing fired. The fee is paid even for negative results — a negative is a delivered result.</p>
+          <button className="btn primary" disabled={busy || !net || !f?.merchant} onClick={start}>{busy ? <><Spinner /> running…</> : `▶ Run "${f?.headline?.toLowerCase() ?? "…"}" live`}</button>
         </div>
         {notice && <div className={`banner ${notice.tone === "info" ? "info" : notice.tone === "bad" ? "bad" : ""}`}>{notice.text}</div>}
-        {run && <RunPanel run={run} net={net} sample={sample} />}
+        {run && <><HandRule /><RunPanel run={run} net={net} sample={sample} /></>}
 
-        <div className="card">
-          <div className="card-title"><h3>Recent runs</h3><span className="tiny dim">every run is persisted with its receipts; open one for the permanent link</span></div>
-          {runs.length === 0 ? <div className="dim small">none yet</div> : (
+        <HandRule />
+        <div className="stack" style={{ gap: 8 }}>
+          <div className="row between"><h3>Recent runs</h3><span className="tiny dim">every run is persisted with its receipts; open one for the permanent link</span></div>
+          {runs.length === 0 ? <p className="dim small">none yet</p> : (
             <table className="t">
-              <thead><tr><th>When</th><th>Fixture</th><th>Outcome</th><th>Business tx</th><th>Service fee</th><th>Duration</th><th></th></tr></thead>
+              <thead><tr><th>when</th><th>situation</th><th>outcome</th><th>business tx</th><th>service fee</th><th>took</th><th></th></tr></thead>
               <tbody>
                 {runs.map((r) => (
                   <tr key={r.runId}>

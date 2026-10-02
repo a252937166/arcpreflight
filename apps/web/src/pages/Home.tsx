@@ -1,107 +1,161 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useNet } from "../App";
 import { api, explorerAddr, type RunSummary } from "../lib/api";
-import { Chip, DecisionBadge, Hex, Labels } from "../components/Badges";
+import { DecisionBadge, Hex } from "../components/Badges";
 import { Pipeline } from "../components/Pipeline";
+import { Typewriter } from "../components/Typewriter";
+import { Thread, type Anchor } from "../components/Thread";
+import { HeroScene, TwoFaces, PinnedBlocks, ReceiptChain, FacilitatorFlow, ProxySwap, Squiggle } from "../components/Illustrations";
 import { ago, usdcToken } from "../lib/format";
 
-const ARC_USES = [
-  { t: "USDC is the gas — and it has two faces", d: "Native USDC has 18 decimals, the ERC-20 interface at 0x3600…0000 has 6, one balance behind both. ArcPreflight's AMOUNT_SEMANTICS check catches the 10¹² mistake before a signature exists.", tag: "AMOUNT_SEMANTICS" },
-  { t: "Pinned reads at a verified block hash", d: "Every fact in a report is read with EIP-1898 block-hash pinning on Arc's public RPC, re-verified by number, and digested as raw evidence. Final validation repeats the critical reads at a new block before signing.", tag: "BLOCK_HASH pinning" },
-  { t: "x402 settled by the Circle Facilitator on Arc", d: "The report is bought with one EIP-3009 TransferWithAuthorization (0.01 USDC, 6-dec units) settled through Circle's Facilitator on Arc — no custom payment contract, no allowance, no gas for the buyer.", tag: "x402 · EIP-3009" },
-  { t: "Circle's own proxies as subjects", d: "GatewayWallet, FxEscrow and the ERC-8004 registries on Arc mainnet are minimal ERC-1967 proxies. The observer reads their slots raw and only then matches a verified template — unknown shapes stay 'unknown'.", tag: "ERC-1967 raw → template" },
+const MONOLOGUE = [
+  "I'm an agent. I'm about to pay 0.05 USDC to a merchant contract on Arc.",
+  "The contract is a proxy. It was approved on implementation A last week.",
+  "Before I sign anything I buy a report pinned at one block: what is behind that proxy right now?",
+  "Still A → I validate again at a fresh block, sign the exact plan, and prove the order got paid.",
+  "Moved to B, same ABI, same calldata → I stop and ask a human.",
 ];
 
 export default function Home() {
   const { net } = useNet();
   const [runs, setRuns] = useState<RunSummary[]>([]);
-  useEffect(() => { api.runs(6).then((r) => setRuns(r.runs)).catch(() => {}); }, []);
+  useEffect(() => { api.runs(5).then((r) => setRuns(r.runs)).catch(() => {}); }, []);
+  const fx = (id: string) => net?.fixtures.find((f) => f.id === id);
+  const home = useRef<HTMLDivElement>(null);
+  const hero = useRef<HTMLDivElement>(null), loop = useRef<HTMLDivElement>(null), o1 = useRef<HTMLDivElement>(null), o2 = useRef<HTMLDivElement>(null), o3 = useRef<HTMLDivElement>(null), arc = useRef<HTMLDivElement>(null), fee = useRef<HTMLDivElement>(null), chain = useRef<HTMLDivElement>(null), honest = useRef<HTMLDivElement>(null);
+  const anchors = useMemo<Anchor[]>(() => [{ ref: hero, side: "left" }, { ref: loop, side: "right" }, { ref: o1, side: "left" }, { ref: o2, side: "right" }, { ref: o3, side: "left" }, { ref: arc, side: "right" }, { ref: fee, side: "left" }, { ref: chain, side: "right" }, { ref: honest, side: "left" }], []);
   return (
-    <>
-      <section className="section" style={{ paddingTop: 64 }}>
-        <div className="container stack" style={{ gap: 22 }}>
-          <div className="row" style={{ gap: 8 }}>
-            <span className="kicker">Arc Microgrants · agentic economy</span>
-            {net && <Chip tone={net.profile === "SUBMISSION_RESTRICTED" ? "warn" : "ok"}>{net.profile}</Chip>}
+    <div className="home" ref={home}>
+      <Thread container={home} anchors={anchors} />
+
+      {/* hero: Arc first, then the agent */}
+      <section className="section" style={{ paddingTop: 48, paddingBottom: 30 }}>
+        <div className="container" ref={hero}>
+          <div className="arc-lockup">
+            <img src="/arc/logo-gradient.svg" className="arc-logo-big" alt="Arc" />
+            <p className="arc-logo-note">built on <b>Arc</b> — Circle's chain where <b>USDC is the gas</b>, chain id {net?.chainId ?? 5042}, ~1 s blocks</p>
           </div>
-          <h1 className="hero-title">Agents pay on Arc.<br />ArcPreflight proves the target is still <span className="g">what was approved</span> — before anything is signed.</h1>
-          <p className="lead">A block-pinned preflight report bought over x402 with USDC on Arc, a deterministic decision in the agent's own process, final validation at a fresh block, an exact signed plan, and a verified business outcome. Unapproved implementation change → <b>REVIEW</b>. Wrong USDC units → <b>BLOCKED</b>. Approved → <b>paid and proven</b>.</p>
-          <div className="row">
-            <Link to="/demo" className="btn primary">▶ Run the live demo</Link>
-            <Link to="/inspect" className="btn">Inspect any Arc contract</Link>
-            <Link to="/developer" className="btn ghost">Developer console →</Link>
-          </div>
-          <div className="ticker">
-            <span>chain <b>{net?.caip2 ?? "…"}</b></span>
-            <span>head <b>{net?.head ? `#${net.head}` : "…"}</b></span>
-            <span>report price <b>{net ? usdcToken(net.priceTokenAtomic) : "…"}</b></span>
-            <span>live runs today <b>{net ? `${net.budget.usedToday}/${net.budget.maxRunsPerDay}` : "…"}</b></span>
-            <span>release <b>{net?.release ?? "…"}</b></span>
+          <div className="cols" style={{ marginTop: 34 }}>
+            <div className="stack" style={{ gap: 22 }}>
+              <h1>Know what you're paying<br /><span className="underline-squiggle">before you sign<Squiggle /></span></h1>
+              <Typewriter lines={MONOLOGUE} className="monologue" />
+              <div className="row" style={{ marginTop: 4 }}>
+                <Link to="/demo" className="btn primary">Run it live on Arc</Link>
+                <Link to="/inspect" className="btn">Look at any Arc contract</Link>
+                <Link to="/developer" className="btn ghost">bring your own wallet →</Link>
+              </div>
+              <div className="chain-strip">
+                <span className="blk" /><span className="blk" /><span className="blk" />
+                <span>head <b style={{ color: "var(--ink-2)" }}>{net?.head ? `#${net.head}` : "…"}</b></span>
+                <span>· {net?.caip2 ?? "eip155:5042"}</span>
+                <span>· a report costs {net ? usdcToken(net.priceTokenAtomic) : "0.01 USDC"}</span>
+                <span>· live runs today {net ? `${net.budget.usedToday}/${net.budget.maxRunsPerDay}` : "…"}</span>
+              </div>
+            </div>
+            <HeroScene />
           </div>
         </div>
       </section>
 
+      {/* the loop, hanging off the thread to the right */}
       <section className="section-tight">
-        <div className="container card">
-          <div className="card-title"><h3>One loop: sense → decide → act → verify</h3><span className="tiny dim">the report is decision support; the agent decides, signs, broadcasts and checks the outcome itself</span></div>
-          <Pipeline idle />
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="container stack" style={{ gap: 18 }}>
-          <div><span className="kicker">Three outcomes, one code path</span><h2 style={{ marginTop: 6 }}>Same merchant ABI. Same calldata shape. Three different truths.</h2></div>
-          <div className="grid-3">
-            {(net?.fixtures ?? []).map((f) => (
-              <Link key={f.id} to={`/demo?fixture=${f.id}`} className="card clickable stack" style={{ color: "inherit", textDecoration: "none" }}>
-                <div className="row between"><span className="kicker">{f.id.replace(/_/g, " ")}</span><DecisionBadge decision={f.headline} size="sm" /></div>
-                <h3>{f.title}</h3>
-                <p className="small muted">{f.blurb}</p>
-                <div className="tiny dim">merchant {f.merchant ? <Hex value={f.merchant} n={4} /> : "not deployed"}{f.upgradeTx && <> · upgraded A→B</>}</div>
-              </Link>
-            ))}
-            {!net && [0, 1, 2].map((i) => <div key={i} className="card"><div className="spinner" /></div>)}
+        <div className="container">
+          <div className="along right w-880" ref={loop}>
+            <p className="caption">the whole loop. the report is decision support — the agent decides, signs, broadcasts and checks the outcome itself</p>
+            <Pipeline idle />
           </div>
         </div>
       </section>
 
-      <section className="section">
-        <div className="container stack" style={{ gap: 18 }}>
-          <div><span className="kicker">What it uses Arc for</span><h2 style={{ marginTop: 6 }}>Arc-specific by construction, not by branding</h2></div>
-          <div className="grid-2">
-            {ARC_USES.map((u) => <div key={u.t} className="card stack" style={{ gap: 8 }}><Chip tone="info">{u.tag}</Chip><h3>{u.t}</h3><p className="small muted">{u.d}</p></div>)}
+      {/* three outcomes, left / right / left along the thread */}
+      <section className="section" style={{ paddingTop: 30 }}>
+        <div className="container stack" style={{ gap: 64 }}>
+          <p className="bigq along left w-760">Between <em>approved</em> and <em>signed</em> there is time, there is a proxy, and there is USDC with two faces. Three things can be true.</p>
+          <div className="along left w-880" ref={o1}>
+            <div className="cols" style={{ gap: 28 }}>
+              <div className="stack" style={{ gap: 10 }}>
+                <p className="hand">① the implementation moved</p>
+                <h2 style={{ fontSize: "1.9rem" }}>Review required.</h2>
+                <p className="muted">The merchant proxy was approved on implementation A and silently upgraded to B. Same ABI, same calldata, same price. The pinned report sees the new code hash; the agent refuses to sign until a human re-approves the baseline.</p>
+                <p className="row" style={{ gap: 10 }}><DecisionBadge decision="REVIEW_REQUIRED" size="sm" />{fx("CHANGED_IMPLEMENTATION")?.merchant && <span className="tiny dim">proxy <Hex value={fx("CHANGED_IMPLEMENTATION")!.merchant} n={4} /></span>}<Link to="/demo?fixture=CHANGED_IMPLEMENTATION" className="small">run this one →</Link></p>
+              </div>
+              <ProxySwap changed />
+            </div>
+          </div>
+          <div className="along right w-880" ref={o2}>
+            <div className="cols rev" style={{ gap: 28 }}>
+              <TwoFaces />
+              <div className="stack" style={{ gap: 10 }}>
+                <p className="hand rose">② the amount is in the wrong units</p>
+                <h2 style={{ fontSize: "1.9rem" }}>Blocked.</h2>
+                <p className="muted">USDC is Arc's gas. Native value has 18 decimals, the ERC-20 face has 6, one balance behind both. The order is 0.05 USDC; the calldata carries <code>value = 50000</code>. AMOUNT_SEMANTICS blocks it before a signature exists — and the pinned simulation decodes the contract's own <code>WrongAmount(...)</code>.</p>
+                <p className="row" style={{ gap: 10 }}><DecisionBadge decision="BLOCKED" size="sm" /><Link to="/demo?fixture=AMOUNT_UNIT_MISMATCH" className="small">run this one →</Link></p>
+              </div>
+            </div>
+          </div>
+          <div className="along left w-880" ref={o3}>
+            <div className="cols" style={{ gap: 28 }}>
+              <div className="stack" style={{ gap: 10 }}>
+                <p className="hand mint">③ nothing fired</p>
+                <h2 style={{ fontSize: "1.9rem" }}>Paid, and proven.</h2>
+                <p className="muted">Baseline matches, the order is payable, the simulation passes. The agent re-validates at a new block after paying the service fee, signs exactly the validated plan, decodes its own signed bytes against the plan, broadcasts, and reads the order back: paid, by this payer, for this amount.</p>
+                <p className="row" style={{ gap: 10 }}><DecisionBadge decision="CONFIRMED" size="sm" /><Link to="/demo?fixture=APPROVED_PAYMENT" className="small">run this one →</Link></p>
+              </div>
+              <PinnedBlocks />
+            </div>
           </div>
         </div>
       </section>
 
+      {/* Arc, specifically */}
       <section className="section">
-        <div className="container grid-2">
-          <div className="card stack">
-            <span className="kicker">Honest by construction</span>
-            <h3>Labels you can audit</h3>
-            <Labels labels={["LIVE_REQUEST", "DEMO_ON_MAINNET", "RECORDED_SAMPLE"]} />
-            <ul className="list">
-              <li><b>LIVE_REQUEST</b> — the run you are watching happened on-chain just now; every hash links to the explorer.</li>
-              <li><b>DEMO_ON_MAINNET</b> — the project's own runner, on Arc mainnet, against the project's own DemoMerchant fixtures.</li>
-              <li><b>RECORDED_SAMPLE</b> — served when the live budget is exhausted; never presented as live.</li>
-              <li><b>NO_POLICY_VIOLATION</b> means "no configured check fired at the pinned block", never "safe".</li>
-              <li>Signals carry a <code>basis</code>: <code>chain_read</code>, <code>simulation</code>, or <code>network_advisory</code> (documentation-backed Arc rules, not target findings).</li>
+        <div className="container stack" style={{ gap: 56 }}>
+          <div className="along right w-760" ref={arc}>
+            <h2><img src="/arc/arc-icon.svg" className="arc-icon" alt="" /> Arc-specific by construction, <em>not by branding</em></h2>
+            <p className="muted" style={{ marginTop: 12 }}>Everything here exists because of how Arc works. USDC pays for gas, so a unit mistake is a money mistake. Blocks come every second, so a report must say <em>which</em> block it looked at. Circle's Facilitator settles x402 on Arc, so the report itself can be bought with USDC and nothing else.</p>
+            <div className="stack" style={{ marginTop: 18, gap: 10 }}>
+              <p className="margin-note" style={{ maxWidth: "none" }}>reads are pinned by block hash and re-verified by number — a few blocks behind head, because the public RPC is load-balanced</p>
+              <p className="margin-note" style={{ maxWidth: "none", color: "var(--violet)" }}>fee floor is 20 gwei: lower transactions are silently dropped, so final validation re-estimates before signing</p>
+              <p className="margin-note" style={{ maxWidth: "none", color: "var(--rose)" }}>PREVRANDAO is 0, value-transfer rules differ, SELFDESTRUCT moves USDC — surfaced as documentation-backed advisories, never as target findings</p>
+            </div>
+          </div>
+          <div className="along left w-760" ref={fee}>
+            <p className="hand teal">the service fee is x402, settled by the Circle Facilitator on Arc</p>
+            <p className="muted" style={{ marginTop: 8 }}>One EIP-3009 <code>TransferWithAuthorization</code> for exactly the quoted 0.01 USDC, forwarded with a seller proof. The buyer needs no allowance and pays no gas; the settlement is a real transaction on Arc and the report is delivered only after it.</p>
+            <FacilitatorFlow />
+          </div>
+          <div className="along right w-760" ref={chain}>
+            <p className="hand violet">every receipt carries the receipts before it</p>
+            <p className="muted" style={{ marginTop: 8 }}>Intent, report, decision, final validation, plan and execution are each digested over canonical JSON. Anyone with the raw RPC evidence can replay the chain and arrive at the same bytes. Circle's own proxies on Arc — GatewayWallet, FxEscrow, the ERC-8004 registries — are the public test objects: <Link to="/inspect">look at one</Link>.</p>
+            <ReceiptChain />
+          </div>
+        </div>
+      </section>
+
+      {/* honesty + runs */}
+      <section className="section" style={{ paddingTop: 10 }}>
+        <div className="container two" style={{ alignItems: "start" }}>
+          <div className="stack along left w-640" style={{ gap: 12 }} ref={honest}>
+            <h2 style={{ fontSize: "1.9rem" }}>Honest by construction</h2>
+            <p className="muted"><b style={{ color: "var(--ink)" }}>NO_POLICY_VIOLATION</b> means no configured check fired at the pinned block. It is never "safe". Runs are labelled <code>LIVE_REQUEST</code> when they happened on-chain just now, <code>DEMO_ON_MAINNET</code> when the project's own runner did it on Arc mainnet, and <code>RECORDED_SAMPLE</code> when the daily budget is spent and you are looking at a replay. Every signal says what it is based on — a chain read, a simulation, or a network advisory — and what it could not see.</p>
+            <p className="caption">LLMs may explain. Code decides.</p>
+          </div>
+          <div className="stack" style={{ gap: 8 }}>
+            <div className="row between"><h3>Recent runs on {net?.network === "mainnet" ? "Arc mainnet" : "Arc testnet"}</h3><Link to="/demo" className="small">all runs →</Link></div>
+            {runs.length === 0 && <p className="dim small">No runs yet — start one on the demo page.</p>}
+            <ul className="runs-list">
+              {runs.map((r) => (
+                <li key={r.runId}>
+                  <Link to={`/runs/${r.runId}`} className="row" style={{ gap: 10, color: "inherit" }}><DecisionBadge decision={r.businessStatus === "SUCCESS" ? "CONFIRMED" : r.decision ?? (r.state === "RUNNING" ? null : "FAILED")} size="sm" /><span className="small">{r.fixture.replace(/_/g, " ").toLowerCase()}</span></Link>
+                  <span className="tiny dim">{ago(r.createdAt)}</span>
+                </li>
+              ))}
             </ul>
-          </div>
-          <div className="card stack">
-            <div className="card-title"><h3>Recent runs</h3><Link to="/demo" className="small">all runs →</Link></div>
-            {runs.length === 0 && <div className="dim small">No runs yet — start one on the demo page.</div>}
-            {runs.map((r) => (
-              <Link key={r.runId} to={`/runs/${r.runId}`} className="row between" style={{ color: "inherit", textDecoration: "none", padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
-                <span className="row" style={{ gap: 8 }}><DecisionBadge decision={r.businessStatus === "SUCCESS" ? "CONFIRMED" : r.decision ?? (r.state === "RUNNING" ? null : "FAILED")} size="sm" /><span className="small">{r.fixture.replace(/_/g, " ").toLowerCase()}</span></span>
-                <span className="tiny dim">{ago(r.createdAt)}</span>
-              </Link>
-            ))}
-            {net?.deployments && <div className="tiny dim">fixtures deployed {net.deployments.deployedAtUTC.slice(0, 10)} · MAIN <a href={explorerAddr(net, net.deployments.proxies.MAIN.address)} target="_blank" rel="noreferrer">{net.deployments.proxies.MAIN.address.slice(0, 10)}…</a></div>}
+            {net?.deployments && <p className="tiny dim">fixtures deployed {net.deployments.deployedAtUTC.slice(0, 10)} · MAIN proxy <a href={explorerAddr(net, net.deployments.proxies.MAIN.address)} target="_blank" rel="noreferrer">{net.deployments.proxies.MAIN.address.slice(0, 10)}…</a></p>}
           </div>
         </div>
       </section>
-    </>
+    </div>
   );
 }
