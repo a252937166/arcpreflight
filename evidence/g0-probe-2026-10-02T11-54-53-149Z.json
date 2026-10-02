@@ -1,0 +1,109 @@
+{
+  "status": "RUN",
+  "capturedAtUTC": "2026-10-02T11:54:53.149Z",
+  "providerId": "https://rpc.mainnet.arc.io",
+  "chainId": 5042,
+  "blockNumber": "23875540",
+  "blockHash": "0xc04ed45a6da8c57cf9dabebfabf4f29f3976aef24ec100ec2f331bff55eb35d7",
+  "blockTimestampUTC": "2026-10-02T11:55:09.000Z",
+  "pinningMode": "BLOCK_HASH",
+  "headAtCapture": "23875560",
+  "scriptPath": "scripts/g0/probe.mjs",
+  "observations": {
+    "USDC_ERC20": {
+      "fullAddress": "0x3600000000000000000000000000000000000000",
+      "codeBytes": 1798,
+      "codeHash": "0xc9987bd3af6b26a030951faa7eacc017b68343aeedf3ce5fe68f821c4b93939d",
+      "rawSlots": {
+        "erc1967_impl": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "erc1967_admin": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "erc1967_beacon": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "zos_impl": "0x000000000000000000000000c6ad664ac6679f4ce74e10e91449c93ec1ae3ca6",
+        "zos_admin": "0x0000000000000000000000009005e53e3ee2f27999f15e7a52c58f804fc716e0"
+      },
+      "rpcMethod": [
+        "eth_getCode",
+        "eth_getStorageAt"
+      ],
+      "limitations": [
+        "raw slot values only; proxy kind not inferred here (template adapter decides)"
+      ]
+    },
+    "GatewayWallet": {
+      "fullAddress": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE",
+      "codeBytes": 163,
+      "codeHash": "0x874a21508289bf01ee9802032607ae53ba0a4f47f28143a8493921b8db102187",
+      "rawSlots": {
+        "erc1967_impl": "0x000000000000000000000000d15002e19d75f6abe69e46b2a94cc7c0cc5857de",
+        "erc1967_admin": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "erc1967_beacon": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "zos_impl": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "zos_admin": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "rpcMethod": [
+        "eth_getCode",
+        "eth_getStorageAt"
+      ],
+      "limitations": [
+        "raw slot values only; proxy kind not inferred here (template adapter decides)"
+      ]
+    },
+    "StableFX_FxEscrow": {
+      "fullAddress": "0xe2E5F173576B513d994073CCbDaCBE027d43DFe6",
+      "codeBytes": 130,
+      "codeHash": "0x78816f4994be9db9b7d18894daf64d05b992a20e95d4de48ef2fad68c3372fd9",
+      "rawSlots": {
+        "erc1967_impl": "0x000000000000000000000000bd01a88ae56f9dd6791dfc39079387901d77cc6d",
+        "erc1967_admin": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "erc1967_beacon": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "zos_impl": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "zos_admin": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "rpcMethod": [
+        "eth_getCode",
+        "eth_getStorageAt"
+      ],
+      "limitations": [
+        "raw slot values only; proxy kind not inferred here (template adapter decides)"
+      ]
+    },
+    "CCTP_TokenMessengerV2": {
+      "fullAddress": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+      "codeBytes": 2175,
+      "codeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+      "rawSlots": {
+        "erc1967_impl": "0x0000000000000000000000001ccafdffbc1b7b5c499c97322f961b7d929a41b4",
+        "erc1967_admin": "0x000000000000000000000000a407622276a7b91e70193b76c29a92e047c751ca",
+        "erc1967_beacon": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "zos_impl": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "zos_admin": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "rpcMethod": [
+        "eth_getCode",
+        "eth_getStorageAt"
+      ],
+      "limitations": [
+        "raw slot values only; proxy kind not inferred here (template adapter decides)"
+      ]
+    },
+    "ERC8004_Identity": {
+      "fullAddress": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "codeBytes": 130,
+      "codeHash": "0xd0e45b1d89fa9b6cc7e97c1f155d64180e5c232aaccf9900ef9d4fd738c02b41",
+      "rawSlots": {
+        "erc1967_impl": "0x0000000000000000000000007274e874ca62410a93bd8bf61c69d8045e399c02",
+        "erc1967_admin": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "erc1967_beacon": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "zos_impl": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "zos_admin": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "rpcMethod": [
+        "eth_getCode",
+        "eth_getStorageAt"
+      ],
+      "limitations": [
+        "raw slot values only; proxy kind not inferred here (template adapter decides)"
+      ]
+    }
+  }
+}
