@@ -5,6 +5,7 @@ import { getAddress, isAddress } from "viem";
 
 export const SCHEMA_VERSION = "1.0" as const;
 export const ARC_CHAIN_ID = 5042 as const;
+export const ARC_TESTNET_CHAIN_ID = 5042002 as const;
 
 export const Address = z.string().refine((s) => isAddress(s, { strict: false }), "invalid 20-byte address")
   .transform((s) => getAddress(s).toLowerCase() as `0x${string}`); // canonical lowercase for hashing (spec §7.1)
@@ -12,7 +13,8 @@ export const Digest = z.string().regex(/^0x[0-9a-f]{64}$/, "digest must be 32 by
 export const HexData = z.string().regex(/^0x([0-9a-f]{2})*$/, "hex data must be lowercase, even length");
 export const UIntString = z.string().regex(/^(0|[1-9][0-9]*)$/, "UIntString: decimal integer, no leading zeros, no sign");
 export const UtcTime = z.string().datetime({ offset: false }); // RFC 3339 UTC "Z"
-export const ChainId = z.literal(ARC_CHAIN_ID);
+// Mainnet is the submission network; testnet is accepted only for rehearsal and is never mixed with mainnet state.
+export const ChainId = z.union([z.literal(ARC_CHAIN_ID), z.literal(ARC_TESTNET_CHAIN_ID)]);
 
 export const Snapshot = z.object({
   chainId: ChainId,
@@ -211,7 +213,7 @@ export const QuoteCore = z.object({
   intentDigest: Digest,
   reportDigest: Digest,
   coverageDigest: Digest,
-  network: z.literal("eip155:5042"),
+  network: z.enum(["eip155:5042", "eip155:5042002"]),
   asset: Address,
   amountTokenAtomic: UIntString,
   payTo: Address,
