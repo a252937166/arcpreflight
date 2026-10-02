@@ -3,15 +3,17 @@ import { randomUUID } from "node:crypto";
 import { getAddress, isAddress, type Hex } from "viem";
 import { IntentCore, intentDigest as computeIntentDigest, BaselineCore, baselineDigest as computeBaselineDigest } from "@arcpreflight/schema";
 import { cfg } from "./config.js";
-import { openDb, row, run, now, type Db } from "./db.js";
+import { openDb, row, rows, run, now, type Db } from "./db.js";
 import { principalOf, isAdmin } from "./auth.js";
 import { buildObjectReport, buildIntentReport, client } from "./report.js";
 import { makeQuote, paymentRequirementsFor, paymentMatchesQuote, settleForRequest, reconcilePending, type PaymentInput } from "./payments.js";
+import { networkInfo, startRun, getRun, listRuns, createOrderFor, evidenceIndex, evidenceFile, clientKey, FIXTURES } from "./demo.js";
 
 const db: Db = openDb(cfg.dbPath);
+const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization, x-admin-token", "access-control-allow-methods": "GET, POST, OPTIONS" };
 const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
   const s = JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", "x-arcpreflight-release": cfg.releaseSha, ...headers });
+  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", "x-arcpreflight-release": cfg.releaseSha, ...CORS, ...headers });
   res.end(s);
 };
 async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<any> {
@@ -34,11 +36,44 @@ function usageOk(principal: string): boolean {
   return true;
 }
 
+const clientIp = (req: IncomingMessage) => { const xf = req.headers["x-forwarded-for"]; const s = Array.isArray(xf) ? xf[0] : xf; return (s?.split(",")[0].trim()) || req.socket.remoteAddress || undefined; };
+
 async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname.replace(/\/+$/, "") || "/";
+  let m: RegExpExecArray | null;
   try {
+    if (req.method === "OPTIONS") { res.writeHead(204, CORS); return res.end(); }
     if (req.method === "GET" && path === "/health/live") return json(res, 200, { ok: true, release: cfg.releaseSha, profile: cfg.profile, network: cfg.caip2 });
+    // Public: network + fixture facts, demo runs (budgeted live runs by the project's own runner), evidence index
+    if (req.method === "GET" && path === "/v1/network") return json(res, 200, await networkInfo(db));
+    if (req.method === "GET" && path === "/v1/demo/runs") return json(res, 200, { runs: listRuns(db, Math.min(Number(url.searchParams.get("limit") ?? 20), 100)) });
+    if (req.method === "GET" && (m = /^\/v1\/demo\/runs\/([0-9a-f-]{36})$/.exec(path))) { const r = getRun(db, m[1]); return r ? json(res, 200, r) : json(res, 404, { error: "NOT_FOUND" }); }
+    if (req.method === "POST" && path === "/v1/demo/run") {
+      const body = await readJson(req);
+      const fixture = String(body.fixture ?? "");
+      if (!(fixture in FIXTURES)) return json(res, 400, { error: "INVALID_INPUT", reason: `fixture must be one of ${Object.keys(FIXTURES).join(", ")}` });
+      const r = await startRun(db, fixture as keyof typeof FIXTURES, clientKey(clientIp(req), req.headers["user-agent"]));
+      return r.ok ? json(res, 202, { runId: r.runId, poll: `/v1/demo/runs/${r.runId}` }) : json(res, r.status, { error: r.error, reason: r.reason, sampleRunId: r.sample ?? null });
+    }
+    if (req.method === "POST" && path === "/v1/demo/orders") {
+      const principal = principalOf(req);
+      if (!principal) return json(res, 401, { error: "UNAUTHENTICATED", hint: "a trial principal token is required to create developer orders in this release" });
+      const body = await readJson(req);
+      if (!isAddress(String(body.payer ?? ""))) return json(res, 400, { error: "INVALID_INPUT", reason: "payer must be an address" });
+      const r = await createOrderFor(db, getAddress(body.payer) as Hex, clientKey(clientIp(req), req.headers["user-agent"]));
+      return r.ok ? json(res, 201, r) : json(res, r.status, { error: r.error, reason: r.reason });
+    }
+    if (req.method === "GET" && path === "/v1/public-reports") {
+      const list = rows(db, "SELECT report_digest, subject, mode, created_at FROM reports WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50");
+      return json(res, 200, { reports: list.map((r: any) => ({ reportDigest: r.report_digest, subject: r.subject, mode: r.mode, createdAt: r.created_at })) });
+    }
+    if (req.method === "GET" && path === "/v1/evidence") return json(res, 200, { files: evidenceIndex() });
+    if (req.method === "GET" && (m = /^\/v1\/evidence\/(.+)$/.exec(path))) {
+      const f = evidenceFile(decodeURIComponent(m[1]));
+      if (!f) return json(res, 404, { error: "NOT_FOUND" });
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "public, max-age=60", ...CORS }); return res.end(f);
+    }
     if (req.method === "GET" && path === "/health/ready") {
       if (lastReady && Date.now() - lastReady.at < 10_000) return json(res, 200, lastReady.body);
       const deps: Record<string, unknown> = {};
@@ -53,7 +88,6 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if (req.method === "GET" && path === "/openapi.json") return json(res, 200, openapi());
 
     // Public object observation (never decision-eligible)
-    let m: RegExpExecArray | null;
     if (req.method === "GET" && (m = /^\/v1\/subjects\/(0x[0-9a-fA-F]{40})$/.exec(path))) {
       const addr = getAddress(m[1]) as Hex;
       const c = objectCache.get(addr.toLowerCase());
@@ -133,7 +167,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const quote = JSON.parse(q.quote_json);
       reportDigestStr = q.report_digest;
       if (!body.payment) {
-        return json(res, 402, { requestId, quote, quoteDigest: q.quote_digest, reportDigest: reportDigestStr, paymentRequirements: paymentRequirementsFor(quote, resourceUrl), note: "Report is prepared and pinned; pay exactly this quote to receive it." });
+        const prepared = row(db, "SELECT report_json FROM reports WHERE report_digest = ?", reportDigestStr);
+        const obs = prepared ? JSON.parse(prepared.report_json).observation : null;
+        return json(res, 402, { requestId, quote, quoteDigest: q.quote_digest, reportDigest: reportDigestStr, pinnedBlock: obs?.blockNumber ?? null, observedAt: obs?.observedAt ?? null,
+          paymentRequirements: paymentRequirementsFor(quote, resourceUrl), note: "Report is prepared and pinned; pay exactly this quote to receive it." });
       }
       const p: PaymentInput = body.payment;
       const mismatch = paymentMatchesQuote(p, quote, intent);
@@ -186,8 +223,14 @@ function openapi() {
     openapi: "3.0.3", info: { title: "ArcPreflight API", version: cfg.releaseSha, description: `profile=${cfg.profile}; network=${cfg.caip2}. External paid access is closed unless a principal token is configured.` },
     paths: {
       "/health/live": { get: { summary: "process liveness" } }, "/health/ready": { get: { summary: "dependency readiness (bounded probes)" } },
+      "/v1/network": { get: { summary: "network, fixture deployments, approved baselines, demo budget" } },
       "/v1/subjects/{address}": { get: { summary: "public object observation (OBJECT_OBSERVATION, never decision-eligible)" } },
+      "/v1/public-reports": { get: { summary: "list public sample reports" } },
       "/v1/public-reports/{reportDigest}": { get: { summary: "public sample report with raw evidence" } },
+      "/v1/demo/run": { post: { summary: "start a budgeted live demo run by the project's own runner (fixture: APPROVED_PAYMENT | CHANGED_IMPLEMENTATION | AMOUNT_UNIT_MISMATCH)" } },
+      "/v1/demo/runs": { get: { summary: "recent demo runs" } }, "/v1/demo/runs/{runId}": { get: { summary: "run steps, receipts and labels" } },
+      "/v1/demo/orders": { post: { summary: "create a DemoMerchant order for an external payer (trial principals only)", security: [{ bearer: [] }] } },
+      "/v1/evidence": { get: { summary: "index of published evidence files" } }, "/v1/evidence/{path}": { get: { summary: "one evidence file" } },
       "/v1/preflight": { post: { summary: "supported-intent preflight; 402 with quote until paid (x402 exact, EIP-3009, Circle Facilitator on Arc)", security: [{ bearer: [] }] } },
       "/v1/requests/{requestId}": { get: { summary: "authenticated recovery of payment state and purchased report", security: [{ bearer: [] }] } },
     },

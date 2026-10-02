@@ -26,9 +26,21 @@ export async function buildSellerProof(seller: Account, net: ArcNet, purpose: Pr
     message: { purpose, method, bodyHash: keccak256(toBytes(body)), network, payTo: seller.address, nonce, issuedAt: BigInt(issuedAt), expiresAt: BigInt(expiresAt) },
   });
   const envelope = { version: 1, signature, network, payTo: seller.address, nonce, issuedAt, expiresAt };
-  return Buffer.from(JSON.stringify(envelope)).toString("base64url");
+  return base64url(new TextEncoder().encode(JSON.stringify(envelope)));
 }
 
 export function decodeSellerProof(proof: string): { version: number; signature: Hex; network: string; payTo: Hex; nonce: Hex; issuedAt: number; expiresAt: number } {
-  return JSON.parse(Buffer.from(proof, "base64url").toString("utf8"));
+  return JSON.parse(new TextDecoder().decode(fromBase64url(proof)));
+}
+
+// platform-neutral base64url (Node and browsers share btoa/atob)
+function base64url(bytes: Uint8Array): string {
+  let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function fromBase64url(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4);
+  const bin = atob(b64); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }

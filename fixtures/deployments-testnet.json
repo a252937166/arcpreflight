@@ -1,0 +1,41 @@
+{
+  "network": "testnet",
+  "chainId": 5042002,
+  "deployer": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
+  "runner": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+  "deployedAtUTC": "2026-10-02T13:49:44.911Z",
+  "implA": {
+    "address": "0xd067dfa0e459c63ef7317b461474a31ce2db1e74",
+    "tx": "0x9bd859fac6ac5d97c7523d3b0be7805c0ef7a7fc42fd9b667c928fd32d0d2bbf",
+    "codeHash": "0x55f4677c3ba0447b22996532638da9b80df95bf74989b79822081e6e582ac24a",
+    "block": "65125282"
+  },
+  "implB": {
+    "address": "0x9645f2a6f70a971ebcfdb588ac10ac70836872b6",
+    "tx": "0x68f77df7f9bfd3fe27aeb143b9fca00ae90ad4bc86362a08901c95a70438492b",
+    "codeHash": "0x430cdc447fd70cac21ff55ee1e335e4a51aa9601e11ce0c0f7bb50533a769ac5",
+    "block": "65125288"
+  },
+  "proxies": {
+    "MAIN": {
+      "address": "0x00e393acdcd8cfbef4ab5d0f826bebd87bf4ae14",
+      "tx": "0x24fc2d98be79cbc45003b40f288562e4a96b453b306fc7f29defa7eb75457d5d",
+      "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
+      "block": "65125295"
+    },
+    "CHANGED": {
+      "address": "0x816ca9da6d3a316d9b4cff414890b07cbc95b399",
+      "tx": "0x253ff4042e91cc23fd6f59ff9cb73ef8f79ff5c4102fa8c50438d8a623bb7185",
+      "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
+      "block": "65125301",
+      "upgradeTx": "0xe12bdc6c28afe29393145902c28b42832026914e9cd3841dd026eb065f07fbf3",
+      "upgradeBlock": "65125306",
+      "currentImpl": "0x9645f2a6f70a971ebcfdb588ac10ac70836872b6"
+    }
+  },
+  "compiler": {
+    "solc": "0.8.28",
+    "evm": "cancun",
+    "optimizerRuns": 200
+  }
+}
