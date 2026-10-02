@@ -201,6 +201,24 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
 
+  scripts:
+    dependencies:
+      '@arcpreflight/client':
+        specifier: workspace:*
+        version: link:../packages/client
+      '@arcpreflight/observer':
+        specifier: workspace:*
+        version: link:../packages/observer
+      '@arcpreflight/policy':
+        specifier: workspace:*
+        version: link:../packages/policy
+      '@arcpreflight/schema':
+        specifier: workspace:*
+        version: link:../packages/schema
+      viem:
+        specifier: ^2.57.2
+        version: 2.57.2(typescript@5.9.3)(zod@3.25.76)
+
 packages:
 
   '@adraffy/ens-normalize@1.11.1':
