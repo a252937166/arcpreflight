@@ -56,6 +56,7 @@ not a hidden gap.
 ## Run it
 
 ```
+git clone --recurse-submodules https://github.com/a252937166/arcpreflight && cd arcpreflight
 pnpm install && (cd packages/contracts && forge build)
 # keys/*.json (never committed), then:
 ARC_NET=testnet pnpm exec tsx scripts/demo/deploy.ts                         # fixtures
