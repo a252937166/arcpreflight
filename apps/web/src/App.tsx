@@ -21,7 +21,7 @@ export default function App({ testWallet }: { testWallet: boolean }) {
   return (
     <NetCtx.Provider value={{ net, refresh: () => setTick((t) => t + 1), testWallet }}>
       <div className="aurora"><div className="blob" /></div>
-      <div className="grid-bg" />
+      <div className="grain" />
       <Nav net={net} testWallet={testWallet} />
       <main>
         <Routes>
@@ -37,7 +37,7 @@ export default function App({ testWallet }: { testWallet: boolean }) {
       </main>
       <footer className="footer">
         <div className="container row between">
-          <span>ArcPreflight · release <code>{net?.release ?? "…"}</code> · profile <code>{net?.profile ?? "…"}</code> · {net?.caip2 ?? ""}</span>
+          <span><span className="serif" style={{ fontSize: "1.05rem", color: "var(--ink-2)" }}>ArcPreflight</span> · release <code>{net?.release ?? "…"}</code> · <code>{net?.profile ?? "…"}</code> · {net?.caip2 ?? ""}</span>
           <span className="row" style={{ gap: 14 }}><a href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI</a><a href="https://github.com/a252937166/arcpreflight" target="_blank" rel="noreferrer">GitHub</a><a href="https://docs.arc.io" target="_blank" rel="noreferrer">Arc docs</a></span>
         </div>
       </footer>

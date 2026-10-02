@@ -11,6 +11,7 @@ import { api, explorerTx, type Report } from "../lib/api";
 import { useWallet, erc20Balance, nativeBalance, signTypedDataV4 } from "../lib/wallet";
 import { Chip, DecisionBadge, Hex, Spinner } from "../components/Badges";
 import { ReportView } from "../components/Report";
+import { HandRule, FacilitatorFlow } from "../components/Illustrations";
 import { usdcNative, usdcToken, decisionTone } from "../lib/format";
 
 type Order = { orderId: HexT; tx: HexT; block: string; merchant: HexT; amountNativeAtomic: string; baselineDigest: HexT | null };
@@ -92,10 +93,11 @@ export default function Developer() {
   return (
     <section className="section">
       <div className="container stack" style={{ gap: 18 }}>
-        <div><span className="kicker">Developer console</span><h2 style={{ marginTop: 6 }}>Bring your own wallet. Keep your own decision.</h2><p className="muted" style={{ marginTop: 6 }}>The service never signs for you. It observes at a pinned block and sells the report over x402; the policy and the decision run here, in your browser, from the delivered bytes.</p></div>
+        <div className="cols" style={{ alignItems: "start" }}><div className="stack" style={{ gap: 12 }}><div className="kicker">Developer console</div><h2>Bring your own wallet. <em>Keep your own decision.</em></h2><p className="muted">The service never signs for you. It observes at a pinned block and sells the report over x402; the policy and the decision run here, in your browser, from the delivered bytes. Seven steps, no magic.</p></div><FacilitatorFlow /></div>
         {testWallet && <div className="banner">A local test wallet is injected as <code>window.ethereum</code> (automated self-test mode). Open with <code>?testwallet=off</code> to remove it and use a real wallet.</div>}
-        <div className="grid-2" style={{ alignItems: "start" }}>
-          <div className="card stack">
+        <HandRule />
+        <div className="two">
+          <div className="stack">
             <div className="card-title"><h3>1 · Wallet</h3>{w.account ? <Chip tone="ok">connected</Chip> : <Chip>not connected</Chip>}</div>
             {!w.account ? <button className="btn primary" onClick={w.connect} disabled={w.connecting}>{w.connecting ? <Spinner /> : "Connect wallet (EIP-1193)"}</button> : (
               <div className="kv" style={{ gridTemplateColumns: "120px 1fr" }}>
@@ -107,24 +109,25 @@ export default function Developer() {
               </div>
             )}
             {w.error && <div className="banner bad">{w.error}</div>}
-            <div className="hr" />
+            <div className="rule" />
             <div className="card-title"><h3>2 · Trial access</h3><Chip tone="warn">SUBMISSION_RESTRICTED</Chip></div>
             <p className="small muted">External paid access is closed in this release; the project issues trial principal tokens on request. Without a token you can still connect, switch chains, and run the local checks below.</p>
             <input className="input mono" placeholder="trial principal token" value={token} onChange={(e) => setToken(e.target.value)} />
           </div>
-          <div className="card stack">
+          <div className="stack">
             <div className="card-title"><h3>3 · Order for your wallet</h3>{order && <Chip tone="ok">created</Chip>}</div>
             <p className="small muted">The merchant (deployer-admin) creates a 0.05 USDC order payable only by your address on the MAIN DemoMerchant proxy. This is the independent business expectation the intent must match.</p>
             <button className="btn" disabled={!w.account || !token || !!busy || !onArc} onClick={createOrder}>{busy === "order" ? <Spinner /> : "Create order (admin tx)"}</button>
             {order && <div className="kv" style={{ gridTemplateColumns: "110px 1fr" }}><span className="k">orderId</span><span><Hex value={order.orderId} n={8} /></span><span className="k">tx</span><span><Hex value={order.tx} n={8} link={explorerTx(net, order.tx)} /> @ #{order.block}</span><span className="k">merchant</span><span><Hex value={order.merchant} n={6} /></span><span className="k">baseline</span><span>{order.baselineDigest ? <Hex value={order.baselineDigest} n={6} /> : <Chip tone="warn">none</Chip>}</span></div>}
-            <div className="hr" />
+            <div className="rule" />
             <div className="card-title"><h3>4 · Exact intent + local checks</h3>{localCheck && <Chip tone={decisionTone(localCheck.outcome)}>{localCheck.id}: {localCheck.outcome}</Chip>}</div>
             <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={unitMistake} onChange={(e) => { setUnitMistake(e.target.checked); setQuote(null); setReport(null); setPlan(null); }} /> encode the value in 6-decimal units (the classic Arc mistake)</label>
             {intent && <><div className="tiny dim">intentDigest <Hex value={intentDigest(intent)} n={8} /> · value {intent.valueNativeAtomic} atomic ({usdcNative(intent.valueNativeAtomic, 6)})</div>{localCheck && localCheck.reasons.length > 0 && <ul className="list">{localCheck.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}<details><summary>intent JSON</summary><pre className="json">{JSON.stringify(intent, null, 2)}</pre></details></>}
           </div>
         </div>
 
-        <div className="card stack">
+        <HandRule />
+        <div className="stack">
           <div className="card-title"><h3>5 · Buy the pinned report with your signature (x402 · EIP-3009)</h3>{report && <Chip tone="ok">delivered</Chip>}</div>
           <div className="row">
             <button className="btn" disabled={!intent || !token || !!busy} onClick={getQuote}>{busy === "quote" ? <Spinner /> : "Get quote (HTTP 402)"}</button>
@@ -137,8 +140,9 @@ export default function Developer() {
           </>)}
         </div>
 
-        <div className="grid-2" style={{ alignItems: "start" }}>
-          <div className="card stack">
+        <HandRule />
+        <div className="two">
+          <div className="stack">
             <div className="card-title"><h3>6 · Decision (in your browser)</h3>{decision && <DecisionBadge decision={decision.decision} size="sm" />}</div>
             {!decision ? <div className="dim small">buy a report first</div> : (<>
               <table className="t"><tbody>{decision.checks.map((c) => <tr key={c.id}><td className="mono">{c.id}</td><td><Chip tone={decisionTone(c.outcome)}>{c.outcome}</Chip></td></tr>)}</tbody></table>
@@ -146,7 +150,7 @@ export default function Developer() {
               <div className="tiny dim">Deterministic policy from <code>@arcpreflight/policy</code>: hard violations block; unapproved change or unknowns require review; otherwise "no configured check fired".</div>
             </>)}
           </div>
-          <div className="card stack">
+          <div className="stack">
             <div className="card-title"><h3>7 · Transaction plan</h3><Chip tone="warn">not executed · wallet execution off</Chip></div>
             <p className="small muted">What an agent would sign after final validation: type-2, exact calldata, exact value, fee floor 20 gwei. In this release the plan is displayed only (spec §8.9); the live demo executes it with the project's own runner.</p>
             <button className="btn" disabled={!intent || !onArc || !!busy} onClick={buildPlan}>{busy === "plan" ? <Spinner /> : "Build plan (estimate gas via wallet RPC)"}</button>
@@ -155,7 +159,8 @@ export default function Developer() {
         </div>
         {err && <div className="banner bad">{err}</div>}
 
-        <div className="card stack">
+        <HandRule />
+        <div className="stack">
           <h3>Integrate</h3>
           <pre className="json">{`# 1. quote (free, report prepared & pinned)
 curl -s -X POST ${location.origin}/v1/preflight -H 'authorization: Bearer $TOKEN' -H 'content-type: application/json' -d '{"intent": …}'   # → 402 {quote, pinnedBlock, paymentRequirements}

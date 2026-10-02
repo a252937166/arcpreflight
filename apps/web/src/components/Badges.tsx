@@ -4,11 +4,12 @@ import { decisionTone, short, type Tone } from "../lib/format";
 export function Chip({ tone = "neutral", children, title }: { tone?: Tone; children: React.ReactNode; title?: string }) {
   return <span className={`chip ${tone === "neutral" ? "" : tone}`} title={title}>{children}</span>;
 }
+/** The outcome word, set in italic serif with a hand-drawn mark — not a box. */
 export function DecisionBadge({ decision, size = "md" }: { decision: string | null | undefined; size?: "md" | "sm" }) {
   const tone = decisionTone(decision);
-  const label = decision === "NO_POLICY_VIOLATION" ? "NO POLICY VIOLATION" : (decision ?? "PENDING").replace(/_/g, " ");
-  const icon = tone === "ok" ? "✓" : tone === "warn" ? "⚠" : tone === "bad" ? "✕" : "…";
-  return size === "sm" ? <Chip tone={tone}>{icon} {label}</Chip> : <span className={`badge ${tone}`}><span>{icon}</span>{label}</span>;
+  const label = decision === "NO_POLICY_VIOLATION" ? "no policy violation" : (decision ?? "pending").replace(/_/g, " ").toLowerCase();
+  const mark = tone === "ok" ? "✓" : tone === "warn" ? "!" : tone === "bad" ? "✕" : "…";
+  return size === "sm" ? <Chip tone={tone}>{mark} {label}</Chip> : <span className={`badge ${tone}`}><span className="mk">{mark}</span>{label}</span>;
 }
 export function Hex({ value, n = 6, link }: { value: string | null | undefined; n?: number; link?: string }) {
   const [copied, setCopied] = useState(false);
