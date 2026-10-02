@@ -1,0 +1,16 @@
+{
+  "name": "arcpreflight",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "g0:probe": "node scripts/g0/probe.mjs",
+    "g0:keys": "node scripts/g0/keys.mjs"
+  },
+  "dependencies": {
+    "viem": "^2.57.2"
+  }
+}
