@@ -45,7 +45,7 @@ export async function buildIntentReport(intent: IntentCore, intentDigest: Hex, b
     else if (!approvedImpl?.codeHash) baselineResult = "UNKNOWN";
     else if (approvedTarget?.codeHash && curTarget?.codeHash && approvedTarget.codeHash !== curTarget.codeHash) baselineResult = "IMPLEMENTATION_CHANGED";
     else if (approvedImpl.address !== curImpl.address || approvedImpl.codeHash !== curImpl.codeHash) baselineResult = "IMPLEMENTATION_CHANGED";
-    else if (baseline.adapterManifestDigests.length && !baseline.adapterManifestDigests.every((d) => adapterManifestDigests.includes(d))) baselineResult = "ADAPTER_CHANGED";
+    else if (baseline.adapterManifestDigests.length && !baseline.adapterManifestDigests.every((d) => (adapterManifestDigests as string[]).includes(d))) baselineResult = "ADAPTER_CHANGED";
     else baselineResult = "MATCH";
   }
 
