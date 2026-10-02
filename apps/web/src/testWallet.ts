@@ -45,7 +45,9 @@ export function maybeInjectTestWallet(): boolean {
       on(ev: string, cb: (...a: any[]) => void) { if (!listeners.has(ev)) listeners.set(ev, new Set()); listeners.get(ev)!.add(cb); },
       removeListener(ev: string, cb: (...a: any[]) => void) { listeners.get(ev)?.delete(cb); },
     };
-    (window as any).ethereum = provider;
+    // Wallet extensions may (re)define window.ethereum non-writably or after us; the app prefers this slot when present.
+    (window as any).__arcpreflightTestProvider = provider;
+    try { Object.defineProperty(window, "ethereum", { value: provider, configurable: true, writable: true }); } catch { /* extension owns window.ethereum; the slot above still wins inside the app */ }
     return true;
   } catch { return false; }
 }

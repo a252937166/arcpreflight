@@ -4,7 +4,8 @@ import { getAddress, type Hex } from "viem";
 import type { NetworkInfo } from "./api";
 
 export type Eip1193 = { request(args: { method: string; params?: unknown[] | object }): Promise<any>; on?(ev: string, cb: (...a: any[]) => void): void; removeListener?(ev: string, cb: (...a: any[]) => void): void; isArcPreflightTestWallet?: boolean; isMetaMask?: boolean };
-export const getProvider = (): Eip1193 | null => ((window as any).ethereum as Eip1193 | undefined) ?? null;
+/** The injected test provider (self-test mode) takes precedence over extension-owned window.ethereum. */
+export const getProvider = (): Eip1193 | null => ((window as any).__arcpreflightTestProvider as Eip1193 | undefined) ?? ((window as any).ethereum as Eip1193 | undefined) ?? null;
 
 export const chainParams = (n: NetworkInfo) => ({
   chainId: `0x${n.chainId.toString(16)}`, chainName: n.network === "mainnet" ? "Arc" : "Arc Testnet",
