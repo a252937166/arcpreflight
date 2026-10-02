@@ -12,5 +12,11 @@
   },
   "dependencies": {
     "viem": "^2.57.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }
