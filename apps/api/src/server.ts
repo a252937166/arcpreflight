@@ -26,6 +26,14 @@ async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<any> {
 }
 const objectCache = new Map<string, { at: number; body: unknown }>();
 let lastReady: { at: number; body: unknown } | null = null;
+// Public object observation costs RPC reads: a small per-client and global fixed-window limiter (no auth on that route).
+const subjectHits = new Map<string, { win: number; n: number }>();
+function subjectAllowed(client: string): boolean {
+  const win = Math.floor(Date.now() / 60_000);
+  const bump = (k: string, max: number) => { const e = subjectHits.get(k); if (!e || e.win !== win) { subjectHits.set(k, { win, n: 1 }); return true; } e.n++; return e.n <= max; };
+  if (subjectHits.size > 5000) subjectHits.clear();
+  return bump(`c:${client}`, 12) && bump("global", 90);
+}
 
 function usageOk(principal: string): boolean {
   const day = now().slice(0, 10);
@@ -92,6 +100,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const addr = getAddress(m[1]) as Hex;
       const c = objectCache.get(addr.toLowerCase());
       if (c && Date.now() - c.at < 30_000) return json(res, 200, c.body);
+      if (!subjectAllowed(clientKey(clientIp(req), req.headers["user-agent"]))) return json(res, 429, { error: "RATE_LIMITED", reason: "object observation is limited to 12 new subjects per minute per client" });
       const built = await buildObjectReport(addr);
       run(db, "INSERT OR IGNORE INTO reports (report_digest, request_id, subject, mode, report_json, evidence_json, is_public, created_at) VALUES (?,?,?,?,?,?,?,?)",
         built.digest, null, addr.toLowerCase(), "OBJECT_OBSERVATION", JSON.stringify(built.report), JSON.stringify(built.evidence), 1, now());
