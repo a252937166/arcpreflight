@@ -37,18 +37,22 @@ export default function Developer() {
     return () => { alive = false; };
   }, [w.provider, w.account, onArc, net, order, report]);
 
-  // --- local artefacts (no API) ---
-  const policy = useMemo(() => (net && w.account && order ? PolicyCore.parse({ schemaVersion: "1.0", ownerPrincipal: "developer-console", allowedSenders: [w.account], allowedTargets: [order.merchant], allowedSelectors: [PAY_SELECTOR],
+  // --- local artefacts (no API). The intent must stay byte-identical between quote and payment (the service binds
+  //     clientRequestId to one intent digest), so it depends only on primitives and a per-order expiry. ---
+  const chainId = net?.chainId ?? null;
+  const account = w.account;
+  const expiresAt = useMemo(() => new Date(Date.now() + 10 * 60_000).toISOString(), [order?.orderId, unitMistake]); // eslint-disable-line react-hooks/exhaustive-deps
+  const policy = useMemo(() => (account && order ? PolicyCore.parse({ schemaVersion: "1.0", ownerPrincipal: "developer-console", allowedSenders: [account], allowedTargets: [order.merchant], allowedSelectors: [PAY_SELECTOR],
     maxNativePaymentAtomic: order.amountNativeAtomic, maxTokenPaymentAtomic: "0", maxServiceFeeTokenAtomic: "10000", maxGasCostNativeAtomic: "2000000000000000", maxReportAgeSeconds: 60, maxFinalValidationAgeSeconds: 5,
-    requiredSignalIds: ["PROXY_TEMPLATE_VERIFIED", "SUPPORTED_STATE_ORDER_PAYABLE", "CALL_SIMULATION"], unknownAction: "REVIEW_REQUIRED", implementationChangeAction: "REVIEW_REQUIRED", allowedTransactionTypes: [2], allowAuthorizationList: false }) : null), [net, w.account, order]);
+    requiredSignalIds: ["PROXY_TEMPLATE_VERIFIED", "SUPPORTED_STATE_ORDER_PAYABLE", "CALL_SIMULATION"], unknownAction: "REVIEW_REQUIRED", implementationChangeAction: "REVIEW_REQUIRED", allowedTransactionTypes: [2], allowAuthorizationList: false }) : null), [account, order]);
   const intent = useMemo(() => {
-    if (!net || !w.account || !order || !policy) return null;
+    if (!chainId || !account || !order || !policy) return null;
     const value = unitMistake ? (BigInt(order.amountNativeAtomic) / 10n ** 12n).toString() : order.amountNativeAtomic;
-    return IntentCore.parse({ schemaVersion: "1.0", clientRequestId: `dev-${order.orderId.slice(2, 10)}-${unitMistake ? "u" : "n"}`, chainId: net.chainId, walletMode: "EOA_DIRECT_NON_DELEGATED", from: w.account, operation: "CALL", to: order.merchant,
+    return IntentCore.parse({ schemaVersion: "1.0", clientRequestId: `dev-${order.orderId.slice(2, 10)}-${unitMistake ? "u" : "n"}`, chainId, walletMode: "EOA_DIRECT_NON_DELEGATED", from: account, operation: "CALL", to: order.merchant,
       data: encodeFunctionData({ abi: DEMO_MERCHANT_ABI, functionName: "pay", args: [order.orderId] }), valueNativeAtomic: value,
-      businessExpectation: { sourceId: `order:${order.orderId}`, sourceDigest: keccak256(toHex(`order:${order.orderId}:${w.account}:${order.amountNativeAtomic}`)), action: "MERCHANT_PAY", recipient: order.merchant, asset: "ARC_NATIVE_USDC", amountNativeAtomic: order.amountNativeAtomic, orderId: order.orderId },
-      baselineDigest: order.baselineDigest ?? ("0x" + "00".repeat(32)), policyDigest: policyDigest(policy), expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() });
-  }, [net, w.account, order, policy, unitMistake]);
+      businessExpectation: { sourceId: `order:${order.orderId}`, sourceDigest: keccak256(toHex(`order:${order.orderId}:${account}:${order.amountNativeAtomic}`)), action: "MERCHANT_PAY", recipient: order.merchant, asset: "ARC_NATIVE_USDC", amountNativeAtomic: order.amountNativeAtomic, orderId: order.orderId },
+      baselineDigest: order.baselineDigest ?? ("0x" + "00".repeat(32)), policyDigest: policyDigest(policy), expiresAt });
+  }, [chainId, account, order, policy, unitMistake, expiresAt]);
   const localCheck = useMemo(() => (intent ? checkIntentBinding(intent) : null), [intent]);
   const decision = useMemo(() => {
     if (!intent || !policy || !report) return null;
