@@ -1,0 +1,19 @@
+{
+  "name": "@arcpreflight/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/server.mjs --external:node:sqlite --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@arcpreflight/client": "workspace:*",
+    "@arcpreflight/observer": "workspace:*",
+    "@arcpreflight/policy": "workspace:*",
+    "@arcpreflight/schema": "workspace:*",
+    "viem": "^2.57.2"
+  }
+}

@@ -1,0 +1,17 @@
+[
+  {
+    "adapterId": "oz-erc1967proxy-uups",
+    "version": "5.4.0",
+    "template": "OZ_ERC1967Proxy_UUPS",
+    "knownProxyCodeHashes": ["0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa"],
+    "sourceReferences": [
+      "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.4.0/contracts/proxy/ERC1967/ERC1967Proxy.sol",
+      "packages/contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json (solc 0.8.28, optimizer 200, evm cancun)"
+    ],
+    "semanticAssumptions": [
+      "runtime bytecode identical to OpenZeppelin ERC1967Proxy v5.4.0 compiled with this repo's settings (no immutables)",
+      "implementation address lives in the ERC-1967 implementation slot",
+      "upgrade authority is inside the implementation (UUPS); the proxy itself has no admin slot"
+    ]
+  }
+]
