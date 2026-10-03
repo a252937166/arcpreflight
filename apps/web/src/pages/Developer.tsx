@@ -1,20 +1,20 @@
 // Developer console: connect an EIP-1193 wallet, switch to Arc, buy a preflight with your own EIP-3009 signature
 // (trial principals only in SUBMISSION_RESTRICTED), run the deterministic decision in the browser, see the exact plan.
 // Wallet execution of the business call is off in this release (spec v1.4 §8.9) — the plan is shown, never sent.
-import { useEffect, useMemo, useState } from "react";
-import { encodeFunctionData, keccak256, toHex, type Hex as HexT } from "viem";
-import { IntentCore, PolicyCore, intentDigest, policyDigest, ReportCore, reportDigest } from "@arcpreflight/schema";
-import { checkIntentBinding, decide, DEMO_MERCHANT_ABI, PAY_SELECTOR } from "@arcpreflight/policy";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { toHex, type Hex as HexT } from "viem";
+import { intentDigest, policyDigest, ReportCore, reportDigest } from "@arcpreflight/schema";
+import { checkIntentBinding, decide } from "@arcpreflight/policy";
 import { TRANSFER_WITH_AUTHORIZATION_TYPES, usdcDomain, type ArcNet } from "@arcpreflight/client";
 import { useNet } from "../App";
-import { api, explorerTx, type Report } from "../lib/api";
+import { api, explorerTx, type BaselineRecord, type Report } from "../lib/api";
+import { approvedBaseline, developerIntent, developerPolicy, newRequestIntent, prepareOrderQuote, quoteReady, type DeveloperOrder, type PreparedQuote } from "../lib/preflight";
 import { useWallet, erc20Balance, nativeBalance, signTypedDataV4 } from "../lib/wallet";
 import { Chip, DecisionBadge, Hex, Spinner } from "../components/Badges";
 import { ReportView } from "../components/Report";
 import { HandRule, FacilitatorFlow } from "../components/Illustrations";
 import { usdcNative, usdcToken, decisionTone } from "../lib/format";
 
-type Order = { orderId: HexT; tx: HexT; block: string; merchant: HexT; amountNativeAtomic: string; baselineDigest: HexT | null };
 const TOKEN_KEY = "arcpreflight.trialToken";
 
 export default function Developer() {
@@ -22,10 +22,12 @@ export default function Developer() {
   const w = useWallet();
   const [token, setToken] = useState<string>(() => { try { return localStorage.getItem(TOKEN_KEY) ?? ""; } catch { return ""; } });
   const [bal, setBal] = useState<{ native: bigint; erc20: bigint } | null>(null);
-  const [order, setOrder] = useState<Order | null>(null);
+  const [order, setOrder] = useState<DeveloperOrder | null>(null);
   const [unitMistake, setUnitMistake] = useState(false);
-  const [quote, setQuote] = useState<any>(null);
-  const [report, setReport] = useState<{ report: Report; digest: string; simulation: any; serviceFeeTx: string | null } | null>(null);
+  const [prepared, setPrepared] = useState<(PreparedQuote & { source: ReturnType<typeof developerIntent> }) | null>(null);
+  const [delivered, setReport] = useState<{ report: Report; digest: string; simulation: any; serviceFeeTx: string | null } | null>(null);
+  const [baseline, setBaseline] = useState<BaselineRecord | null>(null);
+  const [now, setNow] = useState(Date.now);
   const [plan, setPlan] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -36,51 +38,76 @@ export default function Developer() {
     let alive = true;
     Promise.all([nativeBalance(w.provider, w.account), erc20Balance(w.provider, net.usdc, w.account)]).then(([native, erc20]) => alive && setBal({ native, erc20 })).catch(() => {});
     return () => { alive = false; };
-  }, [w.provider, w.account, onArc, net, order, report]);
+  }, [w.provider, w.account, onArc, net, order, delivered]);
 
-  // --- local artefacts (no API). The intent must stay byte-identical between quote and payment (the service binds
-  //     clientRequestId to one intent digest), so it depends only on primitives and a per-order expiry. ---
+  // A new local revision gets a fresh ID. Retries store their final exact intent alongside its quote.
   const chainId = net?.chainId ?? null;
   const account = w.account;
-  const expiresAt = useMemo(() => new Date(Date.now() + 10 * 60_000).toISOString(), [order?.orderId, unitMistake]); // eslint-disable-line react-hooks/exhaustive-deps
-  const policy = useMemo(() => (account && order ? PolicyCore.parse({ schemaVersion: "1.0", ownerPrincipal: "developer-console", allowedSenders: [account], allowedTargets: [order.merchant], allowedSelectors: [PAY_SELECTOR],
-    maxNativePaymentAtomic: order.amountNativeAtomic, maxTokenPaymentAtomic: "0", maxServiceFeeTokenAtomic: "10000", maxGasCostNativeAtomic: "2000000000000000", maxReportAgeSeconds: 60, maxFinalValidationAgeSeconds: 5,
-    requiredSignalIds: ["PROXY_TEMPLATE_VERIFIED", "SUPPORTED_STATE_ORDER_PAYABLE", "CALL_SIMULATION"], unknownAction: "REVIEW_REQUIRED", implementationChangeAction: "REVIEW_REQUIRED", allowedTransactionTypes: [2], allowAuthorizationList: false }) : null), [account, order]);
-  const intent = useMemo(() => {
+  const policy = useMemo(() => account && order ? developerPolicy(account, order) : null, [account, order]);
+  const draft = useMemo(() => {
     if (!chainId || !account || !order || !policy) return null;
-    const value = unitMistake ? (BigInt(order.amountNativeAtomic) / 10n ** 12n).toString() : order.amountNativeAtomic;
-    return IntentCore.parse({ schemaVersion: "1.0", clientRequestId: `dev-${order.orderId.slice(2, 10)}-${unitMistake ? "u" : "n"}`, chainId, walletMode: "EOA_DIRECT_NON_DELEGATED", from: account, operation: "CALL", to: order.merchant,
-      data: encodeFunctionData({ abi: DEMO_MERCHANT_ABI, functionName: "pay", args: [order.orderId] }), valueNativeAtomic: value,
-      businessExpectation: { sourceId: `order:${order.orderId}`, sourceDigest: keccak256(toHex(`order:${order.orderId}:${account}:${order.amountNativeAtomic}`)), action: "MERCHANT_PAY", recipient: order.merchant, asset: "ARC_NATIVE_USDC", amountNativeAtomic: order.amountNativeAtomic, orderId: order.orderId },
-      baselineDigest: order.baselineDigest ?? ("0x" + "00".repeat(32)), policyDigest: policyDigest(policy), expiresAt });
-  }, [chainId, account, order, policy, unitMistake, expiresAt]);
+    return developerIntent(chainId, account, order, policy, unitMistake);
+  }, [chainId, account, order, policy, unitMistake]);
+  const currentDraft = useRef(draft);
+  currentDraft.current = draft;
+  const quote = prepared?.source === draft ? prepared : null;
+  const intent = quote?.intent ?? draft;
+  const report = intent && delivered?.report.intentDigest === intentDigest(intent) ? delivered : null;
+  const canBuy = !report && !!order && quoteReady(quote, order.block, now) && !!w.account && onArc;
+  useEffect(() => { setPrepared(null); setReport(null); setPlan(null); }, [draft, token]);
+  useEffect(() => {
+    if (!quote && !report) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [quote, report]);
+  useEffect(() => {
+    setBaseline(null);
+    if (!order?.baselineDigest || !token) return;
+    let alive = true;
+    let request = 0;
+    const refresh = () => {
+      const current = ++request;
+      return approvedBaseline(order.baselineDigest!, token).then((b) => { if (alive && current === request) setBaseline(b); })
+        .catch(() => { if (alive && current === request) setBaseline(null); });
+    };
+    refresh();
+    const timer = report ? setInterval(refresh, 5000) : null;
+    return () => { alive = false; if (timer) clearInterval(timer); };
+  }, [order?.baselineDigest, token, report]);
   const localCheck = useMemo(() => (intent ? checkIntentBinding(intent) : null), [intent]);
   const decision = useMemo(() => {
     if (!intent || !policy || !report) return null;
-    const d = decide({ intent, policy, policyDigest: policyDigest(policy), baseline: null, baselineDigest: null, baselineRevoked: false, report: report.report as any, reportDigest: report.digest as HexT, now: new Date(), simulation: report.simulation });
-    const checks = d.checks.filter((c) => c.id !== "BASELINE_STATUS");
-    const bound = !!order?.baselineDigest && report.report.baselineDigest?.toLowerCase() === order.baselineDigest.toLowerCase();
-    const decision = checks.some((c) => c.outcome === "BLOCKED") ? "BLOCKED" : checks.some((c) => c.outcome === "REVIEW_REQUIRED") || !bound ? "REVIEW_REQUIRED" : "NO_POLICY_VIOLATION";
-    return { decision, checks, reasons: [...d.reasons.filter((r) => !r.startsWith("BASELINE_STATUS")), ...(bound ? [] : ["BASELINE_STATUS: report is not bound to the approved baseline"])] };
-  }, [intent, policy, report, order]);
+    return decide({ intent, policy, policyDigest: policyDigest(policy), baseline: baseline?.baseline ?? null, baselineDigest: (baseline?.baselineDigest as HexT | undefined) ?? null, baselineRevoked: baseline?.revoked ?? false, report: report.report as any, reportDigest: report.digest as HexT, now: new Date(now), simulation: report.simulation });
+  }, [intent, policy, report, baseline, now]);
 
   const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); setErr(null); try { await fn(); } catch (e: any) { setErr(e?.body?.reason ?? e?.body?.error ?? e?.message ?? String(e)); } finally { setBusy(null); } };
-  const createOrder = () => run("order", async () => { setQuote(null); setReport(null); setPlan(null); const r = await api.createOrder(w.account!, token); setOrder(r); });
-  const getQuote = () => run("quote", async () => { const r = await api.preflight(intent, token); if (r.__status !== 402) throw new Error(`expected 402, got ${r.__status}: ${JSON.stringify(r).slice(0, 200)}`); setQuote(r); });
+  const createOrder = () => run("order", async () => { setOrder(null); setPrepared(null); setReport(null); setPlan(null); const r = await api.createOrder(w.account!, token); setOrder(r); });
+  const getQuote = () => run("quote", async () => {
+    if (!draft || !order) return;
+    setPrepared(null); setReport(null); setPlan(null);
+    const result = await prepareOrderQuote(newRequestIntent(draft), order.block, token, { isCurrent: () => currentDraft.current === draft });
+    setNow(Date.now()); setPrepared({ ...result, source: draft });
+  });
   const buy = () => run("buy", async () => {
-    if (!w.provider || !w.account || !net || !quote) return;
+    if (!w.provider || !w.account || !net || !quote || !order) return;
+    if (report) throw new Error("This quote was already purchased; request a new quote for a fresh report.");
+    if (!onArc || !quoteReady(quote, order.block)) throw new Error("Quote is stale or expired; request a new quote before signing.");
+    const quotedIntent = quote.intent;
+    const response = quote.response;
     const nonce = toHex(crypto.getRandomValues(new Uint8Array(32)));
     const validBefore = String(Math.floor(Date.now() / 1000) + 3600);
-    const message = { from: w.account, to: quote.quote.payTo, value: quote.quote.amountTokenAtomic, validAfter: "0", validBefore, nonce };
+    const message = { from: quotedIntent.from, to: response.quote.payTo, value: response.quote.amountTokenAtomic, validAfter: "0", validBefore, nonce };
     const typed = { types: { EIP712Domain: [{ name: "name", type: "string" }, { name: "version", type: "string" }, { name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }], ...TRANSFER_WITH_AUTHORIZATION_TYPES }, primaryType: "TransferWithAuthorization", domain: usdcDomain(net.network as ArcNet), message };
     const signature = await signTypedDataV4(w.provider, w.account, typed);
-    let r = await api.preflight(intent, token, { signature, authorization: message });
+    if (currentDraft.current !== quote.source || !quoteReady(quote, order.block)) throw new Error("Wallet, intent or quote changed during signing; request a new quote.");
+    let r = await api.preflight(quotedIntent, token, { signature, authorization: message });
     let tries = 0;
-    while (r.__status === 202 && tries++ < 20) { await new Promise((s) => setTimeout(s, 1500)); r = await api.request(quote.requestId, token); }
+    while (r.__status === 202 && tries++ < 20) { await new Promise((s) => setTimeout(s, 1500)); r = await api.request(response.requestId, token); }
     if (r.delivery !== "DELIVERED") throw new Error(`not delivered: ${JSON.stringify(r).slice(0, 240)}`);
     const rep = ReportCore.parse(r.report);
     if (reportDigest(rep) !== r.reportDigest) throw new Error("report digest mismatch (recomputed in the browser)");
-    if (rep.intentDigest !== intentDigest(intent!)) throw new Error("report bound to a different intent");
+    if (rep.intentDigest !== intentDigest(quotedIntent)) throw new Error("report bound to a different intent");
     setReport({ report: r.report, digest: r.reportDigest, simulation: r.simulation, serviceFeeTx: r.payment?.transaction ?? null });
   });
   const buildPlan = () => run("plan", async () => {
@@ -112,7 +139,7 @@ export default function Developer() {
             <div className="rule" />
             <div className="card-title"><h3>2 · Trial access</h3><Chip tone="warn">SUBMISSION_RESTRICTED</Chip></div>
             <p className="small muted">External paid access is closed in this release; the project issues trial principal tokens on request. Without a token you can still connect, switch chains, and run the local checks below.</p>
-            <input className="input mono" placeholder="trial principal token" value={token} onChange={(e) => setToken(e.target.value)} />
+            <input className="input mono" placeholder="trial principal token" value={token} disabled={!!busy} onChange={(e) => setToken(e.target.value)} />
           </div>
           <div className="stack">
             <div className="card-title"><h3>3 · Order for your wallet</h3>{order && <Chip tone="ok">created</Chip>}</div>
@@ -121,7 +148,7 @@ export default function Developer() {
             {order && <div className="kv" style={{ gridTemplateColumns: "110px 1fr" }}><span className="k">orderId</span><span><Hex value={order.orderId} n={8} /></span><span className="k">tx</span><span><Hex value={order.tx} n={8} link={explorerTx(net, order.tx)} /> @ #{order.block}</span><span className="k">merchant</span><span><Hex value={order.merchant} n={6} /></span><span className="k">baseline</span><span>{order.baselineDigest ? <Hex value={order.baselineDigest} n={6} /> : <Chip tone="warn">none</Chip>}</span></div>}
             <div className="rule" />
             <div className="card-title"><h3>4 · Exact intent + local checks</h3>{localCheck && <Chip tone={decisionTone(localCheck.outcome)}>{localCheck.id}: {localCheck.outcome}</Chip>}</div>
-            <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={unitMistake} onChange={(e) => { setUnitMistake(e.target.checked); setQuote(null); setReport(null); setPlan(null); }} /> encode the value in 6-decimal units (the classic Arc mistake)</label>
+            <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={unitMistake} disabled={!!busy} onChange={(e) => { setUnitMistake(e.target.checked); setPrepared(null); setReport(null); setPlan(null); }} /> encode the value in 6-decimal units (the classic Arc mistake)</label>
             {intent && <><div className="tiny dim">intentDigest <Hex value={intentDigest(intent)} n={8} /> · value {intent.valueNativeAtomic} atomic ({usdcNative(intent.valueNativeAtomic, 6)})</div>{localCheck && localCheck.reasons.length > 0 && <ul className="list">{localCheck.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}<details><summary>intent JSON</summary><pre className="json">{JSON.stringify(intent, null, 2)}</pre></details></>}
           </div>
         </div>
@@ -131,9 +158,9 @@ export default function Developer() {
           <div className="card-title"><h3>5 · Buy the pinned report with your signature (x402 · EIP-3009)</h3>{report && <Chip tone="ok">delivered</Chip>}</div>
           <div className="row">
             <button className="btn" disabled={!intent || !token || !!busy} onClick={getQuote}>{busy === "quote" ? <Spinner /> : "Get quote (HTTP 402)"}</button>
-            <button className="btn primary" disabled={!quote || !!busy || !onArc} onClick={buy}>{busy === "buy" ? <><Spinner /> settling…</> : "Sign TransferWithAuthorization & buy"}</button>
+            <button className="btn primary" disabled={!canBuy || !!busy} onClick={buy}>{busy === "buy" ? <><Spinner /> settling…</> : "Sign TransferWithAuthorization & buy"}</button>
           </div>
-          {quote && <div className="small muted">quote {usdcToken(quote.quote.amountTokenAtomic)} → payTo <Hex value={quote.quote.payTo} n={5} /> · report pinned at #{quote.pinnedBlock} · expires {quote.quote.expiresAt} · requestId <code>{quote.requestId}</code></div>}
+          {quote && <div className="small muted">quote {usdcToken(quote.response.quote.amountTokenAtomic)} → payTo <Hex value={quote.response.quote.payTo} n={5} /> · report pinned at #{quote.response.pinnedBlock} · expires {quote.response.quote.expiresAt} · requestId <code>{quote.response.requestId}</code>{report ? " · purchased" : !quoteReady(quote, order!.block, now) && " · expired; request a new quote"}</div>}
           {report && (<>
             <div className="small muted">service fee settled by the Circle Facilitator: {report.serviceFeeTx ? <Hex value={report.serviceFeeTx} link={explorerTx(net, report.serviceFeeTx)} /> : "—"} · digest recomputed in the browser and bound to your intent ✓</div>
             <ReportView report={report.report} digest={report.digest} net={net} compact />

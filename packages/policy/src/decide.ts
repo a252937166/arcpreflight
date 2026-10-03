@@ -3,6 +3,7 @@
 import { getAddress } from "viem";
 import type { IntentCore, PolicyCore, ReportCore, Decision, BaselineCore } from "@arcpreflight/schema";
 import { checkIntentBinding, type CheckResult } from "./intent-binding.js";
+import { checkBaselineStatus } from "./baseline-status.js";
 
 export type DecisionInput = {
   intent: IntentCore;
@@ -34,15 +35,12 @@ export function decide(i: DecisionInput): DecisionOutput {
   if (i.intent.walletMode !== "EOA_DIRECT_NON_DELEGATED") pr.push("wallet mode not supported");
   checks.push({ id: "POLICY_ALLOWLISTS", outcome: pr.length ? "BLOCKED" : "PASS", reasons: pr });
   // 3. BASELINE_STATUS
-  const br: string[] = [];
-  if (!i.baseline || !i.baselineDigest) br.push("no approved baseline");
-  else {
-    if (i.baselineRevoked) br.push("baseline revoked");
-    if (i.baselineDigest.toLowerCase() !== i.intent.baselineDigest.toLowerCase()) br.push("intent.baselineDigest != supplied baseline digest");
-    if (i.baseline.validUntil && new Date(i.baseline.validUntil) < i.now) br.push("baseline expired");
-    if (getAddress(i.baseline.subject) !== getAddress(i.intent.to)) br.push("baseline subject != intent target");
+  const baselineStatus = checkBaselineStatus(i);
+  if (i.report.baselineDigest !== i.intent.baselineDigest) {
+    baselineStatus.reasons.push("report.baselineDigest != intent.baselineDigest");
+    baselineStatus.outcome = "REVIEW_REQUIRED";
   }
-  checks.push({ id: "BASELINE_STATUS", outcome: br.length ? "REVIEW_REQUIRED" : "PASS", reasons: br });
+  checks.push(baselineStatus);
   // 4. EXECUTION_IDENTITY (implementation / code hash vs baseline) — from report.baselineResult
   const er: string[] = [];
   if (i.report.baselineResult === "IMPLEMENTATION_CHANGED") er.push("resolved implementation differs from approved baseline (unapproved change)");

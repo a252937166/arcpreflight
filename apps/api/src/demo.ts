@@ -93,22 +93,37 @@ export async function startRun(db: Db, fixture: Fixture, client: string): Promis
   const proxy = dep.proxies[FIXTURES[fixture].proxy];
   const baselineDigest = baselineDigestFor(db, proxy.address);
   if (!baselineDigest) return { ok: false, status: 503, error: "DEMO_UNAVAILABLE", reason: "no approved baseline for the fixture proxy", sample: latestSample(db, fixture) };
-  if (active) return { ok: false, status: 429, error: "DEMO_BUSY", reason: `another run (${active}) is in progress; wait for it to finish`, sample: latestSample(db, fixture) };
-  const day = now().slice(0, 10);
-  const used = row(db, "SELECT COUNT(*) AS c FROM demo_runs WHERE substr(created_at,1,10) = ? AND labels_json LIKE '%LIVE_REQUEST%'", day)?.c ?? 0;
-  if (used >= demoBudget.maxRunsPerDay) return { ok: false, status: 429, error: "DEMO_BUDGET_EXHAUSTED", reason: `daily live-run budget (${demoBudget.maxRunsPerDay}) used; recorded samples remain available`, sample: latestSample(db, fixture) };
-  const last = row(db, "SELECT created_at FROM demo_runs WHERE client_key = ? ORDER BY created_at DESC LIMIT 1", client);
-  if (last && Date.now() - new Date(last.created_at).getTime() < demoBudget.clientCooldownSeconds * 1000) return { ok: false, status: 429, error: "DEMO_COOLDOWN", reason: `one live run per ${demoBudget.clientCooldownSeconds}s per client`, sample: latestSample(db, fixture) };
-  const bal = await publicClient.getBalance({ address: runnerAcct.address });
-  if (bal < demoBudget.runnerFloorNativeAtomic + demoBudget.amountNativeAtomic) return { ok: false, status: 503, error: "DEMO_UNAVAILABLE", reason: "runner balance below the configured floor; live runs paused", sample: latestSample(db, fixture) };
-
   const runId = randomUUID();
   // schema labels: LIVE_REQUEST always; DEMO_ON_MAINNET only on 5042 (the network itself is recorded in the result)
   const labels = cfg.net === "mainnet" ? ["LIVE_REQUEST", "DEMO_ON_MAINNET"] : ["LIVE_REQUEST"];
-  run(db, "INSERT INTO demo_runs (run_id, fixture, state, steps_json, labels_json, created_at, updated_at, client_key, result_json) VALUES (?,?,?,?,?,?,?,?,?)", runId, fixture, "RUNNING", "[]", JSON.stringify(labels), now(), now(), client, null);
+  // Reserve the execution slot, cooldown and daily budget before the first await. The DB row is the
+  // persistent reservation; failed/interrupted attempts still consume budget so retries cannot spend it twice.
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const running = row(db, "SELECT run_id FROM demo_runs WHERE state = 'RUNNING' LIMIT 1");
+    const day = now().slice(0, 10);
+    const used = row(db, "SELECT COUNT(*) AS c FROM demo_runs WHERE substr(created_at,1,10) = ? AND labels_json LIKE '%LIVE_REQUEST%'", day)?.c ?? 0;
+    const last = row(db, "SELECT created_at FROM demo_runs WHERE client_key = ? ORDER BY created_at DESC LIMIT 1", client);
+    let denied: StartResult | null = null;
+    if (active || running) denied = { ok: false, status: 429, error: "DEMO_BUSY", reason: "another run is in progress; wait for it to finish", sample: latestSample(db, fixture) };
+    else if (used >= demoBudget.maxRunsPerDay) denied = { ok: false, status: 429, error: "DEMO_BUDGET_EXHAUSTED", reason: `daily live-run budget (${demoBudget.maxRunsPerDay}) used; recorded samples remain available`, sample: latestSample(db, fixture) };
+    else if (last && Date.now() - new Date(last.created_at).getTime() < demoBudget.clientCooldownSeconds * 1000) denied = { ok: false, status: 429, error: "DEMO_COOLDOWN", reason: `one live run per ${demoBudget.clientCooldownSeconds}s per client`, sample: latestSample(db, fixture) };
+    if (denied) { db.exec("COMMIT"); return denied; }
+    run(db, "INSERT INTO demo_runs (run_id, fixture, state, steps_json, labels_json, created_at, updated_at, client_key, result_json) VALUES (?,?,?,?,?,?,?,?,?)", runId, fixture, "RUNNING", "[]", JSON.stringify(labels), now(), now(), client, null);
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
   active = runId;
   const steps: Step[] = [];
   const persist = () => run(db, "UPDATE demo_runs SET steps_json = ?, updated_at = ? WHERE run_id = ?", JSON.stringify(steps), now(), runId);
+  try {
+    const bal = await publicClient.getBalance({ address: runnerAcct.address });
+    if (bal < demoBudget.runnerFloorNativeAtomic + demoBudget.amountNativeAtomic) throw new Error("runner balance below the configured floor; live runs paused");
+  } catch (e: any) {
+    const reason = String(e?.message ?? e).slice(0, 200);
+    run(db, "UPDATE demo_runs SET state = 'FAILED', steps_json = ?, updated_at = ? WHERE run_id = ?", JSON.stringify([{ step: "error", atMs: 0, error: reason }]), now(), runId);
+    if (active === runId) active = null;
+    return { ok: false, status: 503, error: "DEMO_UNAVAILABLE", reason, sample: latestSample(db, fixture) };
+  }
   (async () => {
     try {
       const out = await runFixture({ fixture, net: cfg.net, chain, publicClient, admin: adminWallet, runner: runnerAcct, merchant: getAddress(proxy.address) as Hex, baselineDigest,
@@ -119,7 +134,7 @@ export async function startRun(db: Db, fixture: Fixture, client: string): Promis
       steps.push({ step: "error", atMs: -1, error: String(e?.message ?? e).slice(0, 400) });
       run(db, "UPDATE demo_runs SET state = 'FAILED', steps_json = ?, updated_at = ? WHERE run_id = ?", JSON.stringify(steps), now(), runId);
       console.error(now(), "DEMO_RUN_FAILED", runId, fixture, String(e?.message ?? e));
-    } finally { active = null; }
+    } finally { if (active === runId) active = null; }
   })();
   return { ok: true, runId };
 }
@@ -150,14 +165,29 @@ export function latestSample(db: Db, fixture: Fixture): string | null {
 export async function createOrderFor(db: Db, payer: Hex, client: string): Promise<{ ok: true; orderId: Hex; tx: Hex; block: string; merchant: Hex; amountNativeAtomic: string; baselineDigest: Hex | null } | StartResult> {
   const dep = deployments();
   if (!dep || !adminWallet) return { ok: false, status: 503, error: "DEMO_UNAVAILABLE", reason: "fixtures not deployed on this network" };
-  const day = now().slice(0, 10);
-  const used = row(db, "SELECT COUNT(*) AS c FROM demo_orders WHERE substr(created_at,1,10) = ?", day)?.c ?? 0;
-  if (used >= demoBudget.maxRunsPerDay) return { ok: false, status: 429, error: "DEMO_BUDGET_EXHAUSTED", reason: "daily order budget used" };
-  const last = row(db, "SELECT created_at FROM demo_orders WHERE client_key = ? ORDER BY created_at DESC LIMIT 1", client);
-  if (last && Date.now() - new Date(last.created_at).getTime() < demoBudget.clientCooldownSeconds * 1000) return { ok: false, status: 429, error: "DEMO_COOLDOWN", reason: `one order per ${demoBudget.clientCooldownSeconds}s per client` };
+  // Persist admissions before queuing the management transaction. A failed RPC/receipt must not refund
+  // a reservation: the transaction may already have been accepted by the chain.
+  db.exec("CREATE TABLE IF NOT EXISTS demo_order_admissions (id TEXT PRIMARY KEY, order_id TEXT UNIQUE, client_key TEXT NOT NULL, created_at TEXT NOT NULL)");
+  const admissionId = randomUUID();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const day = now().slice(0, 10);
+    const legacy = row(db, "SELECT COUNT(*) AS c FROM demo_orders o WHERE substr(created_at,1,10) = ? AND NOT EXISTS (SELECT 1 FROM demo_order_admissions a WHERE a.order_id = o.order_id)", day)?.c ?? 0;
+    const reserved = row(db, "SELECT COUNT(*) AS c FROM demo_order_admissions WHERE substr(created_at,1,10) = ?", day)?.c ?? 0;
+    const last = row(db, "SELECT created_at FROM (SELECT created_at FROM demo_orders WHERE client_key = ? UNION ALL SELECT created_at FROM demo_order_admissions WHERE client_key = ?) ORDER BY created_at DESC LIMIT 1", client, client);
+    if (legacy + reserved >= demoBudget.maxRunsPerDay) { db.exec("COMMIT"); return { ok: false, status: 429, error: "DEMO_BUDGET_EXHAUSTED", reason: "daily order budget used" }; }
+    if (last && Date.now() - new Date(last.created_at).getTime() < demoBudget.clientCooldownSeconds * 1000) { db.exec("COMMIT"); return { ok: false, status: 429, error: "DEMO_COOLDOWN", reason: `one order per ${demoBudget.clientCooldownSeconds}s per client` }; }
+    run(db, "INSERT INTO demo_order_admissions (id, client_key, created_at) VALUES (?,?,?)", admissionId, client, now());
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
   const merchant = getAddress(dep.proxies.MAIN.address) as Hex;
   const o = await adminLock(() => createOrder({ publicClient, admin: adminWallet, merchant, feeParams }, payer, demoBudget.amountNativeAtomic));
-  run(db, "INSERT INTO demo_orders (order_id, payer, merchant, amount_atomic, tx_hash, block, client_key, created_at) VALUES (?,?,?,?,?,?,?,?)", o.orderId, payer.toLowerCase(), merchant.toLowerCase(), demoBudget.amountNativeAtomic.toString(), o.tx, o.block, client, now());
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    run(db, "INSERT INTO demo_orders (order_id, payer, merchant, amount_atomic, tx_hash, block, client_key, created_at) VALUES (?,?,?,?,?,?,?,?)", o.orderId, payer.toLowerCase(), merchant.toLowerCase(), demoBudget.amountNativeAtomic.toString(), o.tx, o.block, client, now());
+    run(db, "UPDATE demo_order_admissions SET order_id = ? WHERE id = ?", o.orderId, admissionId);
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
   return { ok: true, ...o, merchant, amountNativeAtomic: demoBudget.amountNativeAtomic.toString(), baselineDigest: baselineDigestFor(db, merchant) };
 }
 

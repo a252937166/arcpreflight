@@ -50,6 +50,7 @@ export class FacilitatorClient {
     const proof = await buildSellerProof(this.seller, this.net, purpose, method, raw);
     const res = await this.fetchImpl(`${this.base}${path}`, {
       method, headers: { "Facilitator-Seller-Proof": proof, ...(method === "POST" ? { "Content-Type": "application/json" } : {}) }, body: method === "POST" ? raw : undefined,
+      signal: AbortSignal.timeout(15_000),
     });
     const text = await res.text();
     let json: any = null; try { json = JSON.parse(text); } catch { /* keep text */ }

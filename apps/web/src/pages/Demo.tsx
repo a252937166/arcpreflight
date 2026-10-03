@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useNet } from "../App";
 import { api, type Fixture, type Run, type RunSummary } from "../lib/api";
+import { startDemo } from "../lib/demo";
 import { Chip, DecisionBadge, Hex, Spinner } from "../components/Badges";
 import { RunPanel } from "../components/RunPanel";
 import { HandRule } from "../components/Illustrations";
@@ -33,12 +34,10 @@ export default function Demo() {
   const start = async () => {
     setBusy(true); setNotice(null); setSample(false); setRun(null);
     try {
-      const r = await api.startRun(fixture);
-      if (r.runId) { setNotice({ tone: "info", text: "Started. The project's own runner is doing this on-chain right now." }); poll(r.runId); return; }
+      const r = await startDemo(fixture);
+      if (r.mode === "live") { setNotice({ tone: "info", text: "Started. The project's own runner is doing this on-chain right now." }); poll(r.runId); return; }
       setBusy(false);
-      const why = `${r.error}: ${r.reason}`;
-      if (r.sampleRunId) { setNotice({ tone: "warn", text: `${why}. Showing the latest recorded run instead — labelled RECORDED_SAMPLE.` }); setSample(true); setRun(await api.run(r.sampleRunId)); }
-      else setNotice({ tone: "bad", text: why });
+      setNotice({ tone: "warn", text: `${r.reason}. Showing the latest recorded run — labelled RECORDED_SAMPLE.` }); setSample(true); setRun(r.run);
     } catch (e: any) { setBusy(false); setNotice({ tone: "bad", text: e?.message ?? String(e) }); }
   };
   const open = async (id: string) => { setSample(false); setNotice(null); try { const r = await api.run(id); setRun(r); if (r.state === "RUNNING") { setBusy(true); poll(id); } } catch { /* ignore */ } };

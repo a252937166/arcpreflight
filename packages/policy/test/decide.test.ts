@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { encodeFunctionData } from "viem";
 import { decide } from "../src/decide.js";
 import { DEMO_MERCHANT_ABI, PAY_SELECTOR, checkIntentBinding } from "../src/intent-binding.js";
-import { IntentCore, PolicyCore, ReportCore, BaselineCore } from "@arcpreflight/schema";
+import { IntentCore, PolicyCore, ReportCore, BaselineCore, baselineDigest as computeBaselineDigest } from "@arcpreflight/schema";
 
 const D = ("0x" + "11".repeat(32)) as `0x${string}`;
 const MERCHANT = "0x0000000000000000000000000000000000000a11";
@@ -17,7 +17,7 @@ function intent(over: Partial<any> = {}) {
     schemaVersion: "1.0", clientRequestId: "r1", chainId: 5042, walletMode: "EOA_DIRECT_NON_DELEGATED", from: RUNNER, operation: "CALL",
     to: MERCHANT, data: encodeFunctionData({ abi: DEMO_MERCHANT_ABI, functionName: "pay", args: [ORDER] }), valueNativeAtomic: AMOUNT,
     businessExpectation: { sourceId: "order-ab", sourceDigest: D, action: "MERCHANT_PAY", recipient: MERCHANT, asset: "ARC_NATIVE_USDC", amountNativeAtomic: AMOUNT, orderId: ORDER },
-    baselineDigest: D, policyDigest: D, expiresAt: "2026-10-02T12:05:00Z", ...over,
+    baselineDigest: B, policyDigest: D, expiresAt: "2026-10-02T12:05:00Z", ...over,
   });
 }
 const policy = PolicyCore.parse({
@@ -30,15 +30,16 @@ const baseline = BaselineCore.parse({
   schemaVersion: "1.0", chainId: 5042, subject: MERCHANT, approvedBy: "dev", approvedAt: "2026-10-01T00:00:00Z", validUntil: null, previousBaselineDigest: null,
   referenceSnapshot: snapshot, dependencies: [], allowedSelectors: [PAY_SELECTOR], adapterManifestDigests: [], approvedState: [],
 });
+const B = computeBaselineDigest(baseline);
 function report(over: Partial<any> = {}) {
   return ReportCore.parse({
     schemaVersion: "1.0", mode: "SUPPORTED_INTENT", intentDigest: D, decisionEligible: true, observation: snapshot, methodologyDigest: D,
-    adapterManifestDigests: [], baselineDigest: D, baselineResult: "MATCH", dependencies: [],
+    adapterManifestDigests: [], baselineDigest: B, baselineResult: "MATCH", dependencies: [],
     signals: [{ id: "PROXY_TEMPLATE_VERIFIED", state: "observed", basis: "chain_read", scope: "", evidenceDigests: [], limitations: [], sourceIds: [] }],
     rawEvidenceDigests: [], exclusions: [], expiresAt: "2026-10-02T12:01:00Z", ...over,
   });
 }
-const base = () => ({ intent: intent(), policy, policyDigest: D, baseline, baselineDigest: D, baselineRevoked: false, report: report(), reportDigest: D, now, simulation: { ok: true, error: null } });
+const base = () => ({ intent: intent(), policy, policyDigest: D, baseline, baselineDigest: B, baselineRevoked: false, report: report(), reportDigest: D, now, simulation: { ok: true, error: null } });
 
 describe("decide()", () => {
   it("clean path → NO_POLICY_VIOLATION", () => {
@@ -66,6 +67,23 @@ describe("decide()", () => {
   it("revoked or missing baseline → REVIEW_REQUIRED; first observation never auto-approves", () => {
     expect(decide({ ...base(), baselineRevoked: true }).decision).toBe("REVIEW_REQUIRED");
     expect(decide({ ...base(), baseline: null, baselineDigest: null, report: report({ baselineResult: "NO_BASELINE" }) }).decision).toBe("REVIEW_REQUIRED");
+  });
+  it.each([
+    ["expired", { validUntil: now.toISOString() }],
+    ["wrong subject", { subject: "0x0000000000000000000000000000000000000b22" }],
+    ["wrong chain", { chainId: 5042002 }],
+    ["wrong snapshot chain", { referenceSnapshot: { ...snapshot, chainId: 5042002 } }],
+    ["unapproved selector", { allowedSelectors: [] }],
+  ])("%s baseline cannot authorize a payment even when the report says MATCH", (_label, patch) => {
+    const changed = BaselineCore.parse({ ...baseline, ...patch });
+    const d = computeBaselineDigest(changed);
+    const result = decide({ ...base(), intent: intent({ baselineDigest: d }), baseline: changed, baselineDigest: d, report: report({ baselineDigest: d }) });
+    expect(result.decision).toBe("REVIEW_REQUIRED");
+    expect(result.checks.find((c) => c.id === "BASELINE_STATUS")?.outcome).toBe("REVIEW_REQUIRED");
+  });
+  it("rejects baseline content changed under an old digest and a report bound to another baseline", () => {
+    expect(decide({ ...base(), baseline: { ...baseline, approvedBy: "other-admin" } }).decision).toBe("REVIEW_REQUIRED");
+    expect(decide({ ...base(), report: report({ baselineDigest: D }) }).decision).toBe("REVIEW_REQUIRED");
   });
   it("simulation revert → BLOCKED; missing simulation → REVIEW_REQUIRED", () => {
     expect(decide({ ...base(), simulation: { ok: false, error: "OrderAlreadyPaid" } }).decision).toBe("BLOCKED");

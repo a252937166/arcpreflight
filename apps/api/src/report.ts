@@ -1,6 +1,7 @@
 import { createPublicClient, http, encodeFunctionData, decodeFunctionResult, decodeErrorResult, getAddress, type Hex, type PublicClient } from "viem";
-import { ReportCore, reportDigest, type IntentCore, type BaselineCore, type Signal, type ExecutionDependency } from "@arcpreflight/schema";
+import { ReportCore, reportDigest, canonicalize, type IntentCore, type BaselineCore, type Signal, type ExecutionDependency } from "@arcpreflight/schema";
 import { captureSnapshot, observeProxy, readCall, type RpcEvidence } from "@arcpreflight/observer";
+import { checkBaselineStatus } from "@arcpreflight/policy";
 import { cfg } from "./config.js";
 import { adapterManifests, adapterManifestDigests, methodologyDigest, arcAdvisorySignals, DEMO_MERCHANT_TEMPLATE_ABI } from "./manifests.js";
 
@@ -37,13 +38,16 @@ export async function buildIntentReport(intent: IntentCore, intentDigest: Hex, b
   // Baseline comparison (EXECUTION_IDENTITY input)
   let baselineResult: ReportCore["baselineResult"] = "NO_BASELINE";
   if (baseline) {
+    const status = checkBaselineStatus({ intent, baseline, baselineDigest, baselineRevoked: false, now: new Date() });
+    exclusions.push(...status.reasons.map((reason) => `BASELINE_STATUS: ${reason}`));
     const approvedImpl = baseline.dependencies.find((d) => d.role === "IMPLEMENTATION");
     const approvedTarget = baseline.dependencies.find((d) => d.role === "TARGET");
     const curImpl = deps.find((d) => d.role === "IMPLEMENTATION");
     const curTarget = deps.find((d) => d.role === "TARGET");
-    if (proxy.resolution !== "VERIFIED_TEMPLATE" || !curImpl?.codeHash) baselineResult = "UNKNOWN";
+    if (status.outcome !== "PASS" || proxy.resolution !== "VERIFIED_TEMPLATE" || !curImpl?.codeHash) baselineResult = "UNKNOWN";
     else if (!approvedImpl?.codeHash) baselineResult = "UNKNOWN";
-    else if (approvedTarget?.codeHash && curTarget?.codeHash && approvedTarget.codeHash !== curTarget.codeHash) baselineResult = "IMPLEMENTATION_CHANGED";
+    else if (!approvedTarget?.codeHash || !curTarget?.codeHash || approvedTarget.address !== curTarget.address) baselineResult = "UNKNOWN";
+    else if (approvedTarget.codeHash !== curTarget.codeHash) baselineResult = "IMPLEMENTATION_CHANGED";
     else if (approvedImpl.address !== curImpl.address || approvedImpl.codeHash !== curImpl.codeHash) baselineResult = "IMPLEMENTATION_CHANGED";
     else if (baseline.adapterManifestDigests.length && !baseline.adapterManifestDigests.every((d) => (adapterManifestDigests as string[]).includes(d))) baselineResult = "ADAPTER_CHANGED";
     else baselineResult = "MATCH";
@@ -51,26 +55,57 @@ export async function buildIntentReport(intent: IntentCore, intentDigest: Hex, b
 
   // Supported-state reads (DemoMerchant template): paused(), getOrder(orderId), version()
   const decisionEligible = proxy.resolution === "VERIFIED_TEMPLATE" && intent.businessExpectation.action === "MERCHANT_PAY";
+  const stateValues = new Map<string, string | null>();
   if (intent.businessExpectation.action === "MERCHANT_PAY") {
     const paused = await readCall(client, subject, encodeFunctionData({ abi: DEMO_MERCHANT_TEMPLATE_ABI, functionName: "paused" }), snapshot);
     evidence.push({ evidence: paused.evidence, digest: paused.evidenceDigest });
-    const pausedVal = paused.value.ok && paused.value.data ? (decodeFunctionResult({ abi: DEMO_MERCHANT_TEMPLATE_ABI, functionName: "paused", data: paused.value.data }) as boolean) : null;
+    let pausedVal: boolean | null = null;
+    if (paused.value.ok && paused.value.data) {
+      try { pausedVal = decodeFunctionResult({ abi: DEMO_MERCHANT_TEMPLATE_ABI, functionName: "paused", data: paused.value.data }) as boolean; } catch { /* unsupported return data remains unknown */ }
+    }
+    stateValues.set("paused", pausedVal === null ? null : canonicalize(pausedVal));
     signals.push({ id: "SUPPORTED_STATE_PAUSED", state: pausedVal === null ? "unknown" : pausedVal ? "observed" : "not_observed", basis: "chain_read",
       scope: "DemoMerchant.paused() at pinned block", evidenceDigests: [paused.evidenceDigest], limitations: pausedVal === null ? ["paused() call failed"] : [], sourceIds: ["demo-merchant-v1-template"] });
     const order = await readCall(client, subject, encodeFunctionData({ abi: DEMO_MERCHANT_TEMPLATE_ABI, functionName: "getOrder", args: [intent.businessExpectation.orderId as Hex] }), snapshot);
     evidence.push({ evidence: order.evidence, digest: order.evidenceDigest });
     let orderState: "unknown" | "observed" | "not_observed" = "unknown"; const lim: string[] = [];
     if (order.value.ok && order.value.data) {
-      const [payer, amount, paid] = decodeFunctionResult({ abi: DEMO_MERCHANT_TEMPLATE_ABI, functionName: "getOrder", data: order.value.data }) as readonly [Hex, bigint, boolean, bigint, bigint];
-      const expectOk = payer.toLowerCase() === intent.from.toLowerCase() && amount.toString() === intent.businessExpectation.amountNativeAtomic && !paid;
-      orderState = expectOk ? "observed" : "not_observed";
-      if (payer === "0x0000000000000000000000000000000000000000") lim.push("order does not exist at pinned block");
-      if (paid) lim.push("order already paid at pinned block");
-      if (payer.toLowerCase() !== intent.from.toLowerCase() && payer !== "0x0000000000000000000000000000000000000000") lim.push("order payer differs from intent sender");
-      if (amount.toString() !== intent.businessExpectation.amountNativeAtomic) lim.push(`onchain order amount ${amount} != approved ${intent.businessExpectation.amountNativeAtomic}`);
+      try {
+        const [payer, amount, paid] = decodeFunctionResult({ abi: DEMO_MERCHANT_TEMPLATE_ABI, functionName: "getOrder", data: order.value.data }) as readonly [Hex, bigint, boolean, bigint, bigint];
+        const expectOk = payer.toLowerCase() === intent.from.toLowerCase() && amount.toString() === intent.businessExpectation.amountNativeAtomic && !paid;
+        orderState = expectOk ? "observed" : "not_observed";
+        if (payer === "0x0000000000000000000000000000000000000000") lim.push("order does not exist at pinned block");
+        if (paid) lim.push("order already paid at pinned block");
+        if (payer.toLowerCase() !== intent.from.toLowerCase() && payer !== "0x0000000000000000000000000000000000000000") lim.push("order payer differs from intent sender");
+        if (amount.toString() !== intent.businessExpectation.amountNativeAtomic) lim.push(`onchain order amount ${amount} != approved ${intent.businessExpectation.amountNativeAtomic}`);
+      } catch { lim.push("getOrder() returned unsupported data"); }
     } else lim.push("getOrder() call failed");
     signals.push({ id: "SUPPORTED_STATE_ORDER_PAYABLE", state: orderState, basis: "chain_read", scope: "DemoMerchant.getOrder(orderId): exists, unpaid, payer==sender, amount==approved",
       evidenceDigests: [order.evidenceDigest], limitations: lim, sourceIds: ["demo-merchant-v1-template"] });
+
+    if (baseline?.approvedState.some((state) => state.key === "owner")) {
+      const owner = await readCall(client, subject, encodeFunctionData({ abi: DEMO_MERCHANT_TEMPLATE_ABI, functionName: "owner" }), snapshot);
+      evidence.push({ evidence: owner.evidence, digest: owner.evidenceDigest });
+      let ownerValue: string | null = null;
+      if (owner.value.ok && owner.value.data) {
+        try { ownerValue = canonicalize(getAddress(decodeFunctionResult({ abi: DEMO_MERCHANT_TEMPLATE_ABI, functionName: "owner", data: owner.value.data }) as string).toLowerCase()); } catch { /* unrecognized owner data remains unknown */ }
+      }
+      stateValues.set("owner", ownerValue);
+    }
+  }
+  if (baseline && baselineResult === "MATCH") {
+    for (const approved of baseline.approvedState) {
+      const current = stateValues.get(approved.key);
+      if (current == null) {
+        baselineResult = "UNKNOWN";
+        exclusions.push(`approved state ${approved.key} is unsupported or unreadable at the pinned block`);
+        break;
+      }
+      if (current !== approved.canonicalValue) {
+        baselineResult = "STATE_CHANGED";
+        break;
+      }
+    }
   }
 
   // CALL_SIMULATION of the exact candidate call (from/to/data/value) at the pinned block

@@ -3,8 +3,8 @@
 // broadcast raw -> business postcondition. Used by the CLI example and by the API's public demo endpoint.
 import { randomUUID, randomBytes } from "node:crypto";
 import { encodeFunctionData, keccak256, parseTransaction, getAddress, toHex, type Hex, type PublicClient, type WalletClient, type Transport, type Chain, type Account, type PrivateKeyAccount } from "viem";
-import { IntentCore, PolicyCore, intentDigest, policyDigest, DecisionReceipt, decisionDigest, TransactionPlan, transactionPlanDigest, FinalValidationReceipt, finalValidationDigest, ExecutionReceipt, executionDigest, ReportCore, reportDigest } from "@arcpreflight/schema";
-import { decide, DEMO_MERCHANT_ABI, PAY_SELECTOR } from "@arcpreflight/policy";
+import { IntentCore, PolicyCore, BaselineCore, Digest, UIntString, intentDigest, policyDigest, DecisionReceipt, decisionDigest, TransactionPlan, transactionPlanDigest, FinalValidationReceipt, finalValidationDigest, ExecutionReceipt, executionDigest, ReportCore, reportDigest } from "@arcpreflight/schema";
+import { decide, checkBaselineStatus, DEMO_MERCHANT_ABI, PAY_SELECTOR } from "@arcpreflight/policy";
 import { signTransferAuthorization, type ArcNet } from "@arcpreflight/client";
 import { captureSnapshot, readCall, readSlot, SLOTS, slotToAddress, PIN_LAG } from "@arcpreflight/observer";
 
@@ -21,6 +21,19 @@ const CREATE_ORDER_ABI = [{ type: "function", name: "createOrder", stateMutabili
 const GET_ORDER_ABI = [{ type: "function", name: "getOrder", stateMutability: "view", inputs: [{ name: "orderId", type: "bytes32" }], outputs: [{ type: "address" }, { type: "uint256" }, { type: "bool" }, { type: "uint64" }, { type: "uint64" }] }] as const;
 const PAUSED_ABI = [{ type: "function", name: "paused", stateMutability: "view", inputs: [], outputs: [{ type: "bool" }] }] as const;
 const bigJson = (v: unknown) => JSON.parse(JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x)));
+
+async function currentBaseline(o: Pick<RunOptions, "apiUrl" | "token" | "baselineDigest">): Promise<{ baseline: BaselineCore | null; baselineDigest: Hex | null; baselineRevoked: boolean }> {
+  const unavailable = { baseline: null, baselineDigest: null, baselineRevoked: false };
+  try {
+    const r = await fetch(`${o.apiUrl}/v1/baselines/${o.baselineDigest}`, { headers: { authorization: `Bearer ${o.token}` }, signal: AbortSignal.timeout(15_000) });
+    if (!r.ok) return unavailable;
+    const body = await r.json();
+    const parsed = BaselineCore.safeParse(body.baseline);
+    const digest = Digest.safeParse(body.baselineDigest);
+    if (!parsed.success || !digest.success || typeof body.revoked !== "boolean") return unavailable;
+    return { baseline: parsed.data, baselineDigest: digest.data as Hex, baselineRevoked: body.revoked };
+  } catch { return unavailable; }
+}
 
 /** Admin creates an order for `payer` (management transaction; budgeted by the caller). */
 export async function createOrder(o: Pick<RunOptions, "publicClient" | "admin" | "merchant" | "feeParams">, payer: Hex, amount: bigint): Promise<{ orderId: Hex; tx: Hex; block: string }> {
@@ -63,10 +76,17 @@ export async function runFixture(o: RunOptions) {
     r = await fetch(`${o.apiUrl}/v1/preflight`, { method: "POST", headers: hdr, body: JSON.stringify({ intent }) });
     j = await r.json();
     if (r.status !== 402) throw new Error(`expected 402 quote, got ${r.status}: ${JSON.stringify(j).slice(0, 300)}`);
-    const pinned = j.pinnedBlock ? BigInt(j.pinnedBlock) : null;
-    if (pinned !== null && pinned < orderBlock && attempt++ < 5) {
+    const pinnedInput = UIntString.safeParse(j.pinnedBlock);
+    if (!pinnedInput.success) throw new Error("quote does not identify a valid pinned block; refusing to pay");
+    const pinned = BigInt(pinnedInput.data);
+    if (pinned < orderBlock) {
+      if (attempt >= 5) throw new Error("quote remains pinned before the order after bounded retries; refusing to pay");
+      attempt++;
       log("staleObservation", { pinnedBlock: j.pinnedBlock, orderBlock: order.block, why: "the free quote shows the report is pinned before the order existed; nothing was paid - re-request under a new clientRequestId" });
-      intent.clientRequestId = `${intent.clientRequestId}-r${attempt}`; await new Promise((s) => setTimeout(s, 1500)); continue;
+      intent.clientRequestId = `${intent.clientRequestId}-r${attempt}`;
+      iDigest = intentDigest(intent);
+      log("intentRetried", { intentDigest: iDigest, clientRequestId: intent.clientRequestId, why: "the replacement request has its own content digest; the stale quote was never paid" });
+      await new Promise((s) => setTimeout(s, 1500)); continue;
     }
     break;
   }
@@ -86,11 +106,8 @@ export async function runFixture(o: RunOptions) {
   const serviceFeeTx = j.payment?.transaction as string;
   log("reportDelivered", { serviceFeeTx, reportDigest: j.reportDigest, pinnedBlock: report.observation.blockNumber, baselineResult: report.baselineResult, decisionEligible: report.decisionEligible, signals: report.signals.filter((s) => s.basis !== "network_advisory").map((s) => `${s.id}=${s.state}`), why: "service fee settled on Arc through Circle Facilitator; the runner re-hashes the report and checks it is bound to its own intent" });
   // 3. local decision
-  const dec = decide({ intent, policy, policyDigest: pDigest, baseline: null, baselineDigest: null, baselineRevoked: false, report, reportDigest: j.reportDigest, now: new Date(), simulation: j.simulation });
-  const baselineBound = report.baselineDigest?.toLowerCase() === o.baselineDigest.toLowerCase();
-  const checks = dec.checks.filter((c) => c.id !== "BASELINE_STATUS"); const reasons = dec.reasons.filter((x) => !x.startsWith("BASELINE_STATUS"));
-  if (!baselineBound) reasons.push("BASELINE_STATUS: report.baselineDigest != intent.baselineDigest");
-  const decision = checks.some((c) => c.outcome === "BLOCKED") ? "BLOCKED" : (checks.some((c) => c.outcome === "REVIEW_REQUIRED") || !baselineBound) ? "REVIEW_REQUIRED" : "NO_POLICY_VIOLATION";
+  const approval = await currentBaseline(o);
+  const { decision, checks, reasons } = decide({ intent, policy, policyDigest: pDigest, ...approval, report, reportDigest: j.reportDigest, now: new Date(), simulation: j.simulation });
   const decisionReceipt = DecisionReceipt.parse({ schemaVersion: "1.0", executionAttemptId: attemptId, intentDigest: iDigest, reportDigest: j.reportDigest, baselineDigest: o.baselineDigest, policyDigest: pDigest, decision, reasons, decidedAt: new Date().toISOString() });
   const dDigest = decisionDigest(decisionReceipt);
   log("decision", { decision, checks: checks.map((c) => `${c.id}:${c.outcome}`), reasons: reasons.slice(0, 8), who: "demo-runner (deterministic policy, no LLM)", why: "hard violations block; unapproved change or unknowns require review; otherwise 'no configured check fired'" });
@@ -110,6 +127,11 @@ export async function runFixture(o: RunOptions) {
     const gasReserve = gasLimit * fees.maxFeePerGas;
     const nonce = await o.publicClient.getTransactionCount({ address: runnerAcct.address, blockTag: "pending" });
     const fvReasons: string[] = [];
+    const finalApproval = await currentBaseline(o);
+    fvReasons.push(...checkBaselineStatus({ intent, ...finalApproval, now: new Date() }).reasons.map((reason) => `BASELINE_STATUS: ${reason}`));
+    if (new Date(intent.expiresAt) <= new Date()) fvReasons.push("intent expired before final validation");
+    if (new Date(report.expiresAt) <= new Date()) fvReasons.push("report expired before final validation");
+    if (s2.chainId !== intent.chainId) fvReasons.push("final validation chain != intent chain");
     if (!implNow || implNow.toLowerCase() !== approvedImpl?.toLowerCase()) fvReasons.push("implementation changed since report");
     if (!(paused.value.ok && BigInt(paused.value.data ?? "0x1") === 0n)) fvReasons.push("paused or unreadable");
     if (!sim2.value.ok) fvReasons.push(`re-simulation reverted: ${sim2.value.error}`);
@@ -120,15 +142,17 @@ export async function runFixture(o: RunOptions) {
     finalValidation = FinalValidationReceipt.parse({ schemaVersion: "1.0", executionAttemptId: attemptId, intentDigest: iDigest, reportDigest: j.reportDigest, decisionDigest: dDigest, baselineDigest: o.baselineDigest, policyDigest: pDigest, snapshot: s2, transactionPlan: plan, transactionPlanDigest: planDigest,
       walletEvidenceDigest: keccak256(toHex(`eoa:${runnerAcct.address}:code=0x`)), criticalStateEvidenceDigests: [impl.evidenceDigest, paused.evidenceDigest], simulationEvidenceDigest: sim2.evidenceDigest, balanceNativeAtomic: balance.toString(), reservedGasNativeAtomic: gasReserve.toString(), reservedOtherNativeAtomic: "0",
       feeEvidenceDigest: keccak256(toHex(JSON.stringify({ maxFeePerGas: fees.maxFeePerGas.toString(), maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(), gasLimit: gasLimit.toString() }))),
-      result: fvReasons.length ? "REVIEW_REQUIRED" : "PASS", reasons: fvReasons, validatedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + policy.maxFinalValidationAgeSeconds * 1000).toISOString() });
+      result: fvReasons.length ? "REVIEW_REQUIRED" : "PASS", reasons: fvReasons, validatedAt: new Date().toISOString(),
+      expiresAt: new Date(Math.min(Date.now() + policy.maxFinalValidationAgeSeconds * 1000, Date.parse(intent.expiresAt), Date.parse(report.expiresAt), finalApproval.baseline?.validUntil ? Date.parse(finalApproval.baseline.validUntil) : Infinity)).toISOString() });
     execution.finalValidationDigest = finalValidationDigest(finalValidation); execution.transactionPlanDigest = planDigest;
     log("finalValidation", { result: finalValidation.result, reasons: fvReasons, newPinnedBlock: s2.blockNumber, balanceNativeAtomic: balance.toString(), gasLimit: gasLimit.toString(), maxFeePerGasGwei: Number(fees.maxFeePerGas) / 1e9, who: "demo-runner", why: "service fee changed the balance and time passed: re-read implementation, paused, order, balance and fees at a NEW pinned block before signing" });
     if (finalValidation.result === "PASS") {
+      if (new Date(finalValidation.expiresAt) <= new Date()) throw new Error("final validation expired before signing");
       const raw = await runnerAcct.signTransaction({ chainId: o.chain.id, type: "eip1559", to: merchant, data: intent.data as Hex, value: BigInt(plan.valueNativeAtomic), nonce: Number(plan.nonce), gas: BigInt(plan.gasLimit), maxFeePerGas: BigInt(plan.maxFeePerGasNativeAtomic), maxPriorityFeePerGas: BigInt(plan.maxPriorityFeePerGasNativeAtomic), accessList: [] });
       const parsed = parseTransaction(raw);
       const mismatch = [parsed.type !== "eip1559" && "type", parsed.chainId !== o.chain.id && "chainId", getAddress(parsed.to!) !== merchant && "to", parsed.data?.toLowerCase() !== intent.data.toLowerCase() && "data", parsed.value !== BigInt(plan.valueNativeAtomic) && "value", parsed.nonce !== Number(plan.nonce) && "nonce", parsed.gas !== BigInt(plan.gasLimit) && "gas", ((parsed as any).authorizationList?.length ?? 0) !== 0 && "authorizationList"].filter(Boolean);
       if (mismatch.length) throw new Error(`signed tx deviates from plan: ${mismatch.join(",")}`);
-      if (new Date(finalValidation.expiresAt) < new Date()) throw new Error("final validation expired before broadcast");
+      if (new Date(finalValidation.expiresAt) <= new Date()) throw new Error("final validation expired before broadcast");
       execution.signedTransactionHash = keccak256(raw); execution.chainStatus = "SIGNED_NOT_BROADCAST";
       log("signed", { signedTransactionHash: execution.signedTransactionHash, who: "demo-runner", why: "the signed raw transaction is decoded and compared field by field with the validated plan before any broadcast" });
       const txHash = await o.publicClient.sendRawTransaction({ serializedTransaction: raw });

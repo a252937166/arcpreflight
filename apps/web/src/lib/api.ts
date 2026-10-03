@@ -1,4 +1,6 @@
 // Thin typed client for the ArcPreflight API (same origin; Vite proxies /v1 in dev).
+import type { BaselineCore } from "@arcpreflight/schema";
+
 export type Fixture = "APPROVED_PAYMENT" | "CHANGED_IMPLEMENTATION" | "AMOUNT_UNIT_MISMATCH";
 export type Step = { step: string; atMs: number; who?: string; why?: string; [k: string]: unknown };
 export type Signal = { id: string; state: "observed" | "not_observed" | "unknown"; basis: string; scope: string; evidenceDigests: string[]; limitations: string[]; sourceIds: string[] };
@@ -26,6 +28,7 @@ export type RunResult = {
 };
 export type Run = { runId: string; fixture: Fixture; state: "RUNNING" | "DONE" | "FAILED"; labels: string[]; steps: Step[]; createdAt: string; updatedAt: string; expected: string | null; headline: string | null; result: RunResult | null };
 export type RunSummary = { runId: string; fixture: Fixture; state: string; labels: string[]; createdAt: string; updatedAt: string; decision: string | null; businessTxHash: string | null; businessStatus: string | null; serviceFeeTx: string | null; durationMs: number | null };
+export type BaselineRecord = { baselineDigest: string; baseline: BaselineCore; revoked: boolean };
 
 export class ApiError extends Error { constructor(public status: number, public body: any) { super(body?.reason ?? body?.error ?? `HTTP ${status}`); } }
 async function req<T>(path: string, init?: RequestInit & { token?: string }): Promise<T> {
@@ -43,7 +46,7 @@ export const api = {
   runs: (limit = 20) => req<{ runs: RunSummary[] }>(`/v1/demo/runs?limit=${limit}`),
   run: (id: string) => req<Run>(`/v1/demo/runs/${id}`),
   startRun: (fixture: Fixture) => req<{ runId?: string; error?: string; reason?: string; sampleRunId?: string | null; __status: number }>("/v1/demo/run", { method: "POST", body: JSON.stringify({ fixture }) }),
-  subject: (address: string) => req<{ reportDigest: string; report: Report; supported: boolean; evidenceCount: number }>(`/v1/subjects/${address}`),
+  subject: (address: string, signal?: AbortSignal) => req<{ reportDigest: string; report: Report; supported: boolean; evidenceCount: number }>(`/v1/subjects/${address}`, { signal }),
   publicReports: () => req<{ reports: { reportDigest: string; subject: string; mode: string; createdAt: string }[] }>("/v1/public-reports"),
   publicReport: (digest: string) => req<{ reportDigest: string; report: Report; evidence: Evidence[] }>(`/v1/public-reports/${digest}`),
   evidence: () => req<{ files: { path: string; bytes: number }[] }>("/v1/evidence"),
@@ -52,6 +55,7 @@ export const api = {
   createOrder: (payer: string, token: string) => req<any>("/v1/demo/orders", { method: "POST", body: JSON.stringify({ payer }), token }),
   preflight: (intent: unknown, token: string, payment?: unknown) => req<any>("/v1/preflight", { method: "POST", body: JSON.stringify(payment ? { intent, payment } : { intent }), token }),
   request: (id: string, token: string) => req<any>(`/v1/requests/${id}`, { token }),
+  baseline: (digest: string, token: string) => req<BaselineRecord>(`/v1/baselines/${digest}`, { token }),
 };
 export const explorerTx = (n: NetworkInfo | null | undefined, h: string) => `${n?.explorer ?? "https://explorer.arc.io"}/tx/${h}`;
 export const explorerAddr = (n: NetworkInfo | null | undefined, a: string) => `${n?.explorer ?? "https://explorer.arc.io"}/address/${a}`;

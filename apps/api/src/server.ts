@@ -1,7 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { getAddress, isAddress, type Hex } from "viem";
 import { IntentCore, intentDigest as computeIntentDigest, BaselineCore, baselineDigest as computeBaselineDigest } from "@arcpreflight/schema";
+import { checkBaselineStatus } from "@arcpreflight/policy";
 import { cfg } from "./config.js";
 import { openDb, row, rows, run, now, type Db } from "./db.js";
 import { principalOf, isAdmin } from "./auth.js";
@@ -9,7 +12,7 @@ import { buildObjectReport, buildIntentReport, client } from "./report.js";
 import { makeQuote, paymentRequirementsFor, paymentMatchesQuote, settleForRequest, reconcilePending, type PaymentInput } from "./payments.js";
 import { networkInfo, startRun, getRun, listRuns, createOrderFor, evidenceIndex, evidenceFile, clientKey, FIXTURES } from "./demo.js";
 
-const db: Db = openDb(cfg.dbPath);
+export const db: Db = openDb(cfg.dbPath);
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization, x-admin-token", "access-control-allow-methods": "GET, POST, OPTIONS" };
 const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
   const s = JSON.stringify(body);
@@ -25,6 +28,15 @@ async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<any> {
   });
 }
 const objectCache = new Map<string, { at: number; body: unknown }>();
+const preflightLocks = new Map<string, Promise<void>>();
+async function withPreflightLock<T>(requestId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = preflightLocks.get(requestId) ?? Promise.resolve();
+  const pending = previous.then(fn);
+  const queue = pending.then(() => {}, () => {});
+  preflightLocks.set(requestId, queue);
+  try { return await pending; }
+  finally { if (preflightLocks.get(requestId) === queue) preflightLocks.delete(requestId); }
+}
 let lastReady: { at: number; body: unknown } | null = null;
 // Public object observation costs RPC reads: a small per-client and global fixed-window limiter (no auth on that route).
 const subjectHits = new Map<string, { win: number; n: number }>();
@@ -46,7 +58,7 @@ function usageOk(principal: string): boolean {
 
 const clientIp = (req: IncomingMessage) => { const xf = req.headers["x-forwarded-for"]; const s = Array.isArray(xf) ? xf[0] : xf; return (s?.split(",")[0].trim()) || req.socket.remoteAddress || undefined; };
 
-async function handle(req: IncomingMessage, res: ServerResponse) {
+export async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname.replace(/\/+$/, "") || "/";
   let m: RegExpExecArray | null;
@@ -114,6 +126,14 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return json(res, 200, { reportDigest: r.report_digest, report: JSON.parse(r.report_json), evidence: JSON.parse(r.evidence_json) });
     }
 
+    // Authenticated approval lookup: callers validate scope, digest, expiry and current revocation locally.
+    if (req.method === "GET" && (m = /^\/v1\/baselines\/(0x[0-9a-f]{64})$/.exec(path))) {
+      if (!principalOf(req)) return json(res, 401, { error: "UNAUTHENTICATED" });
+      const b = row(db, "SELECT * FROM baselines WHERE baseline_digest = ?", m[1]);
+      if (!b) return json(res, 404, { error: "NOT_FOUND" });
+      return json(res, 200, { baselineDigest: b.baseline_digest, baseline: BaselineCore.parse(JSON.parse(b.baseline_json)), revoked: !!b.revoked });
+    }
+
     // Admin: approve a baseline for a supported target (internal; token-gated)
     if (req.method === "POST" && path === "/v1/admin/baselines") {
       if (!isAdmin(req)) return json(res, 403, { error: "FORBIDDEN" });
@@ -151,27 +171,32 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         reqRow = row(db, "SELECT * FROM requests WHERE request_id = ?", requestId);
       }
       const requestId = reqRow.request_id as string;
+      return await withPreflightLock(requestId, async () => {
       const resourceUrl = `${cfg.publicBaseUrl}/v1/preflight`;
       // Baseline lookup (by digest the intent references; must be for this subject and not revoked)
       const bRow = row(db, "SELECT * FROM baselines WHERE baseline_digest = ?", intent.baselineDigest);
       const baseline = bRow ? BaselineCore.parse(JSON.parse(bRow.baseline_json)) : null;
+      const baselineStatus = checkBaselineStatus({ intent, baseline, baselineDigest: bRow?.baseline_digest ?? null, baselineRevoked: !!bRow?.revoked, now: new Date() });
       // Quote: prepare report once; reuse while the quote is valid
       let q = row(db, "SELECT * FROM quotes WHERE request_id = ?", requestId);
+      let existingPayment = row(db, "SELECT * FROM payments WHERE request_id = ?", requestId);
+      if (existingPayment && !body.payment) return await recover(req, res, requestId, principal);
+      if (!existingPayment && body.payment && (!q || new Date(q.expires_at).getTime() <= Date.now())) {
+        return json(res, 409, { requestId, error: "QUOTE_EXPIRED", reason: "obtain a current quote before signing a service-fee authorization" });
+      }
       let reportDigestStr: string;
-      if (!q || new Date(q.expires_at) < new Date()) {
-        const payRow0 = row(db, "SELECT state FROM payments WHERE request_id = ?", requestId);
-        if (payRow0 && payRow0.state !== "FAILED") {
-          // a payment exists for the old quote: do not re-quote; recover instead
-          return await recover(req, res, requestId, principal);
-        }
-        const built = await buildIntentReport(intent, iDigest as Hex, baseline && !bRow.revoked ? baseline : null, baseline ? (bRow.baseline_digest as Hex) : null);
+      if (!q || (!existingPayment && new Date(q.expires_at) < new Date())) {
+        if (existingPayment) throw new Error("the original payment quote is unavailable");
+        const built = await buildIntentReport(intent, iDigest as Hex, baselineStatus.outcome === "PASS" ? baseline : null, baseline ? (bRow.baseline_digest as Hex) : null);
         run(db, "INSERT OR IGNORE INTO reports (report_digest, request_id, subject, mode, report_json, evidence_json, is_public, created_at) VALUES (?,?,?,?,?,?,?,?)",
           built.digest, requestId, intent.to.toLowerCase(), "SUPPORTED_INTENT", JSON.stringify(built.report), JSON.stringify({ evidence: built.evidence, simulation: built.simulation, baselineRevoked: !!bRow?.revoked }), 0, now());
         const { quote, digest: qd } = makeQuote(requestId, principal, intent, iDigest, built.digest, built.digest);
-        run(db, "INSERT INTO quotes (request_id, quote_json, quote_digest, report_digest, expires_at, created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET quote_json = excluded.quote_json, quote_digest = excluded.quote_digest, report_digest = excluded.report_digest, expires_at = excluded.expires_at, created_at = excluded.created_at",
+        run(db, "INSERT INTO quotes (request_id, quote_json, quote_digest, report_digest, expires_at, created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET quote_json = excluded.quote_json, quote_digest = excluded.quote_digest, report_digest = excluded.report_digest, expires_at = excluded.expires_at, created_at = excluded.created_at WHERE quotes.expires_at <= excluded.created_at AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.request_id = quotes.request_id)",
           requestId, JSON.stringify(quote), qd, built.digest, quote.expiresAt, now());
-        run(db, "UPDATE requests SET state = 'WAITING_PAYMENT', updated_at = ? WHERE request_id = ?", now(), requestId);
+        run(db, "UPDATE requests SET state = 'WAITING_PAYMENT', updated_at = ? WHERE request_id = ? AND NOT EXISTS (SELECT 1 FROM payments WHERE payments.request_id = requests.request_id)", now(), requestId);
         q = row(db, "SELECT * FROM quotes WHERE request_id = ?", requestId);
+        existingPayment = row(db, "SELECT * FROM payments WHERE request_id = ?", requestId);
+        if (existingPayment && !body.payment) return await recover(req, res, requestId, principal);
       }
       const quote = JSON.parse(q.quote_json);
       reportDigestStr = q.report_digest;
@@ -182,7 +207,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
           paymentRequirements: paymentRequirementsFor(quote, resourceUrl), note: "Report is prepared and pinned; pay exactly this quote to receive it." });
       }
       const p: PaymentInput = body.payment;
-      const mismatch = paymentMatchesQuote(p, quote, intent);
+      const mismatch = paymentMatchesQuote(p, quote, intent, !!existingPayment);
       if (mismatch) return json(res, 400, { error: "PAYMENT_MISMATCH", reason: mismatch });
       const s = await settleForRequest(db, requestId, quote, intent, p, resourceUrl);
       if ("conflict" in s) return json(res, 409, { error: "PAYMENT_CONFLICT", reason: s.conflict });
@@ -192,8 +217,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         const ev = JSON.parse(r.evidence_json);
         return json(res, 200, { requestId, delivery: "DELIVERED", payment: { state: "COMPLETED", transaction: s.txHash, paymentId: s.paymentId }, reportDigest: reportDigestStr, report: JSON.parse(r.report_json), evidence: ev.evidence, simulation: ev.simulation });
       }
-      if (s.state === "PENDING") return json(res, 202, { requestId, payment: { state: "PENDING", paymentId: s.paymentId }, reportDigest: reportDigestStr, note: "settlement pending; recover via GET /v1/requests/{requestId} with the same credentials" });
+      if (s.state === "PENDING" || s.state === "SUBMITTED") return json(res, 202, { requestId, payment: { state: s.state, paymentId: s.paymentId }, reportDigest: reportDigestStr, note: "settlement not yet confirmed; recover the original request via GET /v1/requests/{requestId} with the same credentials" });
       return json(res, 402, { requestId, error: "PAYMENT_FAILED", payment: { state: s.state, reason: s.reason, httpStatus: s.httpStatus }, quote });
+      });
     }
     if (req.method === "GET" && (m = /^\/v1\/requests\/([0-9a-f-]{36})$/.exec(path))) {
       const principal = principalOf(req);
@@ -213,10 +239,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 async function recover(req: IncomingMessage, res: ServerResponse, requestId: string, principal: string) {
   const r = row(db, "SELECT * FROM requests WHERE request_id = ?", requestId);
   if (!r || r.principal !== principal) return json(res, 404, { error: "NOT_FOUND" }); // no existence leak across principals
-  const pay = row(db, "SELECT * FROM payments WHERE request_id = ?", requestId);
+  let pay = row(db, "SELECT * FROM payments WHERE request_id = ?", requestId);
   const q = row(db, "SELECT * FROM quotes WHERE request_id = ?", requestId);
   let payState = pay?.state ?? "NOT_REQUESTED";
-  if (payState === "PENDING") payState = (await reconcilePending(db, requestId)) ?? payState;
+  if (payState === "PENDING" || payState === "SUBMITTED") {
+    payState = (await reconcilePending(db, requestId)) ?? payState;
+    pay = row(db, "SELECT * FROM payments WHERE request_id = ?", requestId);
+  }
   if (payState === "COMPLETED") {
     run(db, "UPDATE requests SET state = 'DELIVERED', updated_at = ? WHERE request_id = ?", now(), requestId);
     const rep = row(db, "SELECT * FROM reports WHERE report_digest = ?", q.report_digest);
@@ -224,7 +253,7 @@ async function recover(req: IncomingMessage, res: ServerResponse, requestId: str
     const p2 = row(db, "SELECT * FROM payments WHERE request_id = ?", requestId);
     return json(res, 200, { requestId, delivery: "DELIVERED", payment: { state: "COMPLETED", transaction: p2.tx_hash, paymentId: p2.facilitator_payment_id }, reportDigest: q.report_digest, report: JSON.parse(rep.report_json), evidence: ev.evidence, simulation: ev.simulation, expired: new Date(JSON.parse(rep.report_json).expiresAt) < new Date() });
   }
-  return json(res, payState === "PENDING" ? 202 : 200, { requestId, state: r.state, payment: { state: payState, paymentId: pay?.facilitator_payment_id ?? null }, quote: q ? JSON.parse(q.quote_json) : null, quoteExpired: q ? new Date(q.expires_at) < new Date() : null });
+  return json(res, payState === "PENDING" || payState === "SUBMITTED" ? 202 : 200, { requestId, state: r.state, payment: { state: payState, paymentId: pay?.facilitator_payment_id ?? null }, quote: q ? JSON.parse(q.quote_json) : null, quoteExpired: q ? new Date(q.expires_at) < new Date() : null });
 }
 
 function openapi() {
@@ -241,12 +270,15 @@ function openapi() {
       "/v1/demo/orders": { post: { summary: "create a DemoMerchant order for an external payer (trial principals only)", security: [{ bearer: [] }] } },
       "/v1/evidence": { get: { summary: "index of published evidence files" } }, "/v1/evidence/{path}": { get: { summary: "one evidence file" } },
       "/v1/preflight": { post: { summary: "supported-intent preflight; 402 with quote until paid (x402 exact, EIP-3009, Circle Facilitator on Arc)", security: [{ bearer: [] }] } },
+      "/v1/baselines/{baselineDigest}": { get: { summary: "authenticated approved baseline and current revocation state", security: [{ bearer: [] }] } },
       "/v1/requests/{requestId}": { get: { summary: "authenticated recovery of payment state and purchased report", security: [{ bearer: [] }] } },
     },
     components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } } },
   };
 }
 
-createServer((req, res) => { handle(req, res); }).listen(cfg.port, "127.0.0.1", () => {
-  console.log(now(), `arcpreflight api listening on 127.0.0.1:${cfg.port} profile=${cfg.profile} network=${cfg.caip2} release=${cfg.releaseSha} principals=${cfg.principals.size} targets=${cfg.supportedTargets.length}`);
-});
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  createServer((req, res) => { handle(req, res); }).listen(cfg.port, "127.0.0.1", () => {
+    console.log(now(), `arcpreflight api listening on 127.0.0.1:${cfg.port} profile=${cfg.profile} network=${cfg.caip2} release=${cfg.releaseSha} principals=${cfg.principals.size} targets=${cfg.supportedTargets.length}`);
+  });
+}

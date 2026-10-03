@@ -65,7 +65,18 @@ pnpm --filter @arcpreflight/web dev                                          # s
 ARC_NET=testnet API_URL=http://127.0.0.1:4040 ADMIN_TOKEN=… pnpm exec tsx scripts/demo/approve-baseline.ts MAIN
 ```
 
-Tests: `pnpm -r test` (schema, observer, policy, client) and `forge test` in `packages/contracts`.
+Tests: `pnpm -r test` and `forge test` in `packages/contracts`.
+
+The workspace test command also covers API payment recovery, persistent demo admissions, baseline scope/expiry,
+runner retries and the developer/inspection UI. Run with Node 22.6+ for `node:sqlite`; native Rollup/esbuild modules
+must match the Node architecture. `pnpm -r typecheck` and `pnpm --filter @arcpreflight/api --filter @arcpreflight/web build`
+check the release bundles.
+
+For an explicitly configured **testnet** API, `ARC_NET=testnet API_URL=http://127.0.0.1:4041 pnpm exec tsx scripts/selftest/testnet.ts`
+runs all three fixtures three times and verifies receipt digests, negative no-sign outcomes and positive paid orders.
+It spends the project's testnet funds (0.09 USDC service fees + 0.15 USDC business payments, plus gas), refuses mainnet,
+and saves the public result summary under `evidence/selftest/`. Keep the API's cooldown/budget configuration appropriate
+for this isolated test run; no production limits are changed by the script.
 
 ## Honesty notes
 

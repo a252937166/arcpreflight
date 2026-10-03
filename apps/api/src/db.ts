@@ -24,6 +24,7 @@ export function openDb(path: string) {
       request_id TEXT PRIMARY KEY, payment_identifier TEXT NOT NULL UNIQUE, network TEXT NOT NULL, asset TEXT NOT NULL,
       payer TEXT NOT NULL, auth_nonce TEXT NOT NULL, state TEXT NOT NULL, facilitator_payment_id TEXT, tx_hash TEXT,
       last_response_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      settle_payload_encrypted TEXT, quote_digest TEXT, report_digest TEXT, settle_lease_owner TEXT, settle_lease_until INTEGER,
       UNIQUE(network, asset, payer, auth_nonce)
     );
     CREATE TABLE IF NOT EXISTS baselines (
@@ -41,7 +42,10 @@ export function openDb(path: string) {
     CREATE TABLE IF NOT EXISTS budget (key TEXT PRIMARY KEY, window_start TEXT NOT NULL, used_atomic TEXT NOT NULL);
   `);
   // additive migrations for databases created by earlier releases
-  for (const sql of ["ALTER TABLE demo_runs ADD COLUMN client_key TEXT", "ALTER TABLE demo_runs ADD COLUMN result_json TEXT"]) {
+  for (const sql of ["ALTER TABLE demo_runs ADD COLUMN client_key TEXT", "ALTER TABLE demo_runs ADD COLUMN result_json TEXT",
+    "ALTER TABLE payments ADD COLUMN settle_payload_encrypted TEXT", "ALTER TABLE payments ADD COLUMN quote_digest TEXT",
+    "ALTER TABLE payments ADD COLUMN report_digest TEXT", "ALTER TABLE payments ADD COLUMN settle_lease_owner TEXT",
+    "ALTER TABLE payments ADD COLUMN settle_lease_until INTEGER"]) {
     try { db.exec(sql); } catch (e: any) { if (!/duplicate column/i.test(String(e?.message ?? e))) throw e; }
   }
   // demo runs interrupted by a restart can never finish

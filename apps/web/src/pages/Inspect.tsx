@@ -23,13 +23,18 @@ export default function Inspect() {
   const { address } = useParams();
   const nav = useNavigate();
   const [input, setInput] = useState(address ?? "");
-  const [data, setData] = useState<{ reportDigest: string; report: Report; supported: boolean; evidenceCount: number } | null>(null);
+  const [observation, setObservation] = useState<{ address: string; reportDigest: string; report: Report; supported: boolean; evidenceCount: number } | null>(null);
+  const data = observation?.address.toLowerCase() === address?.toLowerCase() ? observation : null;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    if (!address) { setData(null); return; }
-    setInput(address); setBusy(true); setErr(null); setData(null);
-    api.subject(address).then(setData).catch((e) => setErr(e?.message ?? String(e))).finally(() => setBusy(false));
+    if (!address) { setObservation(null); setBusy(false); return; }
+    let alive = true;
+    const controller = new AbortController();
+    setInput(address); setBusy(true); setErr(null); setObservation(null);
+    api.subject(address, controller.signal).then((r) => { if (alive) setObservation({ ...r, address }); })
+      .catch((e) => { if (alive) setErr(e?.message ?? String(e)); }).finally(() => { if (alive) setBusy(false); });
+    return () => { alive = false; controller.abort(); };
   }, [address]);
   const go = (a: string) => { const v = a.trim(); if (!isAddress(v, { strict: false })) { setErr("that is not a 20-byte address"); return; } nav(`/subjects/${v}`); };
   const picks = [...(net?.fixtures.filter((f) => f.merchant).map((f) => ({ name: `DemoMerchant ${f.proxy} proxy`, address: f.merchant!, note: f.proxy === "CHANGED" ? "upgraded A→B after approval" : "approved implementation A" })) ?? []), ...(OFFICIAL[net?.network ?? "mainnet"] ?? [])]
