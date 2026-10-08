@@ -1,0 +1,148 @@
+{
+  "generatedBy": "packages/verifier/test/vectors/generate.ts",
+  "profiles": {
+    "jcs": "arcpreflight-jcs-keccak-1.0",
+    "legacy": "legacy-json-stringify-keccak-1.0",
+    "file": "sha256-file-1.0"
+  },
+  "jcs": [
+    {
+      "kind": "intent",
+      "schemaVersion": "1.0",
+      "payload": {
+        "schemaVersion": "1.0",
+        "clientRequestId": "demo-APPROVED-fixture",
+        "chainId": 5042002,
+        "walletMode": "EOA_DIRECT_NON_DELEGATED",
+        "from": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+        "operation": "CALL",
+        "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+        "data": "0x8609cad1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "valueNativeAtomic": "50000000000000000",
+        "businessExpectation": {
+          "sourceId": "order:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sourceDigest": "0x6ea37715a9060ecfb1930edb81d59b05a4c27adb0216c5258771e64d5d8309b1",
+          "action": "MERCHANT_PAY",
+          "recipient": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+          "asset": "ARC_NATIVE_USDC",
+          "amountNativeAtomic": "50000000000000000",
+          "orderId": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "baselineDigest": "0x1035a0831a7f764d5f4f85aca1df54054ccb65aee93e77269f51a665770d221e",
+        "policyDigest": "0xd6489b1bde190fab77d781d702b9d0c861746cad7b8a8dd4bef3dca586ff7e07",
+        "expiresAt": "2026-10-08T10:10:00.000Z"
+      },
+      "canonical": "{\"kind\":\"intent\",\"payload\":{\"baselineDigest\":\"0x1035a0831a7f764d5f4f85aca1df54054ccb65aee93e77269f51a665770d221e\",\"businessExpectation\":{\"action\":\"MERCHANT_PAY\",\"amountNativeAtomic\":\"50000000000000000\",\"asset\":\"ARC_NATIVE_USDC\",\"orderId\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"recipient\":\"0xa8eb51ef994567b84215981e8d1fe17cb8e42252\",\"sourceDigest\":\"0x6ea37715a9060ecfb1930edb81d59b05a4c27adb0216c5258771e64d5d8309b1\",\"sourceId\":\"order:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"chainId\":5042002,\"clientRequestId\":\"demo-APPROVED-fixture\",\"data\":\"0x8609cad1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"expiresAt\":\"2026-10-08T10:10:00.000Z\",\"from\":\"0xc6182d363d7c3da6db491f703c430dc91d0e2ace\",\"operation\":\"CALL\",\"policyDigest\":\"0xd6489b1bde190fab77d781d702b9d0c861746cad7b8a8dd4bef3dca586ff7e07\",\"schemaVersion\":\"1.0\",\"to\":\"0xa8eb51ef994567b84215981e8d1fe17cb8e42252\",\"valueNativeAtomic\":\"50000000000000000\",\"walletMode\":\"EOA_DIRECT_NON_DELEGATED\"},\"schemaVersion\":\"1.0\"}",
+      "digest": "0xed827552bbe6d7952f2c5a534784b33fd0249b5afd6a23523b901bc45f100c66"
+    },
+    {
+      "kind": "decision",
+      "schemaVersion": "1.0",
+      "payload": {
+        "schemaVersion": "1.0",
+        "executionAttemptId": "22222222-2222-4222-8222-222222222222",
+        "intentDigest": "0xed827552bbe6d7952f2c5a534784b33fd0249b5afd6a23523b901bc45f100c66",
+        "reportDigest": "0xbb1c9b218ac9ecdd87280a5742b2fe1b9e9a5776e30a361f8bd751d5961771b0",
+        "baselineDigest": "0x1035a0831a7f764d5f4f85aca1df54054ccb65aee93e77269f51a665770d221e",
+        "policyDigest": "0xd6489b1bde190fab77d781d702b9d0c861746cad7b8a8dd4bef3dca586ff7e07",
+        "decision": "NO_POLICY_VIOLATION",
+        "reasons": [],
+        "decidedAt": "2026-10-08T10:00:00.000Z"
+      },
+      "canonical": "{\"kind\":\"decision\",\"payload\":{\"baselineDigest\":\"0x1035a0831a7f764d5f4f85aca1df54054ccb65aee93e77269f51a665770d221e\",\"decidedAt\":\"2026-10-08T10:00:00.000Z\",\"decision\":\"NO_POLICY_VIOLATION\",\"executionAttemptId\":\"22222222-2222-4222-8222-222222222222\",\"intentDigest\":\"0xed827552bbe6d7952f2c5a534784b33fd0249b5afd6a23523b901bc45f100c66\",\"policyDigest\":\"0xd6489b1bde190fab77d781d702b9d0c861746cad7b8a8dd4bef3dca586ff7e07\",\"reasons\":[],\"reportDigest\":\"0xbb1c9b218ac9ecdd87280a5742b2fe1b9e9a5776e30a361f8bd751d5961771b0\",\"schemaVersion\":\"1.0\"},\"schemaVersion\":\"1.0\"}",
+      "digest": "0xb7cd1df80793b2228f1e9d430c4e2514ca35d97c3a1759beba01c64a82c675e5"
+    },
+    {
+      "kind": "evidence",
+      "schemaVersion": "1.0",
+      "payload": {
+        "kind": "rpc",
+        "method": "eth_getCode",
+        "params": [
+          "\"0xA8eB51EF994567B84215981E8d1Fe17cb8e42252\"",
+          "{\"blockHash\":\"0x87986dcca3ffa64918b4ce82408e0fe59ed46bbb8552ee9d527761034767dbf7\"}"
+        ],
+        "result": "0x6080",
+        "error": null,
+        "snapshot": {
+          "chainId": 5042002,
+          "blockNumber": "65993430",
+          "blockHash": "0x87986dcca3ffa64918b4ce82408e0fe59ed46bbb8552ee9d527761034767dbf7",
+          "observedAt": "2026-10-08T10:00:00.000Z",
+          "providerId": "rpc.testnet",
+          "pinningMode": "BLOCK_HASH"
+        },
+        "capturedAt": "2026-10-08T10:00:00.000Z"
+      },
+      "canonical": "{\"kind\":\"evidence\",\"payload\":{\"capturedAt\":\"2026-10-08T10:00:00.000Z\",\"error\":null,\"kind\":\"rpc\",\"method\":\"eth_getCode\",\"params\":[\"\\\"0xA8eB51EF994567B84215981E8d1Fe17cb8e42252\\\"\",\"{\\\"blockHash\\\":\\\"0x87986dcca3ffa64918b4ce82408e0fe59ed46bbb8552ee9d527761034767dbf7\\\"}\"],\"result\":\"0x6080\",\"snapshot\":{\"blockHash\":\"0x87986dcca3ffa64918b4ce82408e0fe59ed46bbb8552ee9d527761034767dbf7\",\"blockNumber\":\"65993430\",\"chainId\":5042002,\"observedAt\":\"2026-10-08T10:00:00.000Z\",\"pinningMode\":\"BLOCK_HASH\",\"providerId\":\"rpc.testnet\"}},\"schemaVersion\":\"1.0\"}",
+      "digest": "0xcd0477556801039c076e1d6cee44c0539c0a462547b282c89ff11ca4784c4db9"
+    },
+    {
+      "kind": "quote",
+      "schemaVersion": "1.0",
+      "payload": {
+        "schemaVersion": "1.0",
+        "requestId": "11111111-1111-4111-8111-111111111111",
+        "buyerPrincipal": "demo-runner",
+        "payer": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+        "intentDigest": "0xed827552bbe6d7952f2c5a534784b33fd0249b5afd6a23523b901bc45f100c66",
+        "reportDigest": "0xbb1c9b218ac9ecdd87280a5742b2fe1b9e9a5776e30a361f8bd751d5961771b0",
+        "coverageDigest": "0xbb1c9b218ac9ecdd87280a5742b2fe1b9e9a5776e30a361f8bd751d5961771b0",
+        "network": "eip155:5042002",
+        "asset": "0x3600000000000000000000000000000000000000",
+        "amountTokenAtomic": "10000",
+        "payTo": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+        "preparedAt": "2026-10-08T10:00:00.000Z",
+        "expiresAt": "2026-10-08T10:00:30.000Z",
+        "retentionUntil": "2026-11-07T10:00:00.000Z"
+      },
+      "canonical": "{\"kind\":\"quote\",\"payload\":{\"amountTokenAtomic\":\"10000\",\"asset\":\"0x3600000000000000000000000000000000000000\",\"buyerPrincipal\":\"demo-runner\",\"coverageDigest\":\"0xbb1c9b218ac9ecdd87280a5742b2fe1b9e9a5776e30a361f8bd751d5961771b0\",\"expiresAt\":\"2026-10-08T10:00:30.000Z\",\"intentDigest\":\"0xed827552bbe6d7952f2c5a534784b33fd0249b5afd6a23523b901bc45f100c66\",\"network\":\"eip155:5042002\",\"payTo\":\"0x06873b35575d6a22ec8008f30f56c71c19bee7b0\",\"payer\":\"0xc6182d363d7c3da6db491f703c430dc91d0e2ace\",\"preparedAt\":\"2026-10-08T10:00:00.000Z\",\"reportDigest\":\"0xbb1c9b218ac9ecdd87280a5742b2fe1b9e9a5776e30a361f8bd751d5961771b0\",\"requestId\":\"11111111-1111-4111-8111-111111111111\",\"retentionUntil\":\"2026-11-07T10:00:00.000Z\",\"schemaVersion\":\"1.0\"},\"schemaVersion\":\"1.0\"}",
+      "digest": "0xeb93bb9978943a77f48c27c4a7497b0caef6c357640d2522adfaabcc0cb41489"
+    },
+    {
+      "kind": "transactionPlan",
+      "schemaVersion": "1.0",
+      "payload": {
+        "b": "2",
+        "a": [
+          "x",
+          {
+            "d": null,
+            "c": true
+          }
+        ],
+        "n": 1
+      },
+      "canonical": "{\"kind\":\"transactionPlan\",\"payload\":{\"a\":[\"x\",{\"c\":true,\"d\":null}],\"b\":\"2\",\"n\":1},\"schemaVersion\":\"1.0\"}",
+      "digest": "0x5dfdb07e35aef0d80d7aa629a1cfb336f7116dd35edb7151d42fd4818dc296e8"
+    }
+  ],
+  "legacy": [
+    {
+      "preimage": "{\"orderId\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"paid\":true,\"payer\":\"0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE\",\"amountNativeAtomic\":\"50000000000000000\",\"block\":\"65993462\",\"receiptStatus\":\"success\"}",
+      "digest": "0x6fcce159059e9b21ee8fc6f7d8f8bf246fab2472288203e4f4433ccae80b756c"
+    },
+    {
+      "preimage": "{\"orderId\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"paid\":false,\"payer\":\"0xc6182d363d7c3da6db491f703c430dc91d0e2ace\",\"amountNativeAtomic\":\"50000000000000000\",\"block\":\"1\",\"receiptStatus\":\"reverted\"}",
+      "digest": "0x68991a39f005a1cf523d8d0239d0f9798f965cf269a3b9ffe94366dcee30feda"
+    }
+  ],
+  "file": [
+    {
+      "content": "",
+      "sha256": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "content": "{}\n",
+      "sha256": "0xca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+    },
+    {
+      "content": "{\n  \"schemaVersion\": \"1.0\",\n  \"clientRequestId\": \"demo-APPROVED-fixture\",\n  \"chainId\": 5042002,\n  \"walletMode\": \"EOA_DIRECT_NON_DELEGATED\",\n  \"from\": \"0xc6182d363d7c3da6db491f703c430dc91d0e2ace\",\n  \"operation\": \"CALL\",\n  \"to\": \"0xa8eb51ef994567b84215981e8d1fe17cb8e42252\",\n  \"data\": \"0x8609cad1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n  \"valueNativeAtomic\": \"50000000000000000\",\n  \"businessExpectation\": {\n    \"sourceId\": \"order:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n    \"sourceDigest\": \"0x6ea37715a9060ecfb1930edb81d59b05a4c27adb0216c5258771e64d5d8309b1\",\n    \"action\": \"MERCHANT_PAY\",\n    \"recipient\": \"0xa8eb51ef994567b84215981e8d1fe17cb8e42252\",\n    \"asset\": \"ARC_NATIVE_USDC\",\n    \"amountNativeAtomic\": \"50000000000000000\",\n    \"orderId\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n  },\n  \"baselineDigest\": \"0x1035a0831a7f764d5f4f85aca1df54054ccb65aee93e77269f51a665770d221e\",\n  \"policyDigest\": \"0xd6489b1bde190fab77d781d702b9d0c861746cad7b8a8dd4bef3dca586ff7e07\",\n  \"expiresAt\": \"2026-10-08T10:10:00.000Z\"\n}\n",
+      "sha256": "0x1eb0fde632ac6af7483844d1ad3feeec04a46905f52c273b6b9f7c027c086b07"
+    },
+    {
+      "content": "ünïcödé — 🪪",
+      "sha256": "0xf29280ae44812ccaba6bafd867556d686ec0a668cd185d5463174f88bd4ce2d7"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - link "ArcPreflight" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - navigation [ref=e7]:
+        - link "Overview" [ref=e8] [cursor=pointer]:
+          - /url: /
+        - link "Live demo" [ref=e9] [cursor=pointer]:
+          - /url: /demo
+        - link "Inspect" [ref=e10] [cursor=pointer]:
+          - /url: /inspect
+        - link "Developer" [ref=e11] [cursor=pointer]:
+          - /url: /developer
+        - link "Verify" [ref=e12] [cursor=pointer]:
+          - /url: /verify
+        - link "Evidence" [ref=e13] [cursor=pointer]:
+          - /url: /evidence
+      - generic [ref=e14]:
+        - generic [ref=e15]: connecting…
+        - button "Connect wallet" [ref=e18] [cursor=pointer]
+  - main [ref=e20]:
+    - paragraph [ref=e22]: finding the API instances this site fronts…
+  - contentinfo [ref=e24]:
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - text: ArcPreflight · release
+        - code [ref=e27]: …
+        - text: ·
+        - code [ref=e28]: …
+        - text: ·
+      - generic [ref=e29]:
+        - link "OpenAPI" [ref=e30] [cursor=pointer]:
+          - /url: /openapi.json
+        - link "GitHub" [ref=e31] [cursor=pointer]:
+          - /url: https://github.com/a252937166/arcpreflight
+        - link "Arc docs" [ref=e32] [cursor=pointer]:
+          - /url: https://docs.arc.io

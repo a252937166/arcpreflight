@@ -1,7 +1,9 @@
 // Generate project-owned keys (never the user's personal wallets). Output: keys/*.json (chmod 600), addresses printed.
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { writeFileSync, existsSync, chmodSync, mkdirSync } from "node:fs";
-const roles = ["deployer-admin", "merchant-payto", "demo-runner"];
+// order-creator: the narrow DemoMerchant role the public API uses to create orders (no pause/withdraw/upgrade authority)
+// visitor-rehearsal: a project-owned stand-in for "a visitor's wallet" in the lifecycle rehearsal (design v3.3); never a user's key
+const roles = ["deployer-admin", "merchant-payto", "demo-runner", "order-creator", "visitor-rehearsal"];
 mkdirSync("keys", { recursive: true });
 for (const role of roles) {
   const f = `keys/${role}.json`;

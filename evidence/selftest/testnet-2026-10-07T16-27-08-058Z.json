@@ -1,0 +1,107 @@
+{
+  "chainId": 5042002,
+  "release": "d07-rehearsal",
+  "testedAtUTC": "2026-10-07T16:27:08.059Z",
+  "repeats": 3,
+  "runs": [
+    {
+      "round": 1,
+      "fixture": "CHANGED_IMPLEMENTATION",
+      "runId": "90a1583c-1d89-4962-a190-55f4c100059e",
+      "decision": "REVIEW_REQUIRED",
+      "serviceFeeTx": "0x118c65489acd476b1b2090b6999124ce21eeb502765eede02d1642934738f119",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 20307,
+      "reportDigest": "0x20248d262e31765bb71a43fd3426997c2ce2d41b42dc03eba8687d39a35bd671"
+    },
+    {
+      "round": 1,
+      "fixture": "AMOUNT_UNIT_MISMATCH",
+      "runId": "5ba9e6e2-a479-48dd-992b-03a58986f9de",
+      "decision": "BLOCKED",
+      "serviceFeeTx": "0xd6623cd95ac1c714ccf9366f4fa56fe551967628c26ebfa5f354aa96370e593d",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 18886,
+      "reportDigest": "0x7f37a905f152ff2ed1bc664c3806ca74ca4d058369936c90b2534485ee7cfd4b"
+    },
+    {
+      "round": 1,
+      "fixture": "APPROVED_PAYMENT",
+      "runId": "c24d31ae-2d21-41d0-b5e8-84ee6a7bc4cd",
+      "decision": "NO_POLICY_VIOLATION",
+      "serviceFeeTx": "0xc7e147c5aa3102713e15e684fa37da8583bb6faa83e907e47977b9937d4f7c13",
+      "businessTxHash": "0x613dfdde8498520a428c33c9cd6283a1d7e39703c5127959cd3179f88a919a0d",
+      "businessStatus": "SUCCESS",
+      "durationMs": 30427,
+      "reportDigest": "0x397b56d646464a9f2b205c98dfbbdb9424bd7de9a923c53e02453011716d90c0"
+    },
+    {
+      "round": 2,
+      "fixture": "CHANGED_IMPLEMENTATION",
+      "runId": "37b39d8f-5e95-49f0-ace7-39e4ed9830a7",
+      "decision": "REVIEW_REQUIRED",
+      "serviceFeeTx": "0xd0042df41cd975be1674ecf940fee51ccb026d57655f0627505fa776a8af2a3d",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 19139,
+      "reportDigest": "0x6d4138ae5aeabb369b771d9239e31ee6240c5434413cd045d877ea220a94d0b6"
+    },
+    {
+      "round": 2,
+      "fixture": "AMOUNT_UNIT_MISMATCH",
+      "runId": "eecb4960-6869-4513-8fca-24e50dea836a",
+      "decision": "BLOCKED",
+      "serviceFeeTx": "0x95862b9d1013e31616b292c04e63bdf109b25732ceaf750968b53b675bae299f",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 19281,
+      "reportDigest": "0xe2826826dce6140a75c16469bf2ed1416dc786140b2d478e57bb0a014c5d6317"
+    },
+    {
+      "round": 2,
+      "fixture": "APPROVED_PAYMENT",
+      "runId": "2d66fe29-5a7e-407f-bb7a-19ffe0290ad3",
+      "decision": "NO_POLICY_VIOLATION",
+      "serviceFeeTx": "0xcd4b86177906c980da3066eedb8032fa23532517ef1a829d7488eb78bb3a6ff1",
+      "businessTxHash": "0x2229b4fddab3d4f70cd2b4db7f516e90d80aeff32c8b95457b1a563f5335744c",
+      "businessStatus": "SUCCESS",
+      "durationMs": 36274,
+      "reportDigest": "0x66a4bd53a61ccb5080b7e6a85bdc465122e75dd53e97ee78ef628c74b0f0950a"
+    },
+    {
+      "round": 3,
+      "fixture": "CHANGED_IMPLEMENTATION",
+      "runId": "def3e5ba-569c-4c78-9b47-2744ecff8f52",
+      "decision": "REVIEW_REQUIRED",
+      "serviceFeeTx": "0x27488f9a65c42e88fdd1db96579ae94561090a4f73e92b7f41a6816c339dd354",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 18075,
+      "reportDigest": "0x51a334416ba64426c0fac1c5a7aa836c18628461402aae96f9180556d22516bd"
+    },
+    {
+      "round": 3,
+      "fixture": "AMOUNT_UNIT_MISMATCH",
+      "runId": "274b83ff-653d-4fbd-9bcf-dac88ae66280",
+      "decision": "BLOCKED",
+      "serviceFeeTx": "0x518dc18a8797c270c9503b376c8b5dd13a53d7205e69cb6b4066189f052589ca",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 19255,
+      "reportDigest": "0x0b100290a37627250eab2fb71b9b9b15d58919355381de890258e1112ce16956"
+    },
+    {
+      "round": 3,
+      "fixture": "APPROVED_PAYMENT",
+      "runId": "867d56e6-7a3e-4c99-b4ac-9756c97503c5",
+      "decision": "NO_POLICY_VIOLATION",
+      "serviceFeeTx": "0xdbc31082d1731def4ff8bea1fba17a69ff721d38ef00006fa6305300667134bc",
+      "businessTxHash": "0x823d159e037b1083a7ed78585d23b79f063bb68cb303889cd9960ffe0486e2bd",
+      "businessStatus": "SUCCESS",
+      "durationMs": 31348,
+      "reportDigest": "0x63e8b0f7396cfffc42f647def87f082dc7d48d74cb12e0ead4d8551b1d6acd72"
+    }
+  ]
+}

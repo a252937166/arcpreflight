@@ -80,7 +80,10 @@ describe("recorded demo fallback", () => {
   });
   it("returns the live run ID without loading a sample", async () => {
     const fetch = vi.fn(async () => response({ runId: REQUEST }, 202)); vi.stubGlobal("fetch", fetch);
-    expect(await startDemo("APPROVED_PAYMENT")).toEqual({ mode: "live", runId: REQUEST });
+    const started = await startDemo("APPROVED_PAYMENT");
+    expect(started).toMatchObject({ mode: "live", runId: REQUEST, admission: "new" });
     expect(fetch).toHaveBeenCalledTimes(1);
+    // the admission key travels with the request and is the one the client keeps for retries and recovery
+    expect(JSON.parse((fetch.mock.calls[0] as any)[1].body)).toEqual({ fixture: "APPROVED_PAYMENT", clientRunRequestId: (started as any).key });
   });
 });

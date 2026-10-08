@@ -2,9 +2,11 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import type { Hex } from "viem";
 import { getAddress } from "viem";
 import { QuoteCore, quoteDigest, type IntentCore } from "@arcpreflight/schema";
-import { FacilitatorClient, buildSettleBody, paymentIdentifier, classifySettle, type Eip3009Authorization } from "@arcpreflight/client";
+import { FacilitatorClient, buildSettleBody, paymentIdentifier, classifySettle, type Eip3009Authorization, type SettlementEvidence } from "@arcpreflight/client";
 import { cfg } from "./config.js";
-import { type Db, row, run, now } from "./db.js";
+import { type Db, row, rows, run, now } from "./db.js";
+import { client } from "./report.js";
+import { Relayer, relayRpcFromClient } from "./relay.js";
 
 export function makeQuote(requestId: string, principal: string, intent: IntentCore, intentDigest: Hex, reportDigest: Hex, coverageDigest: Hex) {
   if (!cfg.merchant) throw new Error("merchant payTo key not configured");
@@ -18,7 +20,8 @@ export function makeQuote(requestId: string, principal: string, intent: IntentCo
   return { quote, digest: quoteDigest(quote) };
 }
 
-/** x402 "accepts" entry the buyer must satisfy (mirrors paymentRequirements used at /settle). */
+/** x402 "accepts" entry the buyer must satisfy: exact scheme, EIP-3009 on Arc USDC. The wire format is the open standard;
+ *  settlement is performed by this server's own relayer, not a hosted facilitator. */
 export function paymentRequirementsFor(quote: QuoteCore, resourceUrl: string) {
   return { x402Version: 2, resource: { url: resourceUrl, description: "ArcPreflight supported-intent check", mimeType: "application/json" },
     accepts: [{ scheme: "exact", network: quote.network, amount: quote.amountTokenAtomic, asset: quote.asset, payTo: quote.payTo, maxTimeoutSeconds: 12, extra: { name: "USDC", version: "2", assetTransferMethod: "eip3009" } }] };
@@ -26,8 +29,9 @@ export function paymentRequirementsFor(quote: QuoteCore, resourceUrl: string) {
 
 export type PaymentInput = { signature: Hex; authorization: Eip3009Authorization };
 type SettleBody = ReturnType<typeof buildSettleBody>;
+export type SettlementBackend = "circle" | "relay";
 type PaymentState = "SUBMITTED" | "PENDING" | "COMPLETED" | "FAILED";
-type PaymentResult = { state: PaymentState; txHash: string | null; paymentId: string | null; reason?: string | null; httpStatus?: number };
+export type PaymentResult = { state: PaymentState; txHash: string | null; paymentId: string | null; backend: SettlementBackend; evidence: SettlementEvidence | null; reason?: string | null; httpStatus?: number };
 
 export function paymentMatchesQuote(p: PaymentInput, quote: QuoteCore, intent: IntentCore, recovering = false): string | null {
   const a = p?.authorization;
@@ -45,66 +49,78 @@ export function paymentMatchesQuote(p: PaymentInput, quote: QuoteCore, intent: I
   return null;
 }
 
-// Only the recovery outbox holds buyer signatures, encrypted at rest. A deterministic, domain-separated seller
-// signature derives its storage key; retaining the original seller key is required to recover its old payments.
+// Only the recovery outbox holds buyer signatures (and the relayer's signed transactions), encrypted at rest. A deterministic,
+// domain-separated seller signature derives its storage key; retaining the original seller key is required to recover old payments.
 async function recoveryKey() {
   if (!cfg.merchant?.signMessage) throw new Error("merchant cannot derive the payment recovery storage key");
   const signature = await cfg.merchant.signMessage({ message: `ArcPreflight payment recovery storage v1\n${cfg.caip2}\n${cfg.merchant.address.toLowerCase()}` });
   return createHash("sha256").update(signature).digest();
 }
-async function sealBody(body: SettleBody): Promise<string> {
+export async function sealJson(obj: unknown): Promise<string> {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", await recoveryKey(), iv);
-  const data = Buffer.concat([cipher.update(JSON.stringify(body), "utf8"), cipher.final()]);
+  const data = Buffer.concat([cipher.update(JSON.stringify(obj), "utf8"), cipher.final()]);
   return JSON.stringify({ version: 1, iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64"), data: data.toString("base64") });
 }
-async function openBody(encrypted: string): Promise<SettleBody> {
+export async function openJson(encrypted: string): Promise<any> {
   const envelope = JSON.parse(encrypted);
   if (envelope.version !== 1) throw new Error("unsupported payment recovery payload version");
   const decipher = createDecipheriv("aes-256-gcm", await recoveryKey(), Buffer.from(envelope.iv, "base64"));
   decipher.setAuthTag(Buffer.from(envelope.tag, "base64"));
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.data, "base64")), decipher.final()]).toString("utf8"));
 }
+const openBody = (s: string) => openJson(s) as Promise<SettleBody>;
 function sameAuthorization(a: Eip3009Authorization, b: Eip3009Authorization) {
   return a.from.toLowerCase() === b.from.toLowerCase() && a.to.toLowerCase() === b.to.toLowerCase() && a.nonce.toLowerCase() === b.nonce.toLowerCase()
     && a.value === b.value && a.validAfter === b.validAfter && a.validBefore === b.validBefore;
 }
-const outcome = (p: any): PaymentResult => ({ state: p.state, txHash: p.tx_hash ?? null, paymentId: p.facilitator_payment_id ?? null });
+const backendOf = (p: any): SettlementBackend => (p?.backend === "relay" ? "relay" : "circle");
+const outcome = (p: any): PaymentResult => ({ state: p.state, txHash: p.tx_hash ?? null, paymentId: p.facilitator_payment_id ?? null, backend: backendOf(p),
+  evidence: p.settlement_evidence_json ? JSON.parse(p.settlement_evidence_json) : null });
 
-/** Resume the persisted payment, never minting a replacement identifier or authorization. The SQLite lease guards
- * concurrent POST/GET callers and expires after a crashed process; Facilitator HTTP calls are bounded to 15 seconds. */
-export async function reconcilePayment(db: Db, requestId: string): Promise<PaymentResult | null> {
+// Single-sender rule: after a restart, earlier payments are reconciled BEFORE any new relay transaction is signed. The server calls
+// beginSettlementResume() before listening and resumeSettlements() right after; until that completes, new authorizations are refused
+// (503), existing ones are still recoverable. Tests never call beginSettlementResume(), so they run as "resumed".
+let settlementResumeState: "not-started" | "resuming" | "done" = "not-started";
+export const beginSettlementResume = () => { settlementResumeState = "resuming"; };
+export const settlementResumed = () => settlementResumeState !== "resuming";
+
+let relayerInstance: Relayer | null = null;
+export function getRelayer(): Relayer {
+  if (!cfg.merchant) throw new Error("merchant payTo key not configured");
+  return (relayerInstance ??= new Relayer({ net: cfg.net, chainId: cfg.chainId, usdc: cfg.usdc as Hex, account: cfg.merchant, rpc: relayRpcFromClient(client), ...cfg.relay, seal: sealJson, open: openJson }));
+}
+/** For /health: whether new fee settlements are accepted. Never throws. */
+export async function settlementStatus(): Promise<{ backend: "relay"; relayer: string | null; paused: boolean; resumed: boolean; balanceNativeAtomic: string | null; floorNativeAtomic: string; error?: string }> {
+  const floor = cfg.relay.floorNativeAtomic.toString(); const resumed = settlementResumed();
+  if (!cfg.merchant) return { backend: "relay", relayer: null, paused: true, resumed, balanceNativeAtomic: null, floorNativeAtomic: floor, error: "merchant key not configured" };
+  try { const s = await getRelayer().paused(); return { backend: "relay", relayer: cfg.merchant.address, paused: s.paused || !resumed, resumed, balanceNativeAtomic: s.balanceNativeAtomic.toString(), floorNativeAtomic: floor, ...(resumed ? {} : { error: "start-up reconciliation of earlier payments in progress" }) }; }
+  catch (e: any) { return { backend: "relay", relayer: cfg.merchant.address, paused: true, resumed, balanceNativeAtomic: null, floorNativeAtomic: floor, error: String(e?.message ?? e).slice(0, 120) }; }
+}
+
+/** Resume the persisted payment, never minting a replacement identifier or authorization. The SQLite lease guards concurrent
+ *  POST/GET callers and expires after a crashed process. Each row keeps the backend it was first settled with. */
+export type SendOpts = { allowSend: boolean };
+export async function reconcilePayment(db: Db, requestId: string, opts: SendOpts = { allowSend: true }): Promise<PaymentResult | null> {
   if (!cfg.merchant) throw new Error("merchant payTo key not configured");
   let p = row(db, "SELECT * FROM payments WHERE request_id = ?", requestId);
   if (!p) return null;
   if (p.state === "COMPLETED" || p.state === "FAILED") return outcome(p);
   const owner = randomUUID();
+  const leaseMs = backendOf(p) === "relay" ? 90_000 : 30_000; // a relay may wait for a receipt and scan logs
   const claimed = run(db, "UPDATE payments SET settle_lease_owner = ?, settle_lease_until = ? WHERE request_id = ? AND state IN ('SUBMITTED','PENDING') AND (settle_lease_until IS NULL OR settle_lease_until <= ?)",
-    owner, Date.now() + 30_000, requestId, Date.now());
+    owner, Date.now() + leaseMs, requestId, Date.now());
   if (!claimed.changes) return outcome(row(db, "SELECT * FROM payments WHERE request_id = ?", requestId));
   try {
     p = row(db, "SELECT * FROM payments WHERE request_id = ?", requestId);
-    const fac = new FacilitatorClient(cfg.merchant, cfg.net);
-    if (p.facilitator_payment_id) {
-      const s = await fac.status(p.facilitator_payment_id);
-      const st = s.httpStatus === 200 ? s.json?.status : null;
-      const state = st === "completed" ? "COMPLETED" : st === "failed" ? "FAILED" : p.state;
-      run(db, "UPDATE payments SET state = ?, tx_hash = COALESCE(?, tx_hash), last_response_json = ?, updated_at = ? WHERE request_id = ? AND settle_lease_owner = ?",
-        state, s.httpStatus === 200 ? s.json?.transaction ?? null : null, JSON.stringify({ httpStatus: s.httpStatus, body: s.json ?? s.text }), now(), requestId, owner);
-      return { ...outcome(row(db, "SELECT * FROM payments WHERE request_id = ?", requestId)), httpStatus: s.httpStatus };
-    }
+    if (backendOf(p) === "circle") return await reconcileLegacyCircle(db, p, owner, opts.allowSend);
     if (!p.settle_payload_encrypted) return { ...outcome(p), reason: "original authorization unavailable; retry this request with the original payment" };
     const body = await openBody(p.settle_payload_encrypted);
     if (body.paymentRequirements.network !== cfg.caip2 || body.paymentRequirements.payTo.toLowerCase() !== cfg.merchant.address.toLowerCase()) throw new Error("payment recovery seller or network changed");
-    const res = await fac.settle(body);
-    const c = classifySettle(res);
-    // Non-200 responses and transport failures have no terminal settlement outcome.
-    const state: PaymentState = c.state === "REJECTED" ? "SUBMITTED" : c.state;
-    run(db, "UPDATE payments SET state = ?, facilitator_payment_id = COALESCE(?, facilitator_payment_id), tx_hash = COALESCE(?, tx_hash), last_response_json = ?, updated_at = ? WHERE request_id = ? AND settle_lease_owner = ?",
-      state, c.paymentId ?? null, c.transaction ?? null, JSON.stringify({ httpStatus: res.httpStatus, body: res.json ?? res.text }), now(), requestId, owner);
-    return { ...outcome(row(db, "SELECT * FROM payments WHERE request_id = ?", requestId)), reason: c.reason ?? null, httpStatus: res.httpStatus };
+    const r = await getRelayer().settle(db, requestId, { signature: body.paymentPayload.payload.signature, authorization: body.paymentPayload.payload.authorization }, opts);
+    return { ...outcome(row(db, "SELECT * FROM payments WHERE request_id = ?", requestId)), reason: r.reason ?? null };
   } catch (e: any) {
-    // Preserve the original outbox on a timeout. Recovery will replay its identifier, even after quote/report expiry.
+    // Transport or RPC failures have no terminal outcome: the outbox is preserved and recovery replays it later.
     run(db, "UPDATE payments SET last_response_json = ?, updated_at = ? WHERE request_id = ? AND settle_lease_owner = ?", JSON.stringify({ error: String(e?.message ?? e).slice(0, 200) }), now(), requestId, owner);
     return { ...outcome(row(db, "SELECT * FROM payments WHERE request_id = ?", requestId)), reason: "settlement outcome not yet confirmed; recover the original request" };
   } finally {
@@ -112,19 +128,50 @@ export async function reconcilePayment(db: Db, requestId: string): Promise<Payme
   }
 }
 
-/** Bind one authorization to one immutable quote before the first remote submission. */
-export async function settleForRequest(db: Db, requestId: string, quote: QuoteCore, intent: IntentCore, p: PaymentInput, resourceUrl: string): Promise<PaymentResult | { conflict: string }> {
+/** Legacy rows only: payments first submitted to the hosted facilitator keep its status / replay path. No new row is created here. */
+async function reconcileLegacyCircle(db: Db, p: any, owner: string, allowSend = true): Promise<PaymentResult> {
+  const fac = new FacilitatorClient(cfg.merchant!, cfg.net);
+  if (!allowSend && !p.facilitator_payment_id) return { ...outcome(p), reason: "legacy payment awaiting the settlement worker (read routes never submit)" };
+  if (p.facilitator_payment_id) {
+    const s = await fac.status(p.facilitator_payment_id);
+    const st = s.httpStatus === 200 ? s.json?.status : null;
+    const state = st === "completed" ? "COMPLETED" : st === "failed" ? "FAILED" : p.state;
+    run(db, "UPDATE payments SET state = ?, tx_hash = COALESCE(?, tx_hash), last_response_json = ?, updated_at = ? WHERE request_id = ? AND settle_lease_owner = ?",
+      state, s.httpStatus === 200 ? s.json?.transaction ?? null : null, JSON.stringify({ httpStatus: s.httpStatus, body: s.json ?? s.text }), now(), p.request_id, owner);
+    return { ...outcome(row(db, "SELECT * FROM payments WHERE request_id = ?", p.request_id)), httpStatus: s.httpStatus };
+  }
+  if (!p.settle_payload_encrypted) return { ...outcome(p), reason: "original authorization unavailable; retry this request with the original payment" };
+  const body = await openBody(p.settle_payload_encrypted);
+  if (body.paymentRequirements.network !== cfg.caip2 || body.paymentRequirements.payTo.toLowerCase() !== cfg.merchant!.address.toLowerCase()) throw new Error("payment recovery seller or network changed");
+  const res = await fac.settle(body);
+  const c = classifySettle(res);
+  const state: PaymentState = c.state === "REJECTED" ? "SUBMITTED" : c.state; // non-200 responses have no terminal outcome
+  run(db, "UPDATE payments SET state = ?, facilitator_payment_id = COALESCE(?, facilitator_payment_id), tx_hash = COALESCE(?, tx_hash), last_response_json = ?, updated_at = ? WHERE request_id = ? AND settle_lease_owner = ?",
+    state, c.paymentId ?? null, c.transaction ?? null, JSON.stringify({ httpStatus: res.httpStatus, body: res.json ?? res.text }), now(), p.request_id, owner);
+  return { ...outcome(row(db, "SELECT * FROM payments WHERE request_id = ?", p.request_id)), reason: c.reason ?? null, httpStatus: res.httpStatus };
+}
+
+/** Bind one authorization to one immutable quote before the first settlement attempt. New rows always use the relay backend. */
+export async function settleForRequest(db: Db, requestId: string, quote: QuoteCore, intent: IntentCore, p: PaymentInput, resourceUrl: string): Promise<PaymentResult | { conflict: string } | { paused: string }> {
   if (!cfg.merchant) throw new Error("merchant payTo key not configured");
-  const mismatch = paymentMatchesQuote(p, quote, intent, !!row(db, "SELECT request_id FROM payments WHERE request_id = ?", requestId));
+  const existingRow = row(db, "SELECT request_id FROM payments WHERE request_id = ?", requestId);
+  const mismatch = paymentMatchesQuote(p, quote, intent, !!existingRow);
   if (mismatch) return { conflict: mismatch };
-  if (!row(db, "SELECT request_id FROM payments WHERE request_id = ?", requestId) && new Date(quote.expiresAt).getTime() <= Date.now()) return { conflict: "the quoted payment has expired before its first submission" };
+  if (!existingRow && new Date(quote.expiresAt).getTime() <= Date.now()) return { conflict: "the quoted payment has expired before its first submission" };
+  if (!existingRow) {
+    // Low balance or start-up stops NEW quotes/broadcasts only: nothing is stored for this request, the buyer retries later.
+    // Previously accepted authorizations keep their durable record and continue through reconciliation regardless.
+    const status = await settlementStatus();
+    if (status.paused) return { paused: status.error ? `settlement unavailable: ${status.error}` : "settlement paused: relayer balance below floor" };
+  }
   const pid = paymentIdentifier(requestId);
   const body = buildSettleBody({ net: cfg.net, resource: { url: resourceUrl, description: "ArcPreflight supported-intent check", mimeType: "application/json" },
     payTo: quote.payTo as Hex, amountTokenAtomic: quote.amountTokenAtomic, signature: p.signature, authorization: p.authorization, paymentId: pid });
-  const encrypted = await sealBody(body);
+  const encrypted = await sealJson(body);
+  const createdBlock = await client.getBlockNumber?.().then((b) => Math.max(Number(b) - 2, 0)).catch(() => null) ?? null; // bounds later log scans
   try {
-    run(db, "INSERT OR IGNORE INTO payments (request_id, payment_identifier, network, asset, payer, auth_nonce, state, created_at, updated_at, settle_payload_encrypted, quote_digest, report_digest) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM quotes WHERE request_id = ? AND quote_digest != ?)",
-      requestId, pid, quote.network, quote.asset.toLowerCase(), p.authorization.from.toLowerCase(), p.authorization.nonce.toLowerCase(), "SUBMITTED", now(), now(), encrypted, quoteDigest(quote), quote.reportDigest, requestId, quoteDigest(quote));
+    run(db, "INSERT OR IGNORE INTO payments (request_id, payment_identifier, network, asset, payer, auth_nonce, state, created_at, updated_at, settle_payload_encrypted, quote_digest, report_digest, backend, created_block) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM quotes WHERE request_id = ? AND quote_digest != ?)",
+      requestId, pid, quote.network, quote.asset.toLowerCase(), p.authorization.from.toLowerCase(), p.authorization.nonce.toLowerCase(), "SUBMITTED", now(), now(), encrypted, quoteDigest(quote), quote.reportDigest, "relay", createdBlock, requestId, quoteDigest(quote));
   } catch (e: any) {
     return { conflict: `payment binding could not be persisted: ${String(e?.message ?? e)}` };
   }
@@ -144,6 +191,21 @@ export async function settleForRequest(db: Db, requestId: string, quote: QuoteCo
   return (await reconcilePayment(db, requestId))!;
 }
 
-export async function reconcilePending(db: Db, requestId: string) {
-  return (await reconcilePayment(db, requestId))?.state ?? null;
+export async function reconcilePending(db: Db, requestId: string, opts: SendOpts = { allowSend: true }) {
+  return (await reconcilePayment(db, requestId, opts))?.state ?? null;
+}
+
+/** The settlement side of the recovery worker: re-examine every unresolved payment with sending allowed. Sequential, best effort. */
+export async function reconcileOpenPayments(db: Db, log: (m: string) => void = () => {}, minAgeMs = 0) {
+  const cutoff = new Date(Date.now() - minAgeMs).toISOString(); // the worker skips rows a POST may still be settling; start-up resume (minAgeMs 0) takes everything
+  const open = rows(db, "SELECT request_id, backend, state FROM payments WHERE state IN ('SUBMITTED','PENDING') AND created_at <= ? ORDER BY created_at", cutoff);
+  for (const p of open) {
+    try { const r = await reconcilePayment(db, p.request_id, { allowSend: true }); log(`reconcile ${p.request_id} (${backendOf(p)}): ${p.state} -> ${r?.state}${r?.reason ? ` (${r.reason})` : ""}`); }
+    catch (e: any) { log(`reconcile ${p.request_id}: ${String(e?.message ?? e).slice(0, 120)}`); }
+  }
+  return open.length;
+}
+/** At start-up: the same pass, after which new authorizations are accepted again (a crash may have happened between signing and broadcast). */
+export async function resumeSettlements(db: Db, log: (m: string) => void = () => {}) {
+  try { return await reconcileOpenPayments(db, log); } finally { settlementResumeState = "done"; }
 }

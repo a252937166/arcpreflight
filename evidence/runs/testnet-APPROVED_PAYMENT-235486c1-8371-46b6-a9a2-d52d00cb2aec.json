@@ -1,0 +1,637 @@
+{
+  "fixture": "APPROVED_PAYMENT",
+  "network": "testnet",
+  "chainId": 5042002,
+  "attemptId": "235486c1-8371-46b6-a9a2-d52d00cb2aec",
+  "orderId": "0xb4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba",
+  "merchant": "0xA8eB51EF994567B84215981E8d1Fe17cb8e42252",
+  "intent": {
+    "schemaVersion": "1.0",
+    "clientRequestId": "demo-APPROVED_PAYMENT-235486c1",
+    "chainId": 5042002,
+    "walletMode": "EOA_DIRECT_NON_DELEGATED",
+    "from": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+    "operation": "CALL",
+    "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+    "data": "0x8609cad1b4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba",
+    "valueNativeAtomic": "50000000000000000",
+    "businessExpectation": {
+      "sourceId": "order:0xb4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba",
+      "sourceDigest": "0x69ac0620b688f2eff9b374dceff9d1eac7400c4f16827a72f7ad90c0e6b10a76",
+      "action": "MERCHANT_PAY",
+      "recipient": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+      "asset": "ARC_NATIVE_USDC",
+      "amountNativeAtomic": "50000000000000000",
+      "orderId": "0xb4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba"
+    },
+    "baselineDigest": "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e",
+    "policyDigest": "0x3ccf98c2c2b41ec496c51ebc14f384561131c2774fc9fa5aa7af714b5bc1fc39",
+    "expiresAt": "2026-10-08T07:10:24.959Z"
+  },
+  "intentDigest": "0x4c7e70e6979e08bafa92d7e51553619eac0e702d7c046d927eb8b7a6ddf52bc8",
+  "policy": {
+    "schemaVersion": "1.0",
+    "ownerPrincipal": "demo-runner",
+    "allowedSenders": [
+      "0xc6182d363d7c3da6db491f703c430dc91d0e2ace"
+    ],
+    "allowedTargets": [
+      "0xa8eb51ef994567b84215981e8d1fe17cb8e42252"
+    ],
+    "allowedSelectors": [
+      "0x8609cad1"
+    ],
+    "maxNativePaymentAtomic": "50000000000000000",
+    "maxTokenPaymentAtomic": "0",
+    "maxServiceFeeTokenAtomic": "10000",
+    "maxGasCostNativeAtomic": "2000000000000000",
+    "maxReportAgeSeconds": 60,
+    "maxFinalValidationAgeSeconds": 5,
+    "requiredSignalIds": [
+      "PROXY_TEMPLATE_VERIFIED",
+      "SUPPORTED_STATE_ORDER_PAYABLE",
+      "CALL_SIMULATION"
+    ],
+    "unknownAction": "REVIEW_REQUIRED",
+    "implementationChangeAction": "REVIEW_REQUIRED",
+    "allowedTransactionTypes": [
+      2
+    ],
+    "allowAuthorizationList": false
+  },
+  "policyDigest": "0x3ccf98c2c2b41ec496c51ebc14f384561131c2774fc9fa5aa7af714b5bc1fc39",
+  "requestId": "9f47ac0d-48a6-4903-b3cb-24a75c3ba460",
+  "serviceFeeTx": "0x237c08cd51e1a49e2d70c9bb9026e9fe0b2595567ee41012bdf00252aa146d39",
+  "report": {
+    "schemaVersion": "1.0",
+    "mode": "SUPPORTED_INTENT",
+    "intentDigest": "0x4c7e70e6979e08bafa92d7e51553619eac0e702d7c046d927eb8b7a6ddf52bc8",
+    "decisionEligible": true,
+    "observation": {
+      "chainId": 5042002,
+      "blockNumber": "66097085",
+      "blockHash": "0x7117a865923ec4a0cc601c82b2089120f4d7dd52def39dbaf9536693e50d8b2b",
+      "observedAt": "2026-10-08T07:00:44.533Z",
+      "providerId": "https://rpc.testnet.arc.io",
+      "pinningMode": "BLOCK_HASH"
+    },
+    "methodologyDigest": "0xa573e891d563351ae90ef8cb960d5db61a86c95738ea02d699465da3727cd642",
+    "adapterManifestDigests": [
+      "0x731bdb9346a7d2b7874fba66dd6952d38ba99b37db1e47b02a2597a2669abdd6"
+    ],
+    "baselineDigest": "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e",
+    "baselineResult": "MATCH",
+    "dependencies": [
+      {
+        "address": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+        "role": "TARGET",
+        "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
+        "adapterDigest": "0x731bdb9346a7d2b7874fba66dd6952d38ba99b37db1e47b02a2597a2669abdd6",
+        "resolution": "VERIFIED_TEMPLATE"
+      },
+      {
+        "address": "0x342ab0e9f7951e4112e698ff69ac00ac18c009f9",
+        "role": "IMPLEMENTATION",
+        "codeHash": "0x32e3f234bcc25a188c44298549f35cd029d00243b40e4dc5894b1c262248b8ca",
+        "adapterDigest": "0x731bdb9346a7d2b7874fba66dd6952d38ba99b37db1e47b02a2597a2669abdd6",
+        "resolution": "VERIFIED_TEMPLATE"
+      }
+    ],
+    "signals": [
+      {
+        "id": "PROXY_TEMPLATE_VERIFIED",
+        "state": "observed",
+        "basis": "chain_read",
+        "scope": "proxy runtime code hash matches oz-erc1967proxy-uups@5.4.0",
+        "evidenceDigests": [
+          "0x1dab4986ef2671722afa10372a546cf914e7ca3b8c26459b9d12a133fd4930dd"
+        ],
+        "limitations": [
+          "template match covers the proxy contract only; implementation semantics are a separate question"
+        ],
+        "sourceIds": [
+          "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.4.0/contracts/proxy/ERC1967/ERC1967Proxy.sol",
+          "packages/contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json (solc 0.8.28, optimizer 200, evm cancun)"
+        ]
+      },
+      {
+        "id": "UUPS_PROXIABLE_UUID",
+        "state": "observed",
+        "basis": "simulation",
+        "scope": "implementation.proxiableUUID() == ERC-1967 implementation slot",
+        "evidenceDigests": [
+          "0x8e3b5bf86ba3ed8301e3419a602922240f8772a8b291653d5d88d27e157cb215"
+        ],
+        "limitations": [
+          "proxiableUUID only shows the implementation declares UUPS; upgrade authority is a separate check"
+        ],
+        "sourceIds": [
+          "eip-1822",
+          "eip-1967"
+        ]
+      },
+      {
+        "id": "SUPPORTED_STATE_PAUSED",
+        "state": "not_observed",
+        "basis": "chain_read",
+        "scope": "DemoMerchant.paused() at pinned block",
+        "evidenceDigests": [
+          "0x743c0ba08a1d2b5f2ee9abc8c07f0d7368a86346ebd4a48263681a8ae6fae75d"
+        ],
+        "limitations": [],
+        "sourceIds": [
+          "demo-merchant-v1-template"
+        ]
+      },
+      {
+        "id": "SUPPORTED_STATE_ORDER_PAYABLE",
+        "state": "observed",
+        "basis": "chain_read",
+        "scope": "DemoMerchant.getOrder(orderId): exists, unpaid, payer==sender, amount==approved",
+        "evidenceDigests": [
+          "0x1ed1eaee059ccf4f6757d79906c16430a94c5977c5f6d89ea75e1ee5e9f4e542"
+        ],
+        "limitations": [],
+        "sourceIds": [
+          "demo-merchant-v1-template"
+        ]
+      },
+      {
+        "id": "CALL_SIMULATION",
+        "state": "observed",
+        "basis": "simulation",
+        "scope": "eth_call with the exact sender, target, calldata and value at the pinned block",
+        "evidenceDigests": [
+          "0x1b47b70167fa3358c1d60b89c72f14556a19ba0104ed35115d67c23fd691d81e"
+        ],
+        "limitations": [
+          "simulation success is not a guarantee of future inclusion or success"
+        ],
+        "sourceIds": [
+          "https://ethereum.org/developers/docs/apis/json-rpc/"
+        ]
+      },
+      {
+        "id": "ARC_USDC_TWO_INTERFACES",
+        "state": "observed",
+        "basis": "network_advisory",
+        "scope": "network rule: native USDC (18 dec) and ERC-20 USDC (6 dec) share one balance; amounts must be converted at the boundary",
+        "evidenceDigests": [],
+        "limitations": [
+          "network rule only; see AMOUNT_SEMANTICS for the target-specific check"
+        ],
+        "sourceIds": [
+          "https://docs.arc.io/arc/references/evm-differences",
+          "https://www.arc.io/blog/arc-compatibility-guide-for-existing-evm-apps"
+        ]
+      },
+      {
+        "id": "ARC_VALUE_TRANSFER_RULES",
+        "state": "observed",
+        "basis": "network_advisory",
+        "scope": "network rule: native value transfers to the zero address, to/from blocklisted addresses, burns and some SELFDESTRUCT paths revert even with sufficient balance; blocklist reverts still consume gas",
+        "evidenceDigests": [],
+        "limitations": [
+          "does not assert that this call triggers any of these rules"
+        ],
+        "sourceIds": [
+          "https://docs.arc.io/arc/references/evm-differences"
+        ]
+      },
+      {
+        "id": "ARC_PREVRANDAO_ZERO",
+        "state": "observed",
+        "basis": "network_advisory",
+        "scope": "network rule: block.prevrandao is always 0 on Arc; onchain randomness must come from an oracle/VRF",
+        "evidenceDigests": [],
+        "limitations": [
+          "does not assert the target reads prevrandao"
+        ],
+        "sourceIds": [
+          "https://docs.arc.io/arc/references/evm-differences"
+        ]
+      },
+      {
+        "id": "ARC_SELFDESTRUCT_RULES",
+        "state": "observed",
+        "basis": "network_advisory",
+        "scope": "network rule: SELFDESTRUCT follows EIP-6780 plus Arc value rules and moves the contract's native USDC to the beneficiary; sends to a destructed account revert",
+        "evidenceDigests": [],
+        "limitations": [
+          "opcode presence is not checked in P0; this is a rule reminder"
+        ],
+        "sourceIds": [
+          "https://docs.arc.io/arc/references/evm-differences",
+          "https://eips.ethereum.org/EIPS/eip-6780"
+        ]
+      },
+      {
+        "id": "ARC_TIMESTAMP_NON_STRICT",
+        "state": "observed",
+        "basis": "network_advisory",
+        "scope": "network rule: sub-second blocks may share a timestamp; order by block number, not timestamp",
+        "evidenceDigests": [],
+        "limitations": [],
+        "sourceIds": [
+          "https://docs.arc.io/arc/references/evm-differences"
+        ]
+      },
+      {
+        "id": "ARC_MIN_BASE_FEE",
+        "state": "observed",
+        "basis": "network_advisory",
+        "scope": "network rule: transactions with maxFeePerGas below 20 gwei are silently dropped; fee is paid in USDC",
+        "evidenceDigests": [],
+        "limitations": [
+          "the floor is not a sufficiency guarantee; final validation re-estimates fees"
+        ],
+        "sourceIds": [
+          "https://docs.arc.io/arc/references/gas-and-fees"
+        ]
+      }
+    ],
+    "rawEvidenceDigests": [
+      "0x1dab4986ef2671722afa10372a546cf914e7ca3b8c26459b9d12a133fd4930dd",
+      "0xdb896541f9743cdb5d225ba4697201484a4a4876ba546e047b8b45f169aa2b6d",
+      "0x9325208bcbb8232fd50b8bfe1a80fcb4bdc00a0273aaa033d5a10dccb9d5410d",
+      "0xce44aa997fe543c0edd86ff28291473b3e17f23698ee6bc51e5bda2a4225fcde",
+      "0x74bf76ab57c52fb6b2afb99d06138780f04d9f71e8e53abcf9bc1a9ca4ee1804",
+      "0x5a1a7d75236ac3b46a4624e8a0185c4d22fb1f1089285ace5eacf136e995a0bd",
+      "0x23d61bc0882f2de82d2e1cbea1a25c9d13f94ffaf3c36b9208cfcc1b14968046",
+      "0x8e3b5bf86ba3ed8301e3419a602922240f8772a8b291653d5d88d27e157cb215",
+      "0x743c0ba08a1d2b5f2ee9abc8c07f0d7368a86346ebd4a48263681a8ae6fae75d",
+      "0x1ed1eaee059ccf4f6757d79906c16430a94c5977c5f6d89ea75e1ee5e9f4e542",
+      "0x1b47b70167fa3358c1d60b89c72f14556a19ba0104ed35115d67c23fd691d81e"
+    ],
+    "exclusions": [
+      "external oracles, delegatecall targets beyond two levels, and full storage are not covered"
+    ],
+    "expiresAt": "2026-10-08T07:01:44.533Z"
+  },
+  "reportDigest": "0xe1ab49d69ae6ee8ae477d23247105969081ff56a3a5b181fd52b98c249dff5c6",
+  "simulation": {
+    "ok": true,
+    "error": null
+  },
+  "decision": {
+    "schemaVersion": "1.0",
+    "executionAttemptId": "235486c1-8371-46b6-a9a2-d52d00cb2aec",
+    "intentDigest": "0x4c7e70e6979e08bafa92d7e51553619eac0e702d7c046d927eb8b7a6ddf52bc8",
+    "reportDigest": "0xe1ab49d69ae6ee8ae477d23247105969081ff56a3a5b181fd52b98c249dff5c6",
+    "baselineDigest": "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e",
+    "policyDigest": "0x3ccf98c2c2b41ec496c51ebc14f384561131c2774fc9fa5aa7af714b5bc1fc39",
+    "decision": "NO_POLICY_VIOLATION",
+    "reasons": [],
+    "decidedAt": "2026-10-08T07:00:53.533Z"
+  },
+  "decisionDigest": "0x79bcc21c19adfce19112c4cfc02cc9acd9f0fc2b220f460494c26811d3b03e55",
+  "finalValidation": {
+    "schemaVersion": "1.0",
+    "executionAttemptId": "235486c1-8371-46b6-a9a2-d52d00cb2aec",
+    "intentDigest": "0x4c7e70e6979e08bafa92d7e51553619eac0e702d7c046d927eb8b7a6ddf52bc8",
+    "reportDigest": "0xe1ab49d69ae6ee8ae477d23247105969081ff56a3a5b181fd52b98c249dff5c6",
+    "decisionDigest": "0x79bcc21c19adfce19112c4cfc02cc9acd9f0fc2b220f460494c26811d3b03e55",
+    "baselineDigest": "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e",
+    "policyDigest": "0x3ccf98c2c2b41ec496c51ebc14f384561131c2774fc9fa5aa7af714b5bc1fc39",
+    "snapshot": {
+      "chainId": 5042002,
+      "blockNumber": "66097119",
+      "blockHash": "0x7605f7f00597e8b777e3117cfbf393858fd2f617079e347adcfa13a459a003c2",
+      "observedAt": "2026-10-08T07:01:02.421Z",
+      "providerId": "rpc.testnet",
+      "pinningMode": "BLOCK_HASH"
+    },
+    "transactionPlan": {
+      "chainId": 5042002,
+      "from": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+      "type": 2,
+      "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+      "data": "0x8609cad1b4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba",
+      "valueNativeAtomic": "50000000000000000",
+      "nonce": "14",
+      "gasLimit": "40723",
+      "maxFeePerGasNativeAtomic": "29000000000",
+      "maxPriorityFeePerGasNativeAtomic": "5000000000",
+      "accessList": [],
+      "authorizationList": []
+    },
+    "transactionPlanDigest": "0x7e3bd4e1d4fd2166b54820be9798d532a096d1e33b47def73fc77bf0fbe4560f",
+    "walletEvidenceDigest": "0x8ff02ba148a185f66e89e4342d5435d41687c941b3dc9566cbfa769772663bea",
+    "criticalStateEvidenceDigests": [
+      "0xb67b31c53c38399dc2e4bc5fa7f8aafee7c1ecf3656cf8b476289cfa4e030c00",
+      "0x91ddf79e40536b867bb93651740ac16ad20b536e5f11e542d2da53bf612a3a2d"
+    ],
+    "simulationEvidenceDigest": "0xe905cf8b762931cad2e999c07f9ea6db33decb1c3886f22281aaef15c874e36a",
+    "balanceNativeAtomic": "18905873500000000000",
+    "reservedGasNativeAtomic": "1180967000000000",
+    "reservedOtherNativeAtomic": "0",
+    "feeEvidenceDigest": "0xdcf9e2b5b0f50c700252b78e5e3b21a98d600c448449a21b7220898b9c4d5a61",
+    "result": "PASS",
+    "reasons": [],
+    "validatedAt": "2026-10-08T07:01:05.191Z",
+    "expiresAt": "2026-10-08T07:01:10.191Z"
+  },
+  "plan": {
+    "chainId": 5042002,
+    "from": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+    "type": 2,
+    "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+    "data": "0x8609cad1b4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba",
+    "valueNativeAtomic": "50000000000000000",
+    "nonce": "14",
+    "gasLimit": "40723",
+    "maxFeePerGasNativeAtomic": "29000000000",
+    "maxPriorityFeePerGasNativeAtomic": "5000000000",
+    "accessList": [],
+    "authorizationList": []
+  },
+  "execution": {
+    "schemaVersion": "1.0",
+    "executionAttemptId": "235486c1-8371-46b6-a9a2-d52d00cb2aec",
+    "intentDigest": "0x4c7e70e6979e08bafa92d7e51553619eac0e702d7c046d927eb8b7a6ddf52bc8",
+    "reportDigest": "0xe1ab49d69ae6ee8ae477d23247105969081ff56a3a5b181fd52b98c249dff5c6",
+    "decisionDigest": "0x79bcc21c19adfce19112c4cfc02cc9acd9f0fc2b220f460494c26811d3b03e55",
+    "baselineDigest": "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e",
+    "policyDigest": "0x3ccf98c2c2b41ec496c51ebc14f384561131c2774fc9fa5aa7af714b5bc1fc39",
+    "finalValidationDigest": "0x1b3340446b175f7ef76c78374b10cc0653555ab27c0b50655d42ed4057e22ad7",
+    "transactionPlanDigest": "0x7e3bd4e1d4fd2166b54820be9798d532a096d1e33b47def73fc77bf0fbe4560f",
+    "signedTransactionHash": "0xf97ad931c384a7c87e7e70e939bdea98e70d645d253e92a3188e245f17b3fd28",
+    "businessTxHash": "0xf97ad931c384a7c87e7e70e939bdea98e70d645d253e92a3188e245f17b3fd28",
+    "chainStatus": "CONFIRMED",
+    "businessStatus": "SUCCESS",
+    "postconditionEvidenceDigests": [
+      "0x65712f5112e0da7b762e621bb96c4bd4e9176404b1b884a5a7740460018173fc"
+    ],
+    "labels": [
+      "LIVE_REQUEST",
+      "DEMO_ON_MAINNET"
+    ],
+    "recordedAt": "2026-10-08T07:01:06.438Z"
+  },
+  "executionDigest": "0xea2771d0b8b2edf26b6fb4af4f65ce15f747ece2e3533b5f9b9cb184d2dad359",
+  "postcondition": {
+    "orderId": "0xb4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba",
+    "paid": true,
+    "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+    "amountNativeAtomic": "50000000000000000",
+    "block": "66097139",
+    "receiptStatus": "success"
+  },
+  "steps": [
+    {
+      "step": "createOrder",
+      "atMs": 4597,
+      "tx": "0xd1e7d82d2578c5c64c78b8a6bb7a8bb6750687535e1f790374b883dbc95e00e7",
+      "orderId": "0xb4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba",
+      "block": "66097056",
+      "who": "order-creator",
+      "why": "the business expectation must come from an independently approved order, never from the calldata"
+    },
+    {
+      "step": "intent",
+      "atMs": 4607,
+      "intentDigest": "0x4c7e70e6979e08bafa92d7e51553619eac0e702d7c046d927eb8b7a6ddf52bc8",
+      "valueNativeAtomic": "50000000000000000",
+      "approvedAmountNativeAtomic": "50000000000000000",
+      "who": "demo-runner",
+      "why": "exact candidate call bound to the approved order"
+    },
+    {
+      "step": "quote",
+      "atMs": 27513,
+      "http": 402,
+      "requestId": "9f47ac0d-48a6-4903-b3cb-24a75c3ba460",
+      "priceTokenAtomic": "10000",
+      "payTo": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+      "pinnedBlock": "66097085",
+      "expiresAt": "2026-10-08T07:01:17.863Z",
+      "why": "the report is prepared and pinned before any charge; the quote binds intent, report, price and payTo"
+    },
+    {
+      "step": "signServiceFee",
+      "atMs": 27521,
+      "eip3009": {
+        "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+        "value": "10000",
+        "nonce": "0xfbcd4ddf01893bcb5053e31eda64f5f04091a49e6adbb062499357a46f9f2a71"
+      },
+      "who": "demo-runner",
+      "why": "one authorization = one quote; the service fee (0.01 USDC, 6-dec) is separate from the business payment"
+    },
+    {
+      "step": "reportDelivered",
+      "atMs": 33170,
+      "serviceFeeTx": "0x237c08cd51e1a49e2d70c9bb9026e9fe0b2595567ee41012bdf00252aa146d39",
+      "reportDigest": "0xe1ab49d69ae6ee8ae477d23247105969081ff56a3a5b181fd52b98c249dff5c6",
+      "pinnedBlock": "66097085",
+      "baselineResult": "MATCH",
+      "decisionEligible": true,
+      "signals": [
+        "PROXY_TEMPLATE_VERIFIED=observed",
+        "UUPS_PROXIABLE_UUID=observed",
+        "SUPPORTED_STATE_PAUSED=not_observed",
+        "SUPPORTED_STATE_ORDER_PAYABLE=observed",
+        "CALL_SIMULATION=observed"
+      ],
+      "why": "service fee settled on Arc by ArcPreflight's relayer (the merchant account submitted my EIP-3009 authorization and paid the gas in USDC); the runner re-hashes the report and checks it is bound to its own intent"
+    },
+    {
+      "step": "decision",
+      "atMs": 33179,
+      "decision": "NO_POLICY_VIOLATION",
+      "checks": [
+        "INTENT_BINDING:PASS",
+        "POLICY_ALLOWLISTS:PASS",
+        "BASELINE_STATUS:PASS",
+        "EXECUTION_IDENTITY:PASS",
+        "CALL_SIMULATION:PASS",
+        "EVIDENCE_FRESHNESS:PASS"
+      ],
+      "reasons": [],
+      "who": "demo-runner (deterministic policy, no LLM)",
+      "why": "hard violations block; unapproved change or unknowns require review; otherwise 'no configured check fired'"
+    },
+    {
+      "step": "finalValidation",
+      "atMs": 44837,
+      "result": "PASS",
+      "reasons": [],
+      "newPinnedBlock": "66097119",
+      "feeConfirmedBlock": "66097112",
+      "balanceNativeAtomic": "18905873500000000000",
+      "gasLimit": "40723",
+      "maxFeePerGasGwei": 29,
+      "who": "demo-runner",
+      "why": "service fee changed the balance and time passed: re-read implementation, paused, order, balance, fees AND the signer account at a NEW pinned block that follows the fee confirmation, before signing"
+    },
+    {
+      "step": "signed",
+      "atMs": 44848,
+      "signedTransactionHash": "0xf97ad931c384a7c87e7e70e939bdea98e70d645d253e92a3188e245f17b3fd28",
+      "who": "demo-runner",
+      "why": "the signed raw transaction is decoded and compared field by field with the validated plan, then persisted with its context before any broadcast"
+    },
+    {
+      "step": "broadcast",
+      "atMs": 45466,
+      "businessTxHash": "0xf97ad931c384a7c87e7e70e939bdea98e70d645d253e92a3188e245f17b3fd28",
+      "accepted": true,
+      "error": null,
+      "why": "raw transaction handed to the node"
+    },
+    {
+      "step": "postcondition",
+      "atMs": 46083,
+      "orderId": "0xb4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba",
+      "paid": true,
+      "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+      "amountNativeAtomic": "50000000000000000",
+      "block": "66097139",
+      "receiptStatus": "success",
+      "why": "chain receipt success is not business success: the order itself must read as paid, by this payer, for the exact amount"
+    }
+  ],
+  "durationMs": 46084,
+  "quote": {
+    "schemaVersion": "1.0",
+    "requestId": "9f47ac0d-48a6-4903-b3cb-24a75c3ba460",
+    "buyerPrincipal": "demo-runner",
+    "payer": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+    "intentDigest": "0x4c7e70e6979e08bafa92d7e51553619eac0e702d7c046d927eb8b7a6ddf52bc8",
+    "reportDigest": "0xe1ab49d69ae6ee8ae477d23247105969081ff56a3a5b181fd52b98c249dff5c6",
+    "coverageDigest": "0xe1ab49d69ae6ee8ae477d23247105969081ff56a3a5b181fd52b98c249dff5c6",
+    "network": "eip155:5042002",
+    "asset": "0x3600000000000000000000000000000000000000",
+    "amountTokenAtomic": "10000",
+    "payTo": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+    "preparedAt": "2026-10-08T07:00:47.863Z",
+    "expiresAt": "2026-10-08T07:01:17.863Z",
+    "retentionUntil": "2026-11-07T07:00:47.863Z"
+  },
+  "quoteDigest": "0x0bd2091dbb1de4bc13a85404521d26a77469a072dc27522980c9eecbfb37da61",
+  "feeAuthorization": {
+    "from": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+    "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+    "value": "10000",
+    "validAfter": "0",
+    "validBefore": "1791446447",
+    "nonce": "0xfbcd4ddf01893bcb5053e31eda64f5f04091a49e6adbb062499357a46f9f2a71"
+  },
+  "orderCreation": {
+    "tx": "0xd1e7d82d2578c5c64c78b8a6bb7a8bb6750687535e1f790374b883dbc95e00e7",
+    "block": "66097056",
+    "from": "0xb6eef219f86ae75ffc3af9ef3cade49f89a7582b",
+    "gasUsed": "100280",
+    "effectiveGasPriceNativeAtomic": "25000000000",
+    "signer": "order-creator"
+  },
+  "feeReceipt": {
+    "from": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+    "gasUsed": "87165",
+    "effectiveGasPriceNativeAtomic": "25000000000",
+    "blockNumber": "66097112"
+  },
+  "businessReceipt": {
+    "from": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+    "gasUsed": "40352",
+    "effectiveGasPriceNativeAtomic": "25000000000",
+    "blockNumber": "66097139",
+    "status": "success"
+  },
+  "finalValidationEvidence": [
+    {
+      "evidence": {
+        "kind": "rpc",
+        "method": "eth_getStorageAt",
+        "params": [
+          "\"0xA8eB51EF994567B84215981E8d1Fe17cb8e42252\"",
+          "\"0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc\"",
+          "{\"blockHash\":\"0x7605f7f00597e8b777e3117cfbf393858fd2f617079e347adcfa13a459a003c2\"}"
+        ],
+        "result": "0x000000000000000000000000342ab0e9f7951e4112e698ff69ac00ac18c009f9",
+        "error": null,
+        "snapshot": {
+          "chainId": 5042002,
+          "blockNumber": "66097119",
+          "blockHash": "0x7605f7f00597e8b777e3117cfbf393858fd2f617079e347adcfa13a459a003c2",
+          "observedAt": "2026-10-08T07:01:02.421Z",
+          "providerId": "rpc.testnet",
+          "pinningMode": "BLOCK_HASH"
+        },
+        "capturedAt": "2026-10-08T07:01:02.732Z"
+      },
+      "digest": "0xb67b31c53c38399dc2e4bc5fa7f8aafee7c1ecf3656cf8b476289cfa4e030c00"
+    },
+    {
+      "evidence": {
+        "kind": "rpc",
+        "method": "eth_call",
+        "params": [
+          "{\"to\":\"0xA8eB51EF994567B84215981E8d1Fe17cb8e42252\",\"data\":\"0x5c975abb\",\"from\":null,\"value\":null}",
+          "{\"blockHash\":\"0x7605f7f00597e8b777e3117cfbf393858fd2f617079e347adcfa13a459a003c2\"}"
+        ],
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "error": null,
+        "snapshot": {
+          "chainId": 5042002,
+          "blockNumber": "66097119",
+          "blockHash": "0x7605f7f00597e8b777e3117cfbf393858fd2f617079e347adcfa13a459a003c2",
+          "observedAt": "2026-10-08T07:01:02.421Z",
+          "providerId": "rpc.testnet",
+          "pinningMode": "BLOCK_HASH"
+        },
+        "capturedAt": "2026-10-08T07:01:03.044Z"
+      },
+      "digest": "0x91ddf79e40536b867bb93651740ac16ad20b536e5f11e542d2da53bf612a3a2d"
+    },
+    {
+      "evidence": {
+        "kind": "rpc",
+        "method": "eth_call",
+        "params": [
+          "{\"to\":\"0xA8eB51EF994567B84215981E8d1Fe17cb8e42252\",\"data\":\"0x8609cad1b4265bf94c51e9e5a1d633883633c8396a0039415d21ae49be56f66da1f2a3ba\",\"from\":\"0xc6182d363d7c3da6db491f703c430dc91d0e2ace\",\"value\":\"50000000000000000\"}",
+          "{\"blockHash\":\"0x7605f7f00597e8b777e3117cfbf393858fd2f617079e347adcfa13a459a003c2\"}"
+        ],
+        "result": "0x",
+        "error": null,
+        "snapshot": {
+          "chainId": 5042002,
+          "blockNumber": "66097119",
+          "blockHash": "0x7605f7f00597e8b777e3117cfbf393858fd2f617079e347adcfa13a459a003c2",
+          "observedAt": "2026-10-08T07:01:02.421Z",
+          "providerId": "rpc.testnet",
+          "pinningMode": "BLOCK_HASH"
+        },
+        "capturedAt": "2026-10-08T07:01:03.348Z"
+      },
+      "digest": "0xe905cf8b762931cad2e999c07f9ea6db33decb1c3886f22281aaef15c874e36a"
+    },
+    {
+      "evidence": {
+        "kind": "rpc",
+        "method": "eth_getCode",
+        "params": [
+          "\"0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE\"",
+          "{\"blockHash\":\"0x7605f7f00597e8b777e3117cfbf393858fd2f617079e347adcfa13a459a003c2\"}"
+        ],
+        "result": null,
+        "error": null,
+        "snapshot": {
+          "chainId": 5042002,
+          "blockNumber": "66097119",
+          "blockHash": "0x7605f7f00597e8b777e3117cfbf393858fd2f617079e347adcfa13a459a003c2",
+          "observedAt": "2026-10-08T07:01:02.421Z",
+          "providerId": "rpc.testnet",
+          "pinningMode": "BLOCK_HASH"
+        },
+        "capturedAt": "2026-10-08T07:01:05.185Z"
+      },
+      "digest": "0x8ff02ba148a185f66e89e4342d5435d41687c941b3dc9566cbfa769772663bea"
+    }
+  ],
+  "approvalStatusAtValidation": {
+    "revoked": false,
+    "validUntil": null,
+    "fetchedAt": "2026-10-08T07:01:05.190Z"
+  }
+}

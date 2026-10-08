@@ -1,0 +1,40 @@
+- generic [ref=f1e2]:
+  - banner [ref=f1e3]:
+    - generic [ref=f1e5]:
+      - link "ArcPreflight for agents on Arc" [ref=f1e6] [cursor=pointer]:
+        - /url: /
+        - text: ArcPreflight
+        - generic [ref=f1e7]: for agents on Arc
+      - navigation [ref=f1e8]:
+        - link "Overview" [ref=f1e9] [cursor=pointer]:
+          - /url: /
+        - link "Live demo" [ref=f1e10] [cursor=pointer]:
+          - /url: /demo
+        - link "Inspect" [ref=f1e11] [cursor=pointer]:
+          - /url: /inspect
+        - link "Developer" [ref=f1e12] [cursor=pointer]:
+          - /url: /developer
+        - link "Verify" [ref=f1e13] [cursor=pointer]:
+          - /url: /verify
+        - link "Evidence" [ref=f1e14] [cursor=pointer]:
+          - /url: /evidence
+      - generic [ref=f1e15]:
+        - generic [ref=f1e16]: connecting…
+        - button "Connect wallet" [ref=f1e19] [cursor=pointer]
+  - main [ref=f1e21]:
+    - paragraph [ref=f1e23]: finding the API instances this site fronts…
+  - contentinfo [ref=f1e25]:
+    - generic [ref=f1e26]:
+      - generic [ref=f1e27]:
+        - text: ArcPreflight · release
+        - code [ref=f1e28]: …
+        - text: ·
+        - code [ref=f1e29]: …
+        - text: ·
+      - generic [ref=f1e30]:
+        - link "OpenAPI" [ref=f1e31] [cursor=pointer]:
+          - /url: /openapi.json
+        - link "GitHub" [ref=f1e32] [cursor=pointer]:
+          - /url: https://github.com/a252937166/arcpreflight
+        - link "Arc docs" [ref=f1e33] [cursor=pointer]:
+          - /url: https://docs.arc.io

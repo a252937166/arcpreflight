@@ -1,0 +1,23 @@
+# Real-wallet acceptance checklist (AP33-30)
+
+Automation drives an injected EIP-1193 test wallet with fault modes (`apps/web/src/testWallet.ts`, dev builds only). A real
+extension must be exercised by a person once per release on the public site. Record the release SHA, the wallet (name,
+version), the network, and the observed copy for each row. "Pass" means the page said what happened and offered only the
+listed next actions; no row may end in a second signing prompt the visitor did not ask for.
+
+| # | Scenario | How | Expected on the page |
+|---|---|---|---|
+| 1 | Connect, auto chain switch | Connect on Arc mainnet root; switch the site to Arc testnet | the wallet is asked once to switch (or add) Arc testnet; the header chip shows the wallet on the right chain; refusal (4001) leaves "Switch to Arc testnet" in the menu |
+| 2 | Reconnect after refresh | Reload with the wallet connected | still connected; no prompt; My workflow restored for the same account |
+| 3 | Account switching mid-workflow | Create an order with account A, switch to B in the extension | the visible workflow resets to step 1 for B; A's order appears under "other wallets in this browser"; nothing is relabelled as B's |
+| 4 | Wrong network at prompt time | Validate an attempt, switch the extension to another chain, press execute | no transaction prompt; the page says the wallet is on chain X and the plan is for Arc testnet; the attempt stays validated for abandon/recover |
+| 5 | Rejected fee signature | Reject the EIP-712 prompt | "nothing was bought"; a new quote can be requested; no charge |
+| 6 | Rejected transaction | Reject `eth_sendTransaction` | attempt `NOT_SENT`, order unpaid, "nothing was sent"; execute is available again only after a new validation |
+| 7 | Ambiguous submission | Press execute, then close the extension popup or lose connectivity before the hash arrives | "the transaction may have been submitted — reconciling"; no second prompt; ends CONFIRMED (if it went out) or stays validated with "I rejected it — abandon" |
+| 8 | Refresh mid-prompt | Reload the page while the transaction prompt is open | after reload the attempt is listed under My workflow as validated with continue / abandon / recover |
+| 9 | Expired report | Buy a report, wait past the usable window, press execute | execute is disabled with the expiry sentence; "Re-run the check (0.01 USDC)" is offered; nothing is sent |
+| 10 | Insufficient funds | Use a wallet below fee + amount + gas | buy/execute disabled with "your wallet holds X; this step needs ≥ Y"; the faucet card appears on testnet |
+| 11 | Delayed RPC | Throttle the network in devtools | polling continues; the attempt shows "waiting for the receipt"; recover reads only |
+| 12 | Verification states | Verify a tampered bundle on `/verify` | red FAIL state with the failing finding; never a green banner |
+
+Observed results belong in `docs/ACCEPTANCE.md` §11 (AP33-30) with the date and the wallet used.

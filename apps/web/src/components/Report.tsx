@@ -1,8 +1,13 @@
+import { Fragment } from "react";
 import { Chip, Hex } from "./Badges";
 import { explorerAddr, type Evidence, type NetworkInfo, type Report } from "../lib/api";
 import { decisionTone, signalTone, utc } from "../lib/format";
 
 const BASIS: Record<string, "info" | "violet" | "warn" | "neutral"> = { chain_read: "info", simulation: "violet", network_advisory: "warn", heuristic: "warn", template: "info" };
+/** a signal id may wrap at its underscores (never letter by letter) when the column is narrow */
+const breakable = (id: string) => id.split("_").map((part, i, all) => <Fragment key={i}>{part}{i < all.length - 1 ? <>_<wbr /></> : null}</Fragment>);
+/** prose with code identifiers ("DemoMerchant.getOrder(orderId)") may wrap after a dot, a parenthesis or a slash */
+const prose = (text: string) => text.split(/(?<=[.(/])(?=\S)/).map((part, i) => <Fragment key={i}>{i > 0 && <wbr />}{part}</Fragment>);
 
 export function ReportView({ report, digest, evidence, net, compact }: { report: Report; digest?: string; evidence?: Evidence[]; net: NetworkInfo | null; compact?: boolean }) {
   const target = report.dependencies.find((d) => d.role === "TARGET");
@@ -26,23 +31,23 @@ export function ReportView({ report, digest, evidence, net, compact }: { report:
         {report.baselineDigest && <><span className="k">Baseline</span><span><Hex value={report.baselineDigest} /></span></>}
         <span className="k">Methodology</span><span><Hex value={report.methodologyDigest} /> · adapters {report.adapterManifestDigests.map((d) => <Hex key={d} value={d} />)}</span>
       </div>
-      <table className="t">
-        <thead><tr><th>Signal</th><th>State</th><th>Basis</th><th>Scope / limitations</th></tr></thead>
+      <div className="tablewrap fit"><table className="t signals">
+        <thead><tr><th>Signal</th><th className="fit">State</th><th className="fit">Basis</th><th>Scope / limitations</th></tr></thead>
         <tbody>
           {core.map((s) => (
             <tr key={s.id}>
-              <td className="mono">{s.id}</td>
-              <td><Chip tone={signalTone(s.state)}>{s.state}</Chip></td>
-              <td><Chip tone={BASIS[s.basis] ?? "neutral"}>{s.basis}</Chip></td>
-              <td><div className="small">{s.scope}</div>{s.limitations.length > 0 && <div className="tiny muted">{s.limitations.join(" · ")}</div>}{s.evidenceDigests.length > 0 && <div className="tiny dim">evidence {s.evidenceDigests.map((d) => <Hex key={d} value={d} n={4} />)}</div>}</td>
+              <td className="mono sig">{breakable(s.id)}</td>
+              <td className="fit"><Chip tone={signalTone(s.state)}>{s.state}</Chip></td>
+              <td className="fit"><Chip tone={BASIS[s.basis] ?? "neutral"}>{s.basis}</Chip></td>
+              <td className="scope"><div className="small">{prose(s.scope)}</div>{s.limitations.length > 0 && <div className="tiny muted">{prose(s.limitations.join(" · "))}</div>}{s.evidenceDigests.length > 0 && <div className="tiny dim row" style={{ gap: 4 }}>evidence {s.evidenceDigests.map((d) => <Hex key={d} value={d} n={4} />)}</div>}</td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
       {!compact && adv.length > 0 && (
         <details>
           <summary>{adv.length} Arc network advisories (documentation-backed rules, not target findings)</summary>
-          <table className="t" style={{ marginTop: 8 }}><tbody>{adv.map((s) => <tr key={s.id}><td className="mono">{s.id}</td><td className="small">{s.scope} {s.sourceIds.map((u) => <a key={u} href={u} target="_blank" rel="noreferrer" className="tiny"> docs↗</a>)}</td></tr>)}</tbody></table>
+          <div className="tablewrap fit"><table className="t" style={{ marginTop: 8 }}><tbody>{adv.map((s) => <tr key={s.id}><td className="mono">{s.id}</td><td className="small">{s.scope} {s.sourceIds.map((u) => <a key={u} href={u} target="_blank" rel="noreferrer" className="tiny"> docs↗</a>)}</td></tr>)}</tbody></table></div>
         </details>
       )}
       {!compact && (

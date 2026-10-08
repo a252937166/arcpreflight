@@ -7,9 +7,16 @@ export type DeveloperOrder = { orderId: Hex; tx: Hex; block: string; merchant: H
 export type PinnedQuote = { requestId: string; pinnedBlock: string; quote: QuoteCore; __status: number };
 export type PreparedQuote = { intent: IntentCore; response: PinnedQuote };
 
+/** the human-paced validation window (docs/LIFECYCLE.md §3): a wallet prompt takes seconds, not milliseconds; the server caps it at 120 s */
+export const WALLET_VALIDATION_WINDOW_SECONDS = 60;
+/** how long a delivered report may be used by the wallet workflow (reading the decision, answering the prompt): matches the server's report
+ *  lifetime (REPORT_TTL_SECONDS, 300); the final validation re-reads the critical state at a fresh block regardless */
+export const WALLET_REPORT_AGE_SECONDS = 300;
+/** The buyer's policy for an order paid from a browser wallet. Deterministic in (account, order), so the same digest is reproduced after a reload
+ *  and equals `intent.policyDigest` — the server checks exactly that when it validates a wallet attempt. */
 export function developerPolicy(account: string, order: DeveloperOrder): PolicyCore {
   return PolicyCore.parse({ schemaVersion: "1.0", ownerPrincipal: "developer-console", allowedSenders: [account], allowedTargets: [order.merchant], allowedSelectors: [PAY_SELECTOR],
-    maxNativePaymentAtomic: order.amountNativeAtomic, maxTokenPaymentAtomic: "0", maxServiceFeeTokenAtomic: "10000", maxGasCostNativeAtomic: "2000000000000000", maxReportAgeSeconds: 60, maxFinalValidationAgeSeconds: 5,
+    maxNativePaymentAtomic: order.amountNativeAtomic, maxTokenPaymentAtomic: "0", maxServiceFeeTokenAtomic: "10000", maxGasCostNativeAtomic: "2000000000000000", maxReportAgeSeconds: WALLET_REPORT_AGE_SECONDS, maxFinalValidationAgeSeconds: WALLET_VALIDATION_WINDOW_SECONDS,
     requiredSignalIds: ["PROXY_TEMPLATE_VERIFIED", "SUPPORTED_STATE_ORDER_PAYABLE", "CALL_SIMULATION"], unknownAction: "REVIEW_REQUIRED", implementationChangeAction: "REVIEW_REQUIRED", allowedTransactionTypes: [2], allowAuthorizationList: false });
 }
 

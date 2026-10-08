@@ -1,0 +1,882 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - link "ArcPreflight for agents on Arc" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - text: ArcPreflight
+        - generic [ref=e7]: for agents on Arc
+      - navigation [ref=e8]:
+        - link "Overview" [ref=e9] [cursor=pointer]:
+          - /url: /
+        - link "Live demo" [ref=e10] [cursor=pointer]:
+          - /url: /demo
+        - link "Inspect" [ref=e11] [cursor=pointer]:
+          - /url: /inspect
+        - link "Developer" [ref=e12] [cursor=pointer]:
+          - /url: /developer
+        - link "Verify" [ref=e13] [cursor=pointer]:
+          - /url: /verify
+        - link "Evidence" [ref=e14] [cursor=pointer]:
+          - /url: /evidence
+      - generic [ref=e15]:
+        - group "network" [ref=e34]:
+          - button "Arc mainnet" [ref=e35] [cursor=pointer]
+          - button "Arc testnet" [pressed] [ref=e36] [cursor=pointer]
+        - generic "eip155:5042002 · https://rpc.testnet.arc.io" [ref=e37]: Arc testnet
+        - button "Connect wallet" [ref=e19] [cursor=pointer]
+  - status [ref=e756]: Arc testnet — zero-cost demos on the project's testnet funds; mainnet proof lives on the mainnet side.
+  - main [ref=e40]:
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - generic [ref=e45]: Live demo · Arc testnet
+          - heading [level=2] [ref=e46]:
+            - text: Pick a situation.
+            - emphasis [ref=e47]: Watch the payment handled, on-chain.
+        - paragraph [ref=e757]:
+          - generic [ref=e758]:
+            - text: live runs today
+            - generic [ref=e759]: 16/60
+          - generic [ref=e760]:
+            - text: cooldown
+            - generic [ref=e761]: 0s
+          - generic [ref=e762]: business payment 0.05 USDC
+      - tablist "situation" [ref=e368]:
+        - tab "Unapproved implementation change ! review required" [ref=e763] [cursor=pointer]:
+          - generic [ref=e764]: Unapproved implementation change
+          - generic [ref=e765]: "! review required"
+        - tab "6-decimal amount on the 18-decimal path ✕ blocked" [ref=e766] [cursor=pointer]:
+          - generic [ref=e767]: 6-decimal amount on the 18-decimal path
+          - generic [ref=e768]: ✕ blocked
+        - tab "☞ Approved payment, exact plan, verified outcome ✓ confirmed" [selected] [ref=e769] [cursor=pointer]:
+          - generic [ref=e770]: ☞
+          - generic [ref=e771]: Approved payment, exact plan, verified outcome
+          - generic [ref=e772]: ✓ confirmed
+      - generic [ref=e120]:
+        - generic [ref=e124]:
+          - button "▶ Run live · project runner" [ref=e773] [cursor=pointer]
+          - button "▶ Run with a simulated interruption" [ref=e774] [cursor=pointer]
+        - paragraph [ref=e127]: connect a wallet in the header to run the check with your own fee signature — the project's runner otherwise does everything on the project's funds
+      - generic [ref=e381]: "Started with a labelled interruption: the runner will stop waiting right after the broadcast; the recovery worker (every 30 s) resolves the outcome from the recorded hash and the order state."
+      - generic [ref=e386]:
+        - generic [ref=e387]:
+          - generic [ref=e388]:
+            - generic [ref=e389]: approved payment
+            - generic [ref=e390]:
+              - generic [ref=e391]: LIVE_REQUEST
+              - generic [ref=e392]: Arc testnet 5042002
+            - generic [ref=e775]: simulated interruption
+          - generic [ref=e393]:
+            - generic [ref=e776]: 33.1 s · 3m ago
+            - link "#95eacbcb" [ref=e396] [cursor=pointer]:
+              - /url: /runs/95eacbcb-83c7-4cdd-a9a9-f1b289aaa085?net=testnet
+        - 'list "lifecycle: create order, review and approve, preflight check, execute payment, recover, export passport, verify independently" [ref=e398]':
+          - listitem [ref=e549]:
+            - generic [ref=e400]: ✓
+            - generic [ref=e402]: create order
+          - listitem "approval referenced by the intent" [ref=e550]:
+            - generic [ref=e405]: ✓
+            - generic [ref=e407]: review & approve
+          - listitem "no policy violation" [ref=e588]:
+            - generic [ref=e410]: ✓
+            - generic [ref=e412]: preflight check
+          - listitem "not mined" [ref=e777]:
+            - generic [ref=e415]: "!"
+            - generic [ref=e417]: execute payment
+          - listitem "reconciled after a simulated interruption" [ref=e778]:
+            - generic [ref=e420]: ✓
+            - generic [ref=e422]: recover
+          - listitem "downloaded" [ref=e926]:
+            - generic [ref=e425]: ✓
+            - generic [ref=e427]: export passport
+          - listitem "after the export" [ref=e780]:
+            - generic [ref=e430]: "7"
+            - generic [ref=e432]: verify independently
+        - generic [ref=e434]:
+          - generic [ref=e435]:
+            - generic [ref=e436]:
+              - generic [ref=e437]: Order 0x53fd9…fa350
+              - generic [ref=e438]: Arc testnet
+              - generic [ref=e439]: release ui-audit-testnet
+            - status [ref=e440]: The original hash can never be mined (its nonce was consumed by something else); the order reads as unpaid; nothing was re-signed.
+          - status [ref=e781]:
+            - text: "Simulated interruption after broadcast — the process stopped waiting right after the send; recovery resolved the outcome from the recorded hash and the order state:"
+            - code [ref=e782]: UNKNOWN / NOT_EXECUTED
+            - text: "at 2026-10-08 12:01:43Z — the signer nonce was consumed by a transaction this node could not identify within the search window and this hash never received a receipt; the order reads as unpaid; nothing is re-signed; new orders created: 0, new signatures: 0."
+          - generic [ref=e441]:
+            - generic [ref=e442]:
+              - generic [ref=e443]: approved implementation
+              - link "0x342ab…009f9" [ref=e783] [cursor=pointer]:
+                - /url: https://testnet.arcscan.app/address/0x342ab0e9f7951e4112e698ff69ac00ac18c009f9
+                - text: 0x342ab…009f9↗
+              - generic [ref=e446]: referenced approval
+              - generic [ref=e447]:
+                - text: 0xe80bf5…88bf9e
+                - generic [ref=e589]: unchanged
+                - generic [ref=e784]: "· at final validation: valid"
+              - generic [ref=e448]: business amount
+              - generic [ref=e449]: 0.050000 USDC
+              - generic [ref=e450]: check fee
+              - generic [ref=e451]:
+                - text: 0.010000 USDC ·
+                - link "0x17fa41…5f179d" [ref=e590] [cursor=pointer]:
+                  - /url: https://testnet.arcscan.app/tx/0x17fa41afe7c0d96da82657bfe7de5bf121d33c2acedb9ddfa834e4ba6e5f179d
+                  - text: 0x17fa41…5f179d↗
+              - generic [ref=e452]: order creation
+              - generic [ref=e453]:
+                - link "0xb9b28…5ab89" [ref=e551] [cursor=pointer]:
+                  - /url: https://testnet.arcscan.app/tx/0xb9b2885ebb217755573b2201f4c222ef236f4dbd80b8dfb60bee509336d5ab89
+                  - text: 0xb9b28…5ab89↗
+                - text: "@ #66132566"
+                - generic [ref=e552]: confirmed
+            - generic [ref=e454]:
+              - generic [ref=e455]: outcome
+              - generic [ref=e456]:
+                - generic [ref=e457]: not mined
+                - generic [ref=e458]: · from the execution store
+              - generic [ref=e459]: business execution
+              - generic [ref=e785]:
+                - generic [ref=e786]:
+                  - generic [ref=e787]: not mined
+                  - generic [ref=e788]: order not executed
+                - generic [ref=e789]:
+                  - link "0xf10a29…848626" [ref=e790] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xf10a29dd1db83168b35bf673e850e8a5e967ffb78063bdaf65483defd2848626
+                    - text: 0xf10a29…848626↗
+                  - generic [ref=e791]: "· broadcast at head #66132626"
+                  - generic [ref=e792]: · nonce 19
+                - generic [ref=e793]: the signer nonce was consumed by a transaction this node could not identify within the search window and this hash never received a receipt; the order reads as unpaid; nothing is re-signed
+              - generic [ref=e462]: order result
+              - generic [ref=e463]: unpaid
+              - generic [ref=e465]: service outcome
+              - generic [ref=e466]:
+                - generic [ref=e467]: not evaluated
+                - text: a paid order is not proof an offchain service was delivered
+              - generic [ref=e468]: recovery of this attempt
+              - generic [ref=e469]:
+                - generic [ref=e470]: "new orders created: 0 · new check-fee authorizations: 0 · new business signatures: 0"
+                - generic [ref=e471]: "original transaction: not mined"
+                - generic [ref=e472]: counted from the recorded steps — in total 1 order, 1 check-fee authorization, 1 business signature
+          - generic [ref=e473]:
+            - button "Download Payment Passport (outcome unresolved)" [ref=e794] [cursor=pointer]
+            - link "Verify in browser" [ref=e475] [cursor=pointer]:
+              - /url: "#verify-here"
+            - link "Verify elsewhere" [ref=e476] [cursor=pointer]:
+              - /url: /verify?run=95eacbcb-83c7-4cdd-a9a9-f1b289aaa085&net=testnet
+            - link "Technical evidence" [ref=e477] [cursor=pointer]:
+              - /url: "#receipt-chain"
+          - generic [ref=e478]:
+            - generic [ref=e592]:
+              - heading "Cost disclosure" [level=3] [ref=e593]
+              - generic [ref=e594]:
+                - text: USDC · exact strings from
+                - code [ref=e595]: cost-statement.json
+                - text: · captured 2026-10-08 12:01:43Z
+            - table [ref=e597]:
+              - rowgroup [ref=e598]:
+                - row [ref=e599]:
+                  - columnheader "line" [ref=e600]
+                  - columnheader "authorized maximum" [ref=e601]
+                  - columnheader "actual" [ref=e602]
+                  - columnheader "unresolved" [ref=e603]
+              - rowgroup [ref=e604]:
+                - row [ref=e605]:
+                  - cell "buyer 0xC618…2ACE — your wallet" [ref=e606]
+                - row [ref=e607]:
+                  - cell "business principal" [ref=e608]
+                  - cell "0.05 USDC" [ref=e609]
+                  - cell "0 USDC" [ref=e610]
+                  - cell "0 USDC" [ref=e611]
+                - row [ref=e612]:
+                  - cell [ref=e613]:
+                    - text: check fee
+                    - link "0x17fa…179d" [ref=e614] [cursor=pointer]:
+                      - /url: https://testnet.arcscan.app/tx/0x17fa41afe7c0d96da82657bfe7de5bf121d33c2acedb9ddfa834e4ba6e5f179d
+                      - text: 0x17fa…179d↗
+                  - cell "0.01 USDC" [ref=e615]
+                  - cell "0.01 USDC" [ref=e616]
+                  - cell "—" [ref=e617]
+                - row [ref=e795]:
+                  - cell "business gas" [ref=e619]
+                  - cell "0.001181315 USDC" [ref=e796]
+                  - cell "not available (receipt unavailable)" [ref=e621]
+                  - cell "—" [ref=e622]
+                - row [ref=e623]:
+                  - cell "buyer total" [ref=e624]
+                  - cell "—" [ref=e625]
+                  - cell "0.01 USDC" [ref=e626]
+                  - cell "0 USDC" [ref=e627]
+                - row [ref=e628]:
+                  - cell "operator — the project's relayer and order creator; never charged to the buyer" [ref=e629]
+                - row [ref=e797]:
+                  - cell [ref=e631]:
+                    - text: fee-relay gas
+                    - link "0x17fa…179d" [ref=e632] [cursor=pointer]:
+                      - /url: https://testnet.arcscan.app/tx/0x17fa41afe7c0d96da82657bfe7de5bf121d33c2acedb9ddfa834e4ba6e5f179d
+                      - text: 0x17fa…179d↗
+                  - cell "—" [ref=e633]
+                  - cell "0.002179125 USDC · 87165 gas" [ref=e798]
+                  - cell "—" [ref=e635]
+                - row [ref=e636]:
+                  - cell [ref=e637]:
+                    - text: order-creation gas
+                    - link "0xb9b2…ab89" [ref=e638] [cursor=pointer]:
+                      - /url: https://testnet.arcscan.app/tx/0xb9b2885ebb217755573b2201f4c222ef236f4dbd80b8dfb60bee509336d5ab89
+                      - text: 0xb9b2…ab89↗
+                  - cell "—" [ref=e639]
+                  - cell "0.0025073 USDC · 100292 gas" [ref=e640]
+                  - cell "—" [ref=e641]
+                - row [ref=e799]:
+                  - cell "operator total" [ref=e643]
+                  - cell "—" [ref=e644]
+                  - cell "0.004686425 USDC" [ref=e800]
+                  - cell "—" [ref=e646]
+            - paragraph [ref=e647]: unresolved reservation 0 USDC — reservations released only after reconciliation
+            - group [ref=e648]:
+              - generic "notes from the statement (4)" [ref=e801] [cursor=pointer]
+          - generic [ref=e481]:
+            - heading "Verify independently" [level=3] [ref=e482]
+            - generic [ref=e927]:
+              - generic [ref=e928]:
+                - button "Verify in browser" [ref=e929] [cursor=pointer]
+                - generic [ref=e930]:
+                  - code [ref=e931]: arcpreflight-passport-95eacbcb.json
+                  - text: · RPC
+                  - code [ref=e932]: https://rpc.testnet.arc.io
+                  - text: (online findings) · same verifier code as the CLI
+              - generic [ref=e933]:
+                - generic [ref=e934]: anchors
+                - generic [ref=e936]:
+                  - generic [ref=e937]:
+                    - text: baseline
+                    - generic "0x6442a20a7d583cda2a6396ff8cf775953108c5d8bdb0495583ffdf9e7ecd1abf" [ref=e938]: 0x6442a…d1abf
+                  - generic [ref=e939]:
+                    - text: baseline
+                    - generic "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e" [ref=e940]: 0xe80bf…8bf9e
+                  - generic [ref=e941]:
+                    - text: policy
+                    - generic "0x3ccf98c2c2b41ec496c51ebc14f384561131c2774fc9fa5aa7af714b5bc1fc39" [ref=e942]: 0x3ccf9…1fc39
+                  - generic [ref=e943]: supplied by this site (not independent)
+              - group [ref=e944]:
+                - generic "Same check in a clean process (CLI)" [ref=e945] [cursor=pointer]
+        - generic [ref=e484]:
+          - generic [ref=e485]:
+            - paragraph [ref=e486]: the agent, thinking out loud — narration is generated from the receipts; the decision is code
+            - generic [ref=e487]:
+              - paragraph [ref=e802]: "Before the order is even sent, its identity is written down: 0x53fd927e…, my address, the amount. If the process dies now, reconciliation reads the chain for it — it is never replaced."
+              - paragraph [ref=e803]: "The merchant created order 0x53fd927e… for me at block #66132566. That is my business expectation — I never read the amount out of calldata."
+              - paragraph [ref=e804]: "I built the exact call: pay(orderId), value 50000000000000000 atomic. Digest 0x0ec76cae…."
+              - paragraph [ref=e916]: "Quote received: 0.01 USDC, report already pinned at #66132576. Nothing has been charged yet."
+              - paragraph [ref=e917]: I signed one EIP-3009 authorization for exactly that quote. One authorization, one quote — the fee cannot be replayed.
+              - paragraph [ref=e918]: "Settled on Arc (0x17fa41af…). I re-hashed the report myself: it is bound to my intent, baseline says MATCH, pinned at #66132576."
+              - paragraph [ref=e919]: No configured check fired at the pinned block. That is not "safe" — it means I may proceed to final validation.
+              - paragraph [ref=e920]: Time passed and the fee changed my balance, so I re-read implementation, paused state, the order, fees and the approval this intent references at a new block (#66132607) — one that must not predate the fee settlement; a fresh fetch of an old block would not count. Still consistent. Gas 40735 at 29 gwei.
+              - paragraph [ref=e921]: I signed the plan, then decoded my own signed transaction and compared it field by field with the plan before letting it leave.
+              - paragraph [ref=e922]: "A durable marker first: from this moment the transaction may be on the network, whatever happens to this process."
+              - paragraph [ref=e923]: Broadcast. Now I wait for the receipt — a receipt is not an outcome.
+              - paragraph [ref=e924]: "SIMULATED interruption: I stopped waiting right after the send, like a crashed process would. The hash is recorded; recovery will read it and the order state — never sign a replacement."
+              - paragraph [ref=e925]: "Reconciled: the original transaction never reached the chain and the order is unpaid. I signed nothing new — a human decides whether to try again."
+          - generic [ref=e489]:
+            - generic [ref=e490]:
+              - generic [ref=e491]: ✕
+              - text: failed
+            - paragraph [ref=e805]:
+              - text: expected
+              - code [ref=e806]: NO_POLICY_VIOLATION
+              - text: ", got"
+              - code [ref=e807]: NO_POLICY_VIOLATION
+              - generic [ref=e808]: as expected
+            - generic [ref=e651]:
+              - generic [ref=e652]: order
+              - generic [ref=e653]: 0x53fd92…6fa350 · 0.05 USDC
+              - generic [ref=e654]: merchant
+              - link "0xA8eB5…42252" [ref=e809] [cursor=pointer]:
+                - /url: https://testnet.arcscan.app/address/0xA8eB51EF994567B84215981E8d1Fe17cb8e42252
+                - text: 0xA8eB5…42252↗
+              - generic [ref=e657]: service fee
+              - generic [ref=e658]:
+                - link "0x17fa41…5f179d" [ref=e659] [cursor=pointer]:
+                  - /url: https://testnet.arcscan.app/tx/0x17fa41afe7c0d96da82657bfe7de5bf121d33c2acedb9ddfa834e4ba6e5f179d
+                  - text: 0x17fa41…5f179d↗
+                - generic [ref=e660]: 0.010000 USDC · relayed by the project's merchant account
+              - generic [ref=e661]: business tx
+              - generic [ref=e662]: UNKNOWN · NOT_EXECUTED
+        - generic [ref=e492]:
+          - generic [ref=e493]:
+            - heading "Step by step" [level=3] [ref=e494]
+            - paragraph [ref=e495]: who did what, and why — straight from the runner
+            - 'img "Pipeline: approved order, exact intent, pinned report, decision, final validation, sign, broadcast, verify" [ref=e496]':
+              - generic [ref=e498]:
+                - generic [ref=e500]: ✓
+                - generic [ref=e501]: approved order
+              - generic [ref=e502]:
+                - generic [ref=e504]: ✓
+                - generic [ref=e505]: exact intent
+              - generic [ref=e506]:
+                - generic [ref=e508]: ✓
+                - generic [ref=e509]: pinned report · x402
+              - generic [ref=e510]:
+                - generic [ref=e512]: ✓
+                - generic [ref=e513]: deterministic decision
+              - generic [ref=e514]:
+                - generic [ref=e516]: ✓
+                - generic [ref=e517]: final validation
+              - generic [ref=e518]:
+                - generic [ref=e520]: ✓
+                - generic [ref=e521]: sign the exact plan
+              - generic [ref=e522]:
+                - generic [ref=e524]: ✓
+                - generic [ref=e525]: broadcast
+              - generic [ref=e526]:
+                - generic [ref=e528]: ✓
+                - generic [ref=e529]: verify the outcome
+            - generic [ref=e530]:
+              - generic [ref=e531]:
+                - generic [ref=e532]: "1"
+                - generic [ref=e533]:
+                  - generic [ref=e534]:
+                    - generic [ref=e535]: Order identity recorded before its creation is sent
+                    - generic [ref=e536]: +1 ms
+                    - generic [ref=e537]: order-creator
+                  - generic [ref=e538]: the order's identity is recorded before its creation transaction is sent, so an interruption can be reconciled from the chain
+                  - generic [ref=e539]:
+                    - generic [ref=e540]:
+                      - generic [ref=e541]: "orderId:"
+                      - text: 0x53fd92…6fa350
+                    - generic [ref=e542]:
+                      - generic [ref=e543]: "payer:"
+                      - text: 0xC618…2ACE
+                    - generic "50000000000000000" [ref=e544]:
+                      - generic [ref=e545]: "amountNativeAtomic:"
+                      - text: 0.0500 USDC
+                    - generic [ref=e546]:
+                      - generic [ref=e547]: "merchant:"
+                      - text: 0xA8eB…2252
+              - generic [ref=e554]:
+                - generic [ref=e555]: "2"
+                - generic [ref=e556]:
+                  - generic [ref=e557]:
+                    - generic [ref=e558]: Order creator registers the order
+                    - generic [ref=e559]: +2.6 s
+                    - generic [ref=e560]: order-creator
+                  - generic [ref=e561]: the business expectation must come from an independently approved order, never from the calldata
+                  - generic [ref=e562]:
+                    - generic [ref=e563]:
+                      - generic [ref=e564]: "tx:"
+                      - link "0xb9b288…d5ab89" [ref=e565] [cursor=pointer]:
+                        - /url: https://testnet.arcscan.app/tx/0xb9b2885ebb217755573b2201f4c222ef236f4dbd80b8dfb60bee509336d5ab89
+                        - text: 0xb9b288…d5ab89↗
+                    - generic [ref=e566]:
+                      - generic [ref=e567]: "orderId:"
+                      - text: 0x53fd92…6fa350
+                    - generic [ref=e568]:
+                      - generic [ref=e569]: "block:"
+                      - text: "66132566"
+              - generic [ref=e570]:
+                - generic [ref=e571]: "3"
+                - generic [ref=e572]:
+                  - generic [ref=e573]:
+                    - generic [ref=e574]: Agent builds the exact intent
+                    - generic [ref=e575]: +2.6 s
+                    - generic [ref=e576]: demo-runner
+                  - generic [ref=e577]: exact candidate call bound to the approved order
+                  - generic [ref=e578]:
+                    - generic [ref=e579]:
+                      - generic [ref=e580]: "intentDigest:"
+                      - text: 0x0ec76c…d732b4
+                    - generic "50000000000000000" [ref=e581]:
+                      - generic [ref=e582]: "valueNativeAtomic:"
+                      - text: 0.0500 USDC
+                    - generic "50000000000000000" [ref=e583]:
+                      - generic [ref=e584]: "approvedAmountNativeAtomic:"
+                      - text: 0.0500 USDC
+              - generic [ref=e664]:
+                - generic [ref=e665]: "4"
+                - generic [ref=e666]:
+                  - generic [ref=e667]:
+                    - generic [ref=e668]: 402 quote — report prepared & pinned
+                    - generic [ref=e669]: +16.0 s
+                  - generic [ref=e670]: the report is prepared and pinned before any charge; the quote binds intent, report, price and payTo
+                  - generic [ref=e671]:
+                    - generic [ref=e672]:
+                      - generic [ref=e673]: "http:"
+                      - text: "402"
+                    - generic [ref=e674]:
+                      - generic [ref=e675]: "requestId:"
+                      - text: 1e2ab84e-6627-4459-89b4-57d67f077299
+                    - generic "10000" [ref=e676]:
+                      - generic [ref=e677]: "priceTokenAtomic:"
+                      - text: 0.01 USDC (6-dec)
+                    - generic [ref=e678]:
+                      - generic [ref=e679]: "payTo:"
+                      - text: 0x0687…e7b0
+                    - generic [ref=e680]:
+                      - generic [ref=e681]: "pinnedBlock:"
+                      - text: "66132576"
+                    - generic [ref=e682]:
+                      - generic [ref=e683]: "expiresAt:"
+                      - text: 2026-10-08T12:01:54.388Z
+              - generic [ref=e684]:
+                - generic [ref=e685]: "5"
+                - generic [ref=e686]:
+                  - generic [ref=e687]:
+                    - generic [ref=e688]: Agent signs the 0.01 USDC service fee (EIP-3009)
+                    - generic [ref=e689]: +16.0 s
+                    - generic [ref=e690]: demo-runner
+                  - generic [ref=e691]: one authorization = one quote; the service fee (0.01 USDC, 6-dec) is separate from the business payment
+                  - 'generic "{\"to\":\"0x06873b35575d6a22ec8008f30f56c71c19bee7b0\",\"value\":\"10000\",\"nonce\":\"0x1491cb327a5faf4dde19418464b1943f847efcb2aee37abf27248c93a11233ce\"}" [ref=e693]':
+                    - generic [ref=e694]: "eip3009:"
+                    - text: "{\"to\":\"0x06873b35575d6a22ec8008f30f56c71c19bee7b0\",\"value\":\"…"
+              - generic [ref=e695]:
+                - generic [ref=e696]: "6"
+                - generic [ref=e697]:
+                  - generic [ref=e698]:
+                    - generic [ref=e699]: Report delivered after settlement on Arc
+                    - generic [ref=e700]: +20.7 s
+                  - generic [ref=e701]: service fee settled on Arc by ArcPreflight's relayer (the merchant account submitted my EIP-3009 authorization and paid the gas in USDC); the runner re-hashes the report and checks it is bound to its own intent
+                  - generic [ref=e702]:
+                    - generic [ref=e703]:
+                      - generic [ref=e704]: "serviceFeeTx:"
+                      - link "0x17fa41…5f179d" [ref=e705] [cursor=pointer]:
+                        - /url: https://testnet.arcscan.app/tx/0x17fa41afe7c0d96da82657bfe7de5bf121d33c2acedb9ddfa834e4ba6e5f179d
+                        - text: 0x17fa41…5f179d↗
+                    - generic [ref=e706]:
+                      - generic [ref=e707]: "reportDigest:"
+                      - text: 0x120c62…db9ce2
+                    - generic [ref=e708]:
+                      - generic [ref=e709]: "pinnedBlock:"
+                      - text: "66132576"
+                    - generic [ref=e710]:
+                      - generic [ref=e711]: "baselineResult:"
+                      - text: MATCH
+                    - generic [ref=e712]:
+                      - generic [ref=e713]: "decisionEligible:"
+                      - text: "true"
+                    - generic "PROXY_TEMPLATE_VERIFIED=observed UUPS_PROXIABLE_UUID=observed SUPPORTED_STATE_PAUSED=not_observed SUPPORTED_STATE_ORDER_PAYABLE=observed CALL_SIMULATION=observed" [ref=e714]:
+                      - generic [ref=e715]: "signals:"
+                      - text: PROXY_TEMPLATE_VERIFIED=observed · UUPS_PROXIABLE_UUID=observed · SUPPORTED_STATE_PAUSED=not_observed · SUPPORTED_STATE_ORDER_PAYABLE=observed +1
+              - generic [ref=e716]:
+                - generic [ref=e717]: "7"
+                - generic [ref=e718]:
+                  - generic [ref=e719]:
+                    - generic [ref=e720]: Deterministic local decision
+                    - generic [ref=e721]: +20.8 s
+                    - generic [ref=e722]: demo-runner (deterministic policy, no LLM)
+                  - generic [ref=e723]: hard violations block; unapproved change or unknowns require review; otherwise 'no configured check fired'
+                  - generic [ref=e724]:
+                    - generic [ref=e725]:
+                      - generic [ref=e726]: "decision:"
+                      - text: NO_POLICY_VIOLATION
+                    - generic "INTENT_BINDING:PASS POLICY_ALLOWLISTS:PASS BASELINE_STATUS:PASS EXECUTION_IDENTITY:PASS CALL_SIMULATION:PASS EVIDENCE_FRESHNESS:PASS" [ref=e727]:
+                      - generic [ref=e728]: "checks:"
+                      - text: INTENT_BINDING:PASS · POLICY_ALLOWLISTS:PASS · BASELINE_STATUS:PASS · EXECUTION_IDENTITY:PASS +2
+              - generic [ref=e810]:
+                - generic [ref=e811]: "8"
+                - generic [ref=e812]:
+                  - generic [ref=e813]:
+                    - generic [ref=e814]: Final validation at a new pinned block
+                    - generic [ref=e815]: +32.4 s
+                    - generic [ref=e816]: demo-runner
+                  - generic [ref=e817]: "service fee changed the balance and time passed: re-read implementation, paused, order, balance, fees AND the signer account at a NEW pinned block that follows the fee confirmation, before signing"
+                  - generic [ref=e818]:
+                    - generic [ref=e819]:
+                      - generic [ref=e820]: "result:"
+                      - text: PASS
+                    - generic [ref=e821]:
+                      - generic [ref=e822]: "newPinnedBlock:"
+                      - text: "66132607"
+                    - generic [ref=e823]:
+                      - generic [ref=e824]: "feeConfirmedBlock:"
+                      - text: "66132600"
+                    - generic "18510828300000000000" [ref=e825]:
+                      - generic [ref=e826]: "balanceNativeAtomic:"
+                      - text: 18.5108 USDC
+                    - generic [ref=e827]:
+                      - generic [ref=e828]: "gasLimit:"
+                      - text: "40735"
+                    - generic [ref=e829]:
+                      - generic [ref=e830]: "maxFeePerGasGwei:"
+                      - text: "29"
+              - generic [ref=e831]:
+                - generic [ref=e832]: "9"
+                - generic [ref=e833]:
+                  - generic [ref=e834]:
+                    - generic [ref=e835]: Signed — decoded and compared with the plan
+                    - generic [ref=e836]: +32.4 s
+                    - generic [ref=e837]: demo-runner
+                  - generic [ref=e838]: the signed raw transaction is decoded and compared field by field with the validated plan, then persisted with its context before any broadcast
+                  - generic [ref=e840]:
+                    - generic [ref=e841]: "signedTransactionHash:"
+                    - link "0xf10a29…848626" [ref=e842] [cursor=pointer]:
+                      - /url: https://testnet.arcscan.app/tx/0xf10a29dd1db83168b35bf673e850e8a5e967ffb78063bdaf65483defd2848626
+                      - text: 0xf10a29…848626↗
+              - generic [ref=e843]:
+                - generic [ref=e844]: "10"
+                - generic [ref=e845]:
+                  - generic [ref=e846]:
+                    - generic [ref=e847]: Durable broadcast marker written — the transaction may now be on the network
+                    - generic [ref=e848]: +32.7 s
+                  - generic [ref=e849]: "the durable marker is written before the send: from here on the transaction may be on the network, whatever happens to this process"
+                  - generic [ref=e850]:
+                    - generic [ref=e851]:
+                      - generic [ref=e852]: "businessTxHash:"
+                      - link "0xf10a29…848626" [ref=e853] [cursor=pointer]:
+                        - /url: https://testnet.arcscan.app/tx/0xf10a29dd1db83168b35bf673e850e8a5e967ffb78063bdaf65483defd2848626
+                        - text: 0xf10a29…848626↗
+                    - generic [ref=e854]:
+                      - generic [ref=e855]: "headBlock:"
+                      - text: "66132626"
+              - generic [ref=e856]:
+                - generic [ref=e857]: "11"
+                - generic [ref=e858]:
+                  - generic [ref=e859]:
+                    - generic [ref=e860]: Broadcast raw transaction
+                    - generic [ref=e861]: +33.1 s
+                  - generic [ref=e862]: raw transaction handed to the node
+                  - generic [ref=e863]:
+                    - generic [ref=e864]:
+                      - generic [ref=e865]: "businessTxHash:"
+                      - link "0xf10a29…848626" [ref=e866] [cursor=pointer]:
+                        - /url: https://testnet.arcscan.app/tx/0xf10a29dd1db83168b35bf673e850e8a5e967ffb78063bdaf65483defd2848626
+                        - text: 0xf10a29…848626↗
+                    - generic [ref=e867]:
+                      - generic [ref=e868]: "accepted:"
+                      - text: "true"
+              - generic [ref=e869]:
+                - generic [ref=e870]: "12"
+                - generic [ref=e871]:
+                  - generic [ref=e872]:
+                    - generic [ref=e873]: SIMULATED interruption after the broadcast — the process stopped waiting
+                    - generic [ref=e874]: +33.1 s
+                  - generic [ref=e875]: "SIMULATED interruption: this run stopped waiting right after the send, as a crashed process would; recovery works from the recorded hash and the order state, never by signing a replacement"
+                  - generic [ref=e877]:
+                    - generic [ref=e878]: "businessTxHash:"
+                    - link "0xf10a29…848626" [ref=e879] [cursor=pointer]:
+                      - /url: https://testnet.arcscan.app/tx/0xf10a29dd1db83168b35bf673e850e8a5e967ffb78063bdaf65483defd2848626
+                      - text: 0xf10a29…848626↗
+              - generic [ref=e880]:
+                - generic [ref=e881]: "13"
+                - generic [ref=e882]:
+                  - generic [ref=e883]:
+                    - generic [ref=e884]: Reconciled from the original hash and the order state
+                    - generic [ref=e885]: +—
+                  - generic [ref=e886]: the signer nonce was consumed by a transaction this node could not identify within the search window and this hash never received a receipt; the order reads as unpaid; nothing is re-signed
+                  - generic [ref=e887]:
+                    - generic [ref=e888]:
+                      - generic [ref=e889]: "chainStatus:"
+                      - text: UNKNOWN
+                    - generic [ref=e890]:
+                      - generic [ref=e891]: "businessStatus:"
+                      - text: NOT_EXECUTED
+          - generic [ref=e729]:
+            - group [ref=e730]:
+              - generic "Receipt chain — every digest is keccak256 over canonical JSON, schema 1.0; the same bytes the passport carries" [ref=e731] [cursor=pointer]
+              - generic [ref=e732]:
+                - generic [ref=e733]: intent
+                - generic [ref=e734]: 0x0ec76cae…7ed732b4
+                - generic [ref=e735]: policy
+                - generic [ref=e736]: 0x3ccf98c2…5bc1fc39
+                - generic [ref=e737]: report
+                - generic [ref=e738]: 0x120c626f…30db9ce2
+                - generic [ref=e739]: baseline
+                - generic [ref=e740]:
+                  - text: 0xe80bf567…bd88bf9e
+                  - generic [ref=e741]: MATCH
+                - generic [ref=e742]: decision
+                - generic [ref=e743]: 0x609728cb…78dce82b
+                - generic [ref=e892]: final validation
+                - generic [ref=e893]:
+                  - generic [ref=e894]: PASS
+                  - text: "@ #66132607 · balance 18.511 USDC · gas reserve 0.001181 USDC"
+                - generic [ref=e895]: plan
+                - generic [ref=e896]: 0xdd15cb17…b17fb83f · type 2 · nonce 19 · gas 40735 · 29.0 gwei
+                - generic [ref=e897]: signed tx
+                - generic [ref=e898]: 0xf10a29dd…d2848626
+                - generic [ref=e744]: execution
+                - generic [ref=e745]: 0xe6f27245…d9feb52b
+                - generic [ref=e746]: recorded
+                - generic [ref=e747]: 2026-10-08 12:01:43Z
+            - group [ref=e748]:
+              - generic "The pinned report — bought over x402 · delivered after settlement" [ref=e749] [cursor=pointer]
+            - group [ref=e750]:
+              - generic "raw run JSON (intent, policy, report, receipts, cost statement)" [ref=e751] [cursor=pointer]
+      - generic [ref=e131]:
+        - generic [ref=e132]:
+          - heading "Recent runs" [level=3] [ref=e133]
+          - generic [ref=e134]: every run is persisted with its receipts; open one for the permanent link, download its Payment Passport from the row
+        - generic [ref=e135]:
+          - table [ref=e137]:
+            - rowgroup [ref=e138]:
+              - row [ref=e139]:
+                - columnheader "when (UTC)" [ref=e140]
+                - columnheader "network" [ref=e141]
+                - columnheader "situation" [ref=e142]
+                - columnheader "outcome" [ref=e143]
+                - columnheader "check fee" [ref=e144]
+                - columnheader "business payment" [ref=e145]
+                - columnheader "business tx" [ref=e146]
+                - columnheader "service fee tx" [ref=e147]
+                - columnheader "took" [ref=e148]
+                - columnheader [ref=e149]
+            - rowgroup [ref=e150]:
+              - row [ref=e899]:
+                - cell "2026-10-08 12:01:07Z" [ref=e900]
+                - cell "Arc testnet 5042002" [ref=e901]
+                - cell "approved payment" [ref=e903]
+                - cell "✓ no policy violation" [ref=e904]
+                - cell "0.01 USDC" [ref=e906]
+                - cell "—" [ref=e907]
+                - cell "not signed" [ref=e908]
+                - cell [ref=e909]:
+                  - link "0x17fa4…f179d" [ref=e910] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x17fa41afe7c0d96da82657bfe7de5bf121d33c2acedb9ddfa834e4ba6e5f179d
+                    - text: 0x17fa4…f179d↗
+                - cell "33.1 s" [ref=e911]
+                - cell [ref=e912]:
+                  - button "view" [ref=e913] [cursor=pointer]
+                  - link "open" [ref=e914] [cursor=pointer]:
+                    - /url: /runs/95eacbcb-83c7-4cdd-a9a9-f1b289aaa085?net=testnet
+                  - link "passport" [ref=e915] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/95eacbcb-83c7-4cdd-a9a9-f1b289aaa085/passport
+              - row [ref=e151]:
+                - cell "2026-10-08 10:51:24Z" [ref=e152]
+                - cell "Arc testnet 5042002" [ref=e153]
+                - cell "approved payment" [ref=e155]
+                - cell "✓ confirmed" [ref=e156]
+                - cell "0.01 USDC" [ref=e158]
+                - cell "0.05 USDC" [ref=e159]
+                - cell [ref=e160]:
+                  - link "0x5c81a…9721b" [ref=e161] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x5c81ae74d072412b5474baa276bbb5283ccb31fa36f420e75a47d386a1c9721b
+                    - text: 0x5c81a…9721b↗
+                - cell [ref=e162]:
+                  - link "0x926a4…1d9aa" [ref=e163] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x926a4bec4033e2300e551efc153641b6733d7248f98be57ca258b0978ba1d9aa
+                    - text: 0x926a4…1d9aa↗
+                - cell "33.1 s" [ref=e164]
+                - cell [ref=e165]:
+                  - button "view" [ref=e166] [cursor=pointer]
+                  - link "open" [ref=e167] [cursor=pointer]:
+                    - /url: /runs/90cabead-5cf5-4ffb-a441-02d1025f5aaf?net=testnet
+                  - link "passport" [ref=e168] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/90cabead-5cf5-4ffb-a441-02d1025f5aaf/passport
+              - row [ref=e169]:
+                - cell "2026-10-08 10:00:55Z" [ref=e170]
+                - cell "Arc testnet 5042002" [ref=e171]
+                - cell "changed implementation" [ref=e173]
+                - cell "! review required" [ref=e174]
+                - cell "0.01 USDC" [ref=e176]
+                - cell "—" [ref=e177]
+                - cell "not signed" [ref=e178]
+                - cell [ref=e179]:
+                  - link "0xbaace…489b1" [ref=e180] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xbaacef313aabb17f88f43b1e8358e6ef5921299dfa4778a6807b5e7fb81489b1
+                    - text: 0xbaace…489b1↗
+                - cell "21.8 s" [ref=e181]
+                - cell [ref=e182]:
+                  - button "view" [ref=e183] [cursor=pointer]
+                  - link "open" [ref=e184] [cursor=pointer]:
+                    - /url: /runs/58d81e87-2fb6-4446-8cc4-658425d7611a?net=testnet
+                  - link "passport" [ref=e185] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/58d81e87-2fb6-4446-8cc4-658425d7611a/passport
+              - row [ref=e186]:
+                - cell "2026-10-08 09:01:29Z" [ref=e187]
+                - cell "Arc testnet 5042002" [ref=e188]
+                - cell "approved payment" [ref=e190]
+                - cell "✓ confirmed" [ref=e191]
+                - cell "0.01 USDC" [ref=e193]
+                - cell "0.05 USDC" [ref=e194]
+                - cell [ref=e195]:
+                  - link "0x970d6…81c88" [ref=e196] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x970d6641d299ba658f1e878fd92df6dfb970bc138e73f168addb83e67e581c88
+                    - text: 0x970d6…81c88↗
+                - cell [ref=e197]:
+                  - link "0x859c2…9d6ec" [ref=e198] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x859c2bc8839c1e0c7d67c2b3a36e9527f68dff52d880253d5cd3f4ea8e29d6ec
+                    - text: 0x859c2…9d6ec↗
+                - cell "38.6 s" [ref=e199]
+                - cell [ref=e200]:
+                  - button "view" [ref=e201] [cursor=pointer]
+                  - link "open" [ref=e202] [cursor=pointer]:
+                    - /url: /runs/92385e67-8af3-4078-8a8c-6efe35ae2485?net=testnet
+                  - link "passport" [ref=e203] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/92385e67-8af3-4078-8a8c-6efe35ae2485/passport
+              - row [ref=e204]:
+                - cell "2026-10-08 08:56:14Z" [ref=e205]
+                - cell "Arc testnet 5042002" [ref=e206]
+                - cell "changed implementation" [ref=e208]
+                - cell "! review required" [ref=e209]
+                - cell "0.01 USDC" [ref=e211]
+                - cell "—" [ref=e212]
+                - cell "not signed" [ref=e213]
+                - cell [ref=e214]:
+                  - link "0x3d624…829a0" [ref=e215] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x3d624ec3086b637c288ae72e22797a25c10d08dd1c8ecfcf7973ca7d73d829a0
+                    - text: 0x3d624…829a0↗
+                - cell "19.0 s" [ref=e216]
+                - cell [ref=e217]:
+                  - button "view" [ref=e218] [cursor=pointer]
+                  - link "open" [ref=e219] [cursor=pointer]:
+                    - /url: /runs/bb38b2e9-06ff-422c-9c79-202b8e44a8f1?net=testnet
+                  - link "passport" [ref=e220] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/bb38b2e9-06ff-422c-9c79-202b8e44a8f1/passport
+              - row [ref=e221]:
+                - cell "2026-10-08 08:55:52Z" [ref=e222]
+                - cell "Arc testnet 5042002" [ref=e223]
+                - cell "changed implementation" [ref=e225]
+                - cell "! review required" [ref=e226]
+                - cell "0.01 USDC" [ref=e228]
+                - cell "—" [ref=e229]
+                - cell "not signed" [ref=e230]
+                - cell [ref=e231]:
+                  - link "0x09c65…e5857" [ref=e232] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x09c65d562fbc7504c1ada16895d4b8e6aa4f2da1b26473e960c42b030e8e5857
+                    - text: 0x09c65…e5857↗
+                - cell "20.6 s" [ref=e233]
+                - cell [ref=e234]:
+                  - button "view" [ref=e235] [cursor=pointer]
+                  - link "open" [ref=e236] [cursor=pointer]:
+                    - /url: /runs/cd6dd06b-e268-4e62-b6a2-13aeaf99e6f7?net=testnet
+                  - link "passport" [ref=e237] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/cd6dd06b-e268-4e62-b6a2-13aeaf99e6f7/passport
+              - row [ref=e238]:
+                - cell "2026-10-08 08:54:44Z" [ref=e239]
+                - cell "Arc testnet 5042002" [ref=e240]
+                - cell "changed implementation" [ref=e242]
+                - cell "! review required" [ref=e243]
+                - cell "0.01 USDC" [ref=e245]
+                - cell "—" [ref=e246]
+                - cell "not signed" [ref=e247]
+                - cell [ref=e248]:
+                  - link "0xa078f…78537" [ref=e249] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xa078fc7e25e8df85a5169dc6695333947943a76b68d0816aa32e20d72d578537
+                    - text: 0xa078f…78537↗
+                - cell "20.1 s" [ref=e250]
+                - cell [ref=e251]:
+                  - button "view" [ref=e252] [cursor=pointer]
+                  - link "open" [ref=e253] [cursor=pointer]:
+                    - /url: /runs/b4afa1bc-97aa-4a7e-838f-608af819b7fc?net=testnet
+                  - link "passport" [ref=e254] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/b4afa1bc-97aa-4a7e-838f-608af819b7fc/passport
+              - row [ref=e255]:
+                - cell "2026-10-08 08:43:18Z" [ref=e256]
+                - cell "Arc testnet 5042002" [ref=e257]
+                - cell "approved payment" [ref=e259]
+                - cell "✓ confirmed" [ref=e260]
+                - cell "0.01 USDC" [ref=e262]
+                - cell "0.05 USDC" [ref=e263]
+                - cell [ref=e264]:
+                  - link "0xfa0f4…ce8c1" [ref=e265] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xfa0f4420152bb54c3602dd5f41c819bdc5722a3ce4dc71c9a7b4df132d2ce8c1
+                    - text: 0xfa0f4…ce8c1↗
+                - cell [ref=e266]:
+                  - link "0xfa47d…a1dce" [ref=e267] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xfa47d6d05516a36ed4a787cfa38b78d51de616592d421e8b0dc9ae45ae9a1dce
+                    - text: 0xfa47d…a1dce↗
+                - cell "34.2 s" [ref=e268]
+                - cell [ref=e269]:
+                  - button "view" [ref=e270] [cursor=pointer]
+                  - link "open" [ref=e271] [cursor=pointer]:
+                    - /url: /runs/8aaf0f76-9bf8-4561-a3c9-491e690fa940?net=testnet
+                  - link "passport" [ref=e272] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/8aaf0f76-9bf8-4561-a3c9-491e690fa940/passport
+              - row [ref=e273]:
+                - cell "2026-10-08 08:42:51Z" [ref=e274]
+                - cell "Arc testnet 5042002" [ref=e275]
+                - cell "amount unit mismatch" [ref=e277]
+                - cell "✕ blocked" [ref=e278]
+                - cell "0.01 USDC" [ref=e280]
+                - cell "—" [ref=e281]
+                - cell "not signed" [ref=e282]
+                - cell [ref=e283]:
+                  - link "0xf191e…5a525" [ref=e284] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xf191edac5f08a89793b1c82bc675b5655d25b9d5040a6ad829b16c438445a525
+                    - text: 0xf191e…5a525↗
+                - cell "21.7 s" [ref=e285]
+                - cell [ref=e286]:
+                  - button "view" [ref=e287] [cursor=pointer]
+                  - link "open" [ref=e288] [cursor=pointer]:
+                    - /url: /runs/93928d10-6902-4209-b149-d24aa7837861?net=testnet
+                  - link "passport" [ref=e289] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/93928d10-6902-4209-b149-d24aa7837861/passport
+              - row [ref=e290]:
+                - cell "2026-10-08 08:42:27Z" [ref=e291]
+                - cell "Arc testnet 5042002" [ref=e292]
+                - cell "changed implementation" [ref=e294]
+                - cell "! review required" [ref=e295]
+                - cell "0.01 USDC" [ref=e297]
+                - cell "—" [ref=e298]
+                - cell "not signed" [ref=e299]
+                - cell [ref=e300]:
+                  - link "0xcd32b…0e646" [ref=e301] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xcd32b63257ef48870dca153a03ae9fb2fbd04346e86fde93df5f726bbaa0e646
+                    - text: 0xcd32b…0e646↗
+                - cell "18.9 s" [ref=e302]
+                - cell [ref=e303]:
+                  - button "view" [ref=e304] [cursor=pointer]
+                  - link "open" [ref=e305] [cursor=pointer]:
+                    - /url: /runs/62cd8d22-3251-4279-8b19-81aa771f6ac0?net=testnet
+                  - link "passport" [ref=e306] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/62cd8d22-3251-4279-8b19-81aa771f6ac0/passport
+              - row [ref=e307]:
+                - cell "2026-10-08 08:32:34Z" [ref=e308]
+                - cell "Arc testnet 5042002" [ref=e309]
+                - cell "changed implementation" [ref=e311]
+                - cell "! review required" [ref=e312]
+                - cell "0.01 USDC" [ref=e314]
+                - cell "—" [ref=e315]
+                - cell "not signed" [ref=e316]
+                - cell [ref=e317]:
+                  - link "0xdb763…a150a" [ref=e318] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xdb763ac62e8831eccda903a6dd4207a33ac91860546d4f012579eda05e2a150a
+                    - text: 0xdb763…a150a↗
+                - cell "20.6 s" [ref=e319]
+                - cell [ref=e320]:
+                  - button "view" [ref=e321] [cursor=pointer]
+                  - link "open" [ref=e322] [cursor=pointer]:
+                    - /url: /runs/abc94cbc-dd01-4af0-95ef-b97313b05a84?net=testnet
+                  - link "passport" [ref=e323] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/abc94cbc-dd01-4af0-95ef-b97313b05a84/passport
+              - row [ref=e324]:
+                - cell "2026-10-08 07:47:09Z" [ref=e325]
+                - cell "Arc testnet 5042002" [ref=e326]
+                - cell "approved payment" [ref=e328]
+                - cell "✓ confirmed" [ref=e329]
+                - cell "0.01 USDC" [ref=e331]
+                - cell "0.05 USDC" [ref=e332]
+                - cell [ref=e333]:
+                  - link "0x812b7…be6fb" [ref=e334] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x812b732b00b8ce2a30242002c41d036b333e5b4b3215d0282312ef20868be6fb
+                    - text: 0x812b7…be6fb↗
+                - cell [ref=e335]:
+                  - link "0x895bb…5c1b1" [ref=e336] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x895bb90afe278fdafe67c89fff5f481161a378c33b1108af71b885971595c1b1
+                    - text: 0x895bb…5c1b1↗
+                - cell "30.9 s" [ref=e337]
+                - cell [ref=e338]:
+                  - button "view" [ref=e339] [cursor=pointer]
+                  - link "open" [ref=e340] [cursor=pointer]:
+                    - /url: /runs/b746409e-18e7-46cd-b526-995e6f919c82?net=testnet
+                  - link "passport" [ref=e341] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/b746409e-18e7-46cd-b526-995e6f919c82/passport
+          - generic [ref=e359]:
+            - generic [ref=e360]: 12 of 25 runs
+            - button "show more" [ref=e361] [cursor=pointer]
+  - contentinfo [ref=e25]:
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - text: ArcPreflight · release
+        - code [ref=e28]: ui-audit-testnet
+        - text: ·
+        - code [ref=e29]: SUBMISSION_RESTRICTED
+        - text: · eip155:5042002
+        - generic [ref=e362]:
+          - text: · served under
+          - code [ref=e363]: /testnet
+      - generic [ref=e30]:
+        - link "OpenAPI" [ref=e31] [cursor=pointer]:
+          - /url: /testnet/openapi.json
+        - link "GitHub" [ref=e32] [cursor=pointer]:
+          - /url: https://github.com/a252937166/arcpreflight
+        - link "Arc docs" [ref=e33] [cursor=pointer]:
+          - /url: https://docs.arc.io

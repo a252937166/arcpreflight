@@ -1,28 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { isAddress } from "viem";
 import { useNet } from "../App";
-import { api, explorerAddr, type Report } from "../lib/api";
+import { api, apiPath, explorerAddr, type Report } from "../lib/api";
 import { Chip, Hex, Spinner } from "../components/Badges";
 import { ReportView } from "../components/Report";
 import { HandRule, ProxySwap } from "../components/Illustrations";
-
-const OFFICIAL: Record<string, { name: string; address: string; note: string }[]> = {
-  mainnet: [
-    { name: "USDC (ERC-20 face)", address: "0x3600000000000000000000000000000000000000", note: "FiatToken proxy, ZeppelinOS slots" },
-    { name: "Circle GatewayWallet", address: "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE", note: "minimal ERC-1967 proxy" },
-    { name: "StableFX FxEscrow", address: "0xe2E5F173576B513d994073CCbDaCBE027d43DFe6", note: "minimal ERC-1967 proxy" },
-    { name: "CCTP TokenMessengerV2", address: "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d", note: "ERC-1967 impl + admin" },
-    { name: "ERC-8004 IdentityRegistry", address: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432", note: "minimal ERC-1967 proxy" },
-  ],
-  testnet: [{ name: "USDC (ERC-20 face)", address: "0x3600000000000000000000000000000000000000", note: "FiatToken proxy, ZeppelinOS slots" }],
-};
+import { describeError } from "../lib/errors";
 
 export default function Inspect() {
-  const { net } = useNet();
+  const { net, link = (to: string) => to } = useNet();
   const { address } = useParams();
   const nav = useNavigate();
-  const [input, setInput] = useState(address ?? "");
   const [observation, setObservation] = useState<{ address: string; reportDigest: string; report: Report; supported: boolean; evidenceCount: number } | null>(null);
   const data = observation?.address.toLowerCase() === address?.toLowerCase() ? observation : null;
   const [busy, setBusy] = useState(false);
@@ -31,14 +19,18 @@ export default function Inspect() {
     if (!address) { setObservation(null); setBusy(false); return; }
     let alive = true;
     const controller = new AbortController();
-    setInput(address); setBusy(true); setErr(null); setObservation(null);
+    setBusy(true); setErr(null); setObservation(null);
     api.subject(address, controller.signal).then((r) => { if (alive) setObservation({ ...r, address }); })
-      .catch((e) => { if (alive) setErr(e?.message ?? String(e)); }).finally(() => { if (alive) setBusy(false); });
+      .catch((e) => { if (alive) setErr(describeError(e).text); }).finally(() => { if (alive) setBusy(false); });
     return () => { alive = false; controller.abort(); };
   }, [address]);
-  const go = (a: string) => { const v = a.trim(); if (!isAddress(v, { strict: false })) { setErr("that is not a 20-byte address"); return; } nav(`/subjects/${v}`); };
-  const picks = [...(net?.fixtures.filter((f) => f.merchant).map((f) => ({ name: `DemoMerchant ${f.proxy} proxy`, address: f.merchant!, note: f.proxy === "CHANGED" ? "upgraded A→B after approval" : "approved implementation A" })) ?? []), ...(OFFICIAL[net?.network ?? "mainnet"] ?? [])]
-    .filter((p, i, arr) => arr.findIndex((q) => q.address.toLowerCase() === p.address.toLowerCase()) === i);
+  const go = (a: string) => nav(link(`/subjects/${a}`));
+  // The server decides what may be observed (GET /v1/network observableSubjects); fixture proxies get their story from net.fixtures.
+  const picks = (net?.observableSubjects ?? []).map((s) => {
+    const f = net?.fixtures.find((x) => x.merchant && x.merchant.toLowerCase() === s.address.toLowerCase());
+    if (f) return { name: `DemoMerchant ${f.proxy} proxy`, address: s.address, note: f.proxy === "CHANGED" ? "upgraded A→B after approval" : "approved implementation A" };
+    return { name: s.label, address: s.address, note: s.kind === "external" ? "public Arc contract" : "supported intent target" };
+  });
   const impl = data?.report.dependencies.find((d) => d.role === "IMPLEMENTATION");
   return (
     <section className="section">
@@ -47,15 +39,13 @@ export default function Inspect() {
           <div className="stack" style={{ gap: 14 }}>
             <div className="kicker">Inspect · object observation</div>
             <h2>What is behind that address, <em>right now?</em></h2>
-            <p className="muted">Proxy slots are read raw at a verified block hash, then matched against a known template. No intent, no decision — an object observation is never decision-eligible. It is the same observer the paid reports use, pointed at anything.</p>
-            <form className="row" onSubmit={(e) => { e.preventDefault(); go(input); }} style={{ gap: 14 }}>
-              <input className="input mono" placeholder="0x… any contract on Arc" value={input} onChange={(e) => setInput(e.target.value)} style={{ flex: 1, minWidth: 260 }} />
-              <button className="btn primary" type="submit" disabled={busy}>{busy ? <Spinner /> : "observe"}</button>
-            </form>
+            <p className="muted">Proxy slots are read raw at a verified block hash, then matched against a known template. No intent, no decision — an object observation is never decision-eligible. It is the same observer the paid reports use, pointed at a curated list of public samples.</p>
             <p className="small dim row" style={{ gap: 10 }}>
-              <span className="hand" style={{ fontSize: "1.1rem" }}>try one →</span>
-              {picks.map((p) => <button key={p.address} className="btn sm ghost" title={`${p.address} · ${p.note}`} onClick={() => go(p.address)}>{p.name}</button>)}
+              <span className="hand" style={{ fontSize: "1.1rem" }}>pick one →</span>
+              {picks.map((p) => <button key={p.address} className="btn sm ghost" title={`${p.address} · ${p.note}`} onClick={() => go(p.address)} disabled={busy}>{p.name}</button>)}
+              {busy && <Spinner />}
             </p>
+            <p className="small dim">This release observes the samples above only. Each observation is stored as a public report, so arbitrary addresses are refused to keep that list a set of reviewed samples.</p>
             {err && <div className="banner bad">{err}</div>}
           </div>
           <ProxySwap changed={data?.report.baselineResult === "IMPLEMENTATION_CHANGED"} />
@@ -66,7 +56,7 @@ export default function Inspect() {
             <div className="stack fade" style={{ gap: 14 }}>
               <div className="row between" style={{ alignItems: "baseline" }}>
                 <div className="row" style={{ gap: 10, alignItems: "baseline" }}><span className="serif" style={{ fontSize: "1.5rem" }}>subject</span> <Hex value={address!} n={8} link={explorerAddr(net, address!)} />{data.supported ? <Chip tone="ok">supported intent target</Chip> : <Chip>object observation only</Chip>}<Chip tone="info">{data.evidenceCount} raw RPC evidence items</Chip></div>
-                <a className="small" href={`/v1/public-reports/${data.reportDigest}`} target="_blank" rel="noreferrer">report + evidence JSON ↗</a>
+                <a className="small" href={apiPath(`/v1/public-reports/${data.reportDigest}`)} target="_blank" rel="noreferrer">report + evidence JSON ↗</a>
               </div>
               {impl && <p className="caption">it resolves to implementation {impl.address.slice(0, 10)}… with code hash {impl.codeHash?.slice(0, 12)}… — that pair is what a baseline would pin</p>}
               <ReportView report={data.report} digest={data.reportDigest} net={net} />

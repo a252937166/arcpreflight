@@ -1,0 +1,54 @@
+{
+  "kind": "SELF_RELAYED_FEE_PROBE",
+  "network": "testnet",
+  "chainId": 5042002,
+  "usdc": "0x3600000000000000000000000000000000000000",
+  "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+  "relayer": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+  "feeAtomic6": "10000",
+  "authorization": {
+    "from": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+    "to": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+    "value": "10000",
+    "validAfter": "0",
+    "validBefore": "1791387077",
+    "nonce": "0x25376f225c6f4d4cc2b3e6b131c06a1aedc800b642fcc456f56c7b8cfb891e90"
+  },
+  "relayTx": {
+    "hash": "0x0da3dd8121739d48177a47e79e1a0a62d12cbaafd99319950c9ceb525131e087",
+    "nonce": 9,
+    "gasLimit": "105684",
+    "maxFeePerGas": "29000000000"
+  },
+  "stage": "SETTLED",
+  "signedAtUTC": "2026-10-07T15:21:18.880Z",
+  "receipt": {
+    "status": "success",
+    "block": "65985968",
+    "gasUsed": "87141",
+    "effectiveGasPrice": "25000000000",
+    "gasPaidNativeAtomic": "2178525000000000"
+  },
+  "evidence": {
+    "transactionHash": "0x0da3dd8121739d48177a47e79e1a0a62d12cbaafd99319950c9ceb525131e087",
+    "blockNumber": "65985968",
+    "authorizationUsedLogIndex": 17,
+    "transferLogIndex": 19,
+    "from": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+    "to": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+    "value": "10000",
+    "nonce": "0x25376f225c6f4d4cc2b3e6b131c06a1aedc800b642fcc456f56c7b8cfb891e90"
+  },
+  "authorizationStateAfter": true,
+  "balancesNativeAtomic": {
+    "before": {
+      "payer": "19310918700000000000",
+      "relayer": "20270392075000000000"
+    },
+    "after": {
+      "payer": "19300918700000000000",
+      "relayer": "20278213550000000000"
+    }
+  },
+  "settledAtUTC": "2026-10-07T15:21:20.760Z"
+}

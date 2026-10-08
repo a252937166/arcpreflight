@@ -1,18 +1,25 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useNet } from "../App";
-import { api, explorerAddr, explorerTx, type RunSummary } from "../lib/api";
-import { Chip, DecisionBadge, Hex, Labels } from "../components/Badges";
+import { api, apiPath, explorerAddr, explorerTx, type RunSummary } from "../lib/api";
+import { Chip, Hex, Labels } from "../components/Badges";
 import { HandRule, ReceiptChain } from "../components/Illustrations";
+import { RunsTable } from "../components/RunsTable";
 import { ago, utc } from "../lib/format";
 
+const PAGE = 50;
+
 export default function Evidence() {
-  const { net } = useNet();
+  const { net, link = (to: string) => to } = useNet();
   const [files, setFiles] = useState<{ path: string; bytes: number }[]>([]);
   const [reports, setReports] = useState<{ reportDigest: string; subject: string; mode: string; createdAt: string }[]>([]);
-  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [history, setHistory] = useState<{ runs: RunSummary[]; total?: number; more: boolean }>({ runs: [], total: undefined, more: false });
   const [ready, setReady] = useState<any>(null);
-  useEffect(() => { api.evidence().then((r) => setFiles(r.files)).catch(() => {}); api.publicReports().then((r) => setReports(r.reports)).catch(() => {}); api.runs(50).then((r) => setRuns(r.runs)).catch(() => {}); api.health().then(setReady).catch((e) => setReady(e?.body ?? null)); }, []);
+  useEffect(() => { api.evidence().then((r) => setFiles(r.files)).catch(() => {}); api.publicReports().then((r) => setReports(r.reports)).catch(() => {}); api.runs(PAGE, 0).then((r) => setHistory({ runs: r.runs ?? [], total: r.total ?? (r.runs ?? []).length, more: false })).catch(() => {}); api.health().then(setReady).catch((e) => setReady(e?.body ?? null)); }, []);
+  const loadMore = useCallback(() => {
+    setHistory((h) => ({ ...h, more: true }));
+    api.runs(PAGE, history.runs.length).then((r) => setHistory((h) => ({ runs: [...h.runs, ...(r.runs ?? []).filter((x) => !h.runs.some((y) => y.runId === x.runId))], total: r.total ?? h.total, more: false }))).catch(() => setHistory((h) => ({ ...h, more: false })));
+  }, [history.runs.length]);
   const d = net?.deployments;
   return (
     <section className="section">
@@ -34,25 +41,26 @@ export default function Evidence() {
             <div className="stack" style={{ gap: 8 }}>
               <h3>Fixture deployments</h3>
               {d ? (
-                <table className="t"><tbody>
+                <div className="tablewrap fit"><table className="t"><tbody>
                   <tr><td>implA · DemoMerchantV1</td><td><Hex value={d.implA.address} n={6} link={explorerAddr(net, d.implA.address)} /></td><td className="tiny dim">code <Hex value={d.implA.codeHash} n={4} /></td></tr>
                   <tr><td>implB · DemoMerchantV2</td><td><Hex value={d.implB.address} n={6} link={explorerAddr(net, d.implB.address)} /></td><td className="tiny dim">code <Hex value={d.implB.codeHash} n={4} /></td></tr>
                   <tr><td>MAIN proxy (stays on A)</td><td><Hex value={d.proxies.MAIN.address} n={6} link={explorerAddr(net, d.proxies.MAIN.address)} /></td><td className="tiny dim">deploy <Hex value={d.proxies.MAIN.tx} n={4} link={explorerTx(net, d.proxies.MAIN.tx)} /></td></tr>
                   <tr><td>CHANGED proxy (A → B)</td><td><Hex value={d.proxies.CHANGED.address} n={6} link={explorerAddr(net, d.proxies.CHANGED.address)} /></td><td className="tiny dim">upgrade <Hex value={d.proxies.CHANGED.upgradeTx} n={4} link={explorerTx(net, d.proxies.CHANGED.upgradeTx)} /> @ #{d.proxies.CHANGED.upgradeBlock}</td></tr>
-                </tbody></table>
+                </tbody></table></div>
               ) : <p className="dim small">not deployed on this network</p>}
               {d && <p className="tiny dim">deployed {utc(d.deployedAtUTC)} · solc {d.compiler.solc} · {d.compiler.evm} · optimizer runs {d.compiler.optimizerRuns}</p>}
             </div>
             <div className="stack" style={{ gap: 8 }}>
               <h3>Approved baselines</h3>
-              <table className="t"><tbody>{(net?.fixtures ?? []).map((f) => <tr key={f.id}><td className="small">{f.id.replace(/_/g, " ").toLowerCase()}</td><td>{f.baselineDigest ? <Hex value={f.baselineDigest} n={8} /> : <Chip tone="warn">none</Chip>}</td><td className="tiny dim">approved impl <Hex value={f.approvedImplementation} n={4} /> · live impl <Hex value={f.implementation} n={4} /></td></tr>)}</tbody></table>
+              <div className="tablewrap fit"><table className="t"><tbody>{(net?.fixtures ?? []).map((f) => <tr key={f.id}><td className="small">{f.id.replace(/_/g, " ").toLowerCase()}</td><td>{f.baselineDigest ? <Hex value={f.baselineDigest} n={8} /> : <Chip tone="warn">none</Chip>}</td><td className="tiny dim">approved impl <Hex value={f.approvedImplementation} n={4} /> · live impl <Hex value={f.implementation} n={4} /></td></tr>)}</tbody></table></div>
             </div>
             <div className="stack" style={{ gap: 8 }}>
               <h3>Accounts</h3>
-              <div className="kv" style={{ gridTemplateColumns: "140px 1fr" }}>
-                <span className="k">deployer-admin</span><span><Hex value={net?.accounts.deployerAdmin} n={8} link={net?.accounts.deployerAdmin ? explorerAddr(net, net.accounts.deployerAdmin) : undefined} /></span>
+              <div className="kv w140">
+                <span className="k">deployer-admin</span><span><Hex value={net?.accounts.deployerAdmin} n={8} link={net?.accounts.deployerAdmin ? explorerAddr(net, net.accounts.deployerAdmin) : undefined} /> <span className="tiny dim">owner: upgrade, pause, withdraw — {net?.accounts.adminKeyInProcess ? "loaded by the API on this deployment" : "off the API"}</span></span>
+                <span className="k">order-creator</span><span><Hex value={net?.accounts.orderCreator} n={8} link={net?.accounts.orderCreator ? explorerAddr(net, net.accounts.orderCreator) : undefined} /> <span className="tiny dim">creates orders only · signs as <code>{net?.accounts.orderSignerRole ?? "—"}</code></span></span>
                 <span className="k">demo-runner</span><span><Hex value={net?.accounts.demoRunner} n={8} link={net?.accounts.demoRunner ? explorerAddr(net, net.accounts.demoRunner) : undefined} /></span>
-                <span className="k">merchant payTo</span><span><Hex value={net?.accounts.merchantPayTo} n={8} link={net?.accounts.merchantPayTo ? explorerAddr(net, net.accounts.merchantPayTo) : undefined} /></span>
+                <span className="k">merchant payTo</span><span><Hex value={net?.accounts.merchantPayTo} n={8} link={net?.accounts.merchantPayTo ? explorerAddr(net, net.accounts.merchantPayTo) : undefined} /> <span className="tiny dim">receives fees, relays settlements</span></span>
               </div>
             </div>
           </div>
@@ -65,23 +73,20 @@ export default function Evidence() {
             </div>
             <div className="stack" style={{ gap: 8 }}>
               <h3>Published evidence files</h3>
-              {files.length === 0 ? <p className="dim small">none published</p> : <ul className="list plain small">{files.map((f) => <li key={f.path}><a href={`/v1/evidence/${f.path}`} target="_blank" rel="noreferrer" className="mono">{f.path}</a> <span className="tiny dim">{f.bytes} B</span></li>)}</ul>}
+              {files.length === 0 ? <p className="dim small">none published</p> : <ul className="list plain small">{files.map((f) => <li key={f.path}><a href={apiPath(`/v1/evidence/${f.path}`)} target="_blank" rel="noreferrer" className="mono" style={{ overflowWrap: "anywhere" }}>{f.path}</a> <span className="tiny dim">{f.bytes} B</span></li>)}</ul>}
             </div>
-            <p className="small muted">API: <a href="/openapi.json" target="_blank" rel="noreferrer">/openapi.json</a> · <a href="/health/ready" target="_blank" rel="noreferrer">/health/ready</a> · <a href="/v1/network" target="_blank" rel="noreferrer">/v1/network</a> · <a href="/v1/demo/runs" target="_blank" rel="noreferrer">/v1/demo/runs</a></p>
+            <p className="small muted">API: <a href={apiPath("/openapi.json")} target="_blank" rel="noreferrer">{apiPath("/openapi.json")}</a> · <a href={apiPath("/health/ready")} target="_blank" rel="noreferrer">{apiPath("/health/ready")}</a> · <a href={apiPath("/v1/network")} target="_blank" rel="noreferrer">{apiPath("/v1/network")}</a> · <a href={apiPath("/v1/demo/runs")} target="_blank" rel="noreferrer">{apiPath("/v1/demo/runs")}</a></p>
           </div>
         </div>
 
         <HandRule />
         <div className="stack" style={{ gap: 8 }}>
-          <div className="row between"><h3>All demo runs</h3><span className="tiny dim">{runs.length} persisted</span></div>
-          <table className="t">
-            <thead><tr><th>when</th><th>situation</th><th>outcome</th><th>labels</th><th>business tx</th><th>service fee</th><th></th></tr></thead>
-            <tbody>{runs.map((r) => <tr key={r.runId}><td className="tiny dim">{ago(r.createdAt)}</td><td className="small">{r.fixture.replace(/_/g, " ").toLowerCase()}</td><td><DecisionBadge decision={r.businessStatus === "SUCCESS" ? "CONFIRMED" : r.decision ?? r.state} size="sm" /></td><td><Labels labels={r.labels} /></td><td>{r.businessTxHash ? <Hex value={r.businessTxHash} n={5} link={explorerTx(net, r.businessTxHash)} /> : <span className="dim">—</span>}</td><td>{r.serviceFeeTx ? <Hex value={r.serviceFeeTx} n={5} link={explorerTx(net, r.serviceFeeTx)} /> : "—"}</td><td><Link to={`/runs/${r.runId}`} className="btn sm ghost">open</Link></td></tr>)}</tbody>
-          </table>
+          <div className="row between"><h3>All demo runs</h3><span className="tiny dim">{history.total ?? history.runs.length} persisted · UTC timestamps · passport per finished run</span></div>
+          <RunsTable runs={history.runs} net={net} total={history.total} onMore={loadMore} loadingMore={history.more} />
         </div>
         <div className="stack" style={{ gap: 8 }}>
           <div className="row between"><h3>Public object reports</h3><span className="tiny dim">cached observations with raw evidence</span></div>
-          {reports.length === 0 ? <p className="dim small">none yet</p> : <table className="t"><tbody>{reports.map((r) => <tr key={r.reportDigest}><td className="tiny dim">{ago(r.createdAt)}</td><td><Link to={`/subjects/${r.subject}`}><Hex value={r.subject} n={6} /></Link></td><td className="small">{r.mode}</td><td><a href={`/v1/public-reports/${r.reportDigest}`} target="_blank" rel="noreferrer"><Hex value={r.reportDigest} n={6} /></a></td></tr>)}</tbody></table>}
+          {reports.length === 0 ? <p className="dim small">none yet</p> : <div className="tablewrap fit"><table className="t"><tbody>{reports.map((r) => <tr key={r.reportDigest}><td className="when" title={ago(r.createdAt)}>{utc(r.createdAt)}</td><td><Link to={link(`/subjects/${r.subject}`)}><Hex value={r.subject} n={6} /></Link></td><td className="small">{r.mode}</td><td><a href={apiPath(`/v1/public-reports/${r.reportDigest}`)} target="_blank" rel="noreferrer"><Hex value={r.reportDigest} n={6} /></a></td></tr>)}</tbody></table></div>}
         </div>
       </div>
     </section>

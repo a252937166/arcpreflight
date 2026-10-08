@@ -5,9 +5,11 @@ import { arcTestnet } from "viem/chains";
 import { BaselineCore, ReportCore, baselineDigest, intentDigest, reportDigest, type IntentCore } from "@arcpreflight/schema";
 import { PAY_SELECTOR } from "@arcpreflight/policy";
 import { signTransferAuthorization } from "@arcpreflight/client";
-import { runFixture, type Fixture, type RunOptions } from "../src/index.js";
+import { captureSnapshot, readCode } from "@arcpreflight/observer";
+import { runFixture, type Fixture, type RunOptions, type SignedExecution, type ExecutionOutcome } from "../src/index.js";
 
 const D = (`0x${"11".repeat(32)}`) as Hex;
+const T = (`0x${"22".repeat(32)}`) as Hex;
 const MERCHANT = "0x0000000000000000000000000000000000000a11" as Hex;
 const IMPL = "0x0000000000000000000000000000000000000b22" as Hex;
 const AMOUNT = 50_000_000_000_000_000n;
@@ -24,9 +26,14 @@ vi.mock("@arcpreflight/observer", () => ({
   captureSnapshot: vi.fn(async () => snapshot()),
   readSlot: vi.fn(async () => ({ value: `0x${IMPL.slice(2).padStart(64, "0")}`, evidenceDigest: D })),
   readCall: vi.fn(async (_client: unknown, _merchant: unknown, data: string) => ({ value: { ok: true, data: data === "0x5c975abb" ? encodeFunctionResult({ abi: pausedAbi, functionName: "paused", result: false }) : "0x", error: null }, evidenceDigest: D })),
+  readCode: vi.fn(async () => ({ value: { code: null, codeHash: null, bytes: 0 }, evidence: {}, evidenceDigest: D })),
 }));
 
-type Scenario = { fixture: Fixture; staleQuote?: boolean; alwaysStale?: boolean; missingPinnedBlock?: boolean; revokeBeforeSigning?: boolean; baselinePatch?: Partial<BaselineCore> };
+type Scenario = { fixture: Fixture; staleQuote?: boolean; alwaysStale?: boolean; missingPinnedBlock?: boolean; revokeBeforeSigning?: boolean; baselinePatch?: Partial<BaselineCore>;
+  /** fault injection and account-path cases */
+  wrongBaselineDigest?: boolean; signerHasCode?: boolean; codeReadFails?: boolean; feeReceiptMissing?: boolean; snapshotBlock?: string; broadcastThrows?: boolean; receiptTimeout?: boolean;
+  /** review round 2: artefact persistence failing for one artefact name; a snapshot that is already older than the validation window */
+  artifactFails?: string; staleSnapshotSeconds?: number };
 function harness(s: Scenario) {
   // Synthetic test account; all sends, RPC reads and payment requests are local mocks.
   const account = privateKeyToAccount(`0x${"22".repeat(32)}`);
@@ -46,7 +53,8 @@ function harness(s: Scenario) {
   const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     if (String(url).includes("/v1/baselines/")) {
       baselineReads++;
-      return Response.json({ baseline, baselineDigest: bDigest, revoked: !!s.revokeBeforeSigning && baselineReads >= 2 });
+      // a server answering with a different (newer) approval than the one referenced must be ignored
+      return Response.json({ baseline, baselineDigest: s.wrongBaselineDigest ? T : bDigest, revoked: !!s.revokeBeforeSigning && baselineReads >= 2 });
     }
     const body = JSON.parse(String(init?.body));
     lastIntent = body.intent;
@@ -61,18 +69,34 @@ function harness(s: Scenario) {
       signals: ["PROXY_TEMPLATE_VERIFIED", "SUPPORTED_STATE_ORDER_PAYABLE", "CALL_SIMULATION"].map((id) => ({ id, state: "observed", basis: "chain_read", scope: "test", evidenceDigests: [D], limitations: [], sourceIds: [] })),
       rawEvidenceDigests: [D], exclusions: [], expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
-    return Response.json({ delivery: "DELIVERED", report, reportDigest: reportDigest(report), simulation: { ok: s.fixture !== "AMOUNT_UNIT_MISMATCH", error: s.fixture === "AMOUNT_UNIT_MISMATCH" ? "WrongAmount" : null }, payment: { transaction: D } });
+    return Response.json({ delivery: "DELIVERED", report, reportDigest: reportDigest(report), simulation: { ok: s.fixture !== "AMOUNT_UNIT_MISMATCH", error: s.fixture === "AMOUNT_UNIT_MISMATCH" ? "WrongAmount" : null }, payment: { transaction: T } });
   });
   vi.stubGlobal("fetch", fetchMock);
-  const sendRawTransaction = vi.fn(async ({ serializedTransaction }: { serializedTransaction: Hex }) => keccak256(serializedTransaction));
+  vi.mocked(readCode).mockImplementation(async () => {
+    if (s.codeReadFails) throw new Error("rpc down");
+    return { value: s.signerHasCode ? { code: `0xef0100${"11".repeat(20)}` as Hex, codeHash: D, bytes: 23 } : { code: null, codeHash: null, bytes: 0 }, evidence: {} as any, evidenceDigest: D };
+  });
+  vi.mocked(captureSnapshot).mockImplementation(async () => ({ ...snapshot(), blockNumber: s.snapshotBlock ?? "150", observedAt: new Date(Date.now() - (s.staleSnapshotSeconds ?? 0) * 1000).toISOString() }));
+  const artifacts: string[] = [];
+  const onArtifact = vi.fn(async (name: string) => { if (s.artifactFails === name) throw new Error("disk full"); artifacts.push(name); });
+  const calls: string[] = []; let signed: SignedExecution | null = null; const outcomes: ExecutionOutcome[] = [];
+  const store = {
+    persistSigned: vi.fn(async (e: SignedExecution) => { calls.push("persistSigned"); signed = e; }),
+    markBroadcastAttempted: vi.fn(async () => { calls.push("markBroadcastAttempted"); }),
+    persistOutcome: vi.fn(async (_id: string, o: ExecutionOutcome) => { calls.push(`persistOutcome:${o.chainStatus}`); outcomes.push(o); }),
+  };
+  const sendRawTransaction = vi.fn(async ({ serializedTransaction }: { serializedTransaction: Hex }) => { calls.push("send"); if (s.broadcastThrows) throw new Error("socket hang up"); return keccak256(serializedTransaction); });
   const publicClient = {
-    getBlockNumber: vi.fn(async () => 200n), waitForTransactionReceipt: vi.fn(async () => ({ status: "success", blockNumber: 100n })),
+    getBlockNumber: vi.fn(async () => 200n),
+    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => { if (s.receiptTimeout && hash !== D) throw new Error("Timed out while waiting for transaction"); return { status: "success", blockNumber: 100n, transactionHash: hash }; }),
+    getTransactionReceipt: vi.fn(async () => { if (s.feeReceiptMissing) throw new Error("not found"); return { status: "success", blockNumber: 100n }; }), // the service-fee confirmation
     getBalance: vi.fn(async () => 10n ** 18n), estimateGas: vi.fn(async () => 50_000n), getTransactionCount: vi.fn(async () => 1), sendRawTransaction,
     readContract: vi.fn(async () => [account.address, AMOUNT, true, 100n, 151n]),
   };
   const options = { fixture: s.fixture, net: "testnet", chain: arcTestnet, publicClient, admin: { writeContract: vi.fn(async () => D) }, runner: account,
-    merchant: MERCHANT, baselineDigest: bDigest, apiUrl: "http://mock-api.invalid", token: "test-token", feeParams: async () => ({ maxFeePerGas: 20_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n }), labels: ["LIVE_REQUEST"] } as unknown as RunOptions;
-  return { options, signTransaction, sendRawTransaction, quoteIds, getIntent: () => lastIntent };
+    merchant: MERCHANT, baselineDigest: bDigest, apiUrl: "http://mock-api.invalid", token: "test-token", feeParams: async () => ({ maxFeePerGas: 20_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n }), labels: ["LIVE_REQUEST"],
+    executionStore: store, receiptTimeoutMs: 1000, onArtifact } as unknown as RunOptions;
+  return { options, signTransaction, sendRawTransaction, quoteIds, getIntent: () => lastIntent, calls, store, getSigned: () => signed, outcomes, artifacts, onArtifact };
 }
 
 beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers({ toFake: ["setTimeout"] }); });
@@ -96,6 +120,7 @@ describe("runner approvals and retry binding", () => {
     expect(h.signTransaction).toHaveBeenCalledTimes(fixture === "APPROVED_PAYMENT" ? 1 : 0);
     expect(h.sendRawTransaction).toHaveBeenCalledTimes(fixture === "APPROVED_PAYMENT" ? 1 : 0);
     expect(result.steps.find((step: { step: string }) => step.step === "decision").checks).toContain("BASELINE_STATUS:PASS");
+    if (fixture === "APPROVED_PAYMENT") expect(result.finalValidation.walletEvidenceDigest).toBe(D); // the real eth_getCode evidence, not a declaration
   });
   it("rehashes a replacement intent after a stale free quote and completes one purchase", async () => {
     const { h, result } = await run({ fixture: "APPROVED_PAYMENT", staleQuote: true });
@@ -140,5 +165,90 @@ describe("runner approvals and retry binding", () => {
     expect(result.execution.chainStatus).toBe("NOT_SIGNED");
     expect(h.signTransaction).not.toHaveBeenCalled();
     expect(h.sendRawTransaction).not.toHaveBeenCalled();
+  });
+  it("uses the approval referenced by the intent and ignores a server that answers with another one", async () => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT", wrongBaselineDigest: true });
+    expect(result.decision.decision).toBe("REVIEW_REQUIRED");
+    expect(h.signTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("signer account path and snapshot ordering (final validation)", () => {
+  it.each([
+    ["the signer account has code (delegated or contract account)", { signerHasCode: true }, "signer account has code"],
+    ["the account-code read is inconclusive", { codeReadFails: true }, "inconclusive"],
+    ["the service-fee confirmation block is unknown", { feeReceiptMissing: true }, "confirmation block unknown"],
+    ["the snapshot predates the fee confirmation or the order", { snapshotBlock: "95" }, "predates"],
+  ] as const)("does not sign when %s", async (_label, scenario, reason) => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT", ...scenario });
+    expect(result.decision.decision).toBe("NO_POLICY_VIOLATION");
+    expect(result.finalValidation.result).toBe("REVIEW_REQUIRED");
+    expect(result.finalValidation.reasons.join("; ")).toContain(reason);
+    expect(result.execution.chainStatus).toBe("NOT_SIGNED");
+    expect(h.signTransaction).not.toHaveBeenCalled();
+    expect(h.store.persistSigned).not.toHaveBeenCalled();
+  });
+});
+
+describe("business-transaction persistence and recovery (spec D07)", () => {
+  it("persists the signed transaction, then the broadcast marker, before sending, and records the confirmed outcome", async () => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT" });
+    expect(h.calls).toEqual(["persistSigned", "markBroadcastAttempted", "send", "persistOutcome:CONFIRMED"]);
+    const signed = h.getSigned()!;
+    const sentRaw = h.sendRawTransaction.mock.calls[0][0].serializedTransaction;
+    expect(signed.raw).toBe(sentRaw); expect(signed.txHash).toBe(keccak256(sentRaw)); expect(signed.nonce).toBe(1);
+    expect(signed).toMatchObject({ orderId: result.orderId, intentDigest: result.intentDigest, reportDigest: result.reportDigest, decisionDigest: result.decisionDigest, finalValidationDigest: result.execution.finalValidationDigest, transactionPlanDigest: result.execution.transactionPlanDigest });
+    expect(new Date(signed.validUntil).getTime()).toBeGreaterThan(0);
+    expect(result.execution).toMatchObject({ chainStatus: "CONFIRMED", businessStatus: "SUCCESS", businessTxHash: signed.txHash, signedTransactionHash: signed.txHash });
+    expect(h.outcomes[0]).toMatchObject({ chainStatus: "CONFIRMED", businessStatus: "SUCCESS", businessTxHash: signed.txHash, block: "100" });
+  });
+  it("still confirms from the receipt when the broadcast call throws but the transaction propagated anyway", async () => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT", broadcastThrows: true });
+    expect(h.calls).toEqual(["persistSigned", "markBroadcastAttempted", "send", "persistOutcome:CONFIRMED"]);
+    expect(result.steps.find((s: { step: string }) => s.step === "broadcast")).toMatchObject({ accepted: false, error: expect.stringContaining("socket hang up") });
+    expect(result.execution).toMatchObject({ chainStatus: "CONFIRMED", businessStatus: "SUCCESS", businessTxHash: h.getSigned()!.txHash });
+    expect(h.signTransaction).toHaveBeenCalledTimes(1); // no replacement is signed
+  });
+  it("records UNKNOWN, not a business failure, when the broadcast call throws and no receipt can be obtained", async () => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT", broadcastThrows: true, receiptTimeout: true });
+    expect(h.calls).toEqual(["persistSigned", "markBroadcastAttempted", "send", "persistOutcome:UNKNOWN"]);
+    expect(result.execution).toMatchObject({ chainStatus: "UNKNOWN", businessStatus: "UNKNOWN", businessTxHash: h.getSigned()!.txHash });
+    expect(h.signTransaction).toHaveBeenCalledTimes(1);
+    expect(result.steps.map((s: { step: string }) => s.step)).toContain("outcomeUnknown");
+  });
+  it("records UNKNOWN when no receipt arrives within the bounded wait", async () => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT", receiptTimeout: true });
+    expect(h.calls).toEqual(["persistSigned", "markBroadcastAttempted", "send", "persistOutcome:UNKNOWN"]);
+    expect(result.execution).toMatchObject({ chainStatus: "UNKNOWN", businessStatus: "UNKNOWN" });
+    expect(h.outcomes[0].note).toContain("receipt not obtained");
+    expect(h.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("review round 2 — evidence before the broadcast, the real snapshot age", () => {
+  it("persists every artefact up to the signed execution record, and a persistence failure before the broadcast stops the run with nothing sent", async () => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT" });
+    expect(h.artifacts.slice(0, 7)).toEqual(["order", "intent", "quote", "feeAuthorization", "report", "decision", "execution"]);
+    expect(h.artifacts).toContain("finalValidation"); expect(h.artifacts.filter((a) => a === "execution").length).toBeGreaterThanOrEqual(3);
+    expect(result.execution.chainStatus).toBe("CONFIRMED");
+    const h2 = harness({ fixture: "APPROVED_PAYMENT", artifactFails: "finalValidation" });
+    const running = runFixture(h2.options); await vi.runAllTimersAsync();
+    await expect(running).rejects.toThrow(/artefact finalValidation could not be persisted before the broadcast.*nothing was sent/);
+    expect(h2.sendRawTransaction).not.toHaveBeenCalled(); expect(h2.store.markBroadcastAttempted).not.toHaveBeenCalled(); expect(h2.signTransaction).not.toHaveBeenCalled();
+  });
+  it("a persistence failure after the broadcast is logged, never fatal: the outcome is still established", async () => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT", artifactFails: "postcondition" });
+    expect(h.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(result.execution).toMatchObject({ chainStatus: "CONFIRMED", businessStatus: "SUCCESS" });
+    expect(result.steps.find((s: { step: string }) => s.step === "artifactNotPersisted")).toMatchObject({ artifact: "postcondition" });
+  });
+  it("the validation window counts from the pinned observation: a snapshot already older than the window is refused and nothing is signed", async () => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT", staleSnapshotSeconds: 30 }); // the runner policy allows 5 s
+    expect(result.finalValidation.result).toBe("REVIEW_REQUIRED");
+    expect(result.finalValidation.reasons.join("; ")).toMatch(/exceeded its own window/);
+    expect(h.signTransaction).not.toHaveBeenCalled();
+    const fresh = await run({ fixture: "APPROVED_PAYMENT" });
+    const fv = fresh.result.finalValidation;
+    expect(new Date(fv.expiresAt).getTime() - new Date(fv.snapshot.observedAt).getTime()).toBeLessThanOrEqual(5000); // expiry = observedAt + window, not "now + window"
   });
 });

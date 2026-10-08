@@ -70,7 +70,7 @@ export function HeroScene() {
           <text x="150" y="92" textAnchor="middle" fontSize="12" className="fill-amber">$</text>
           <text className="note" x="150" y="46" textAnchor="middle" fontSize="16">0.01 USDC via x402</text>
         </g>
-        <text className="note" x="40" y="330" fontSize="17">nothing is signed until the lens says "still A"</text>
+        <text className="note" x="40" y="330" fontSize="17">no business transaction is signed until the lens says "still A"</text>
       </g>
     </svg>
   );
@@ -94,7 +94,7 @@ export function TwoFaces() {
         <path d="M232 110 C 260 100, 300 120, 328 110" className="ink draw d2" markerEnd="url(#arrow)" markerStart="url(#arrow)" style={{ color: "var(--ink-2)" }} />
         <text x="280" y="92" textAnchor="middle" fontSize="12">one balance</text>
         <text x="280" y="206" textAnchor="middle" fontSize="19" className="fill-rose note">50000 ≠ 50 000 000 000 000 000</text>
-        <text x="280" y="230" textAnchor="middle" fontSize="15" className="fill-dim note">a 10¹² underpayment that looks like 0.05 USDC — AMOUNT_SEMANTICS blocks it before a signature exists</text>
+        <text x="280" y="230" textAnchor="middle" fontSize="15" className="fill-dim note">native value 50000 instead of 50000000000000000 — AMOUNT_SEMANTICS blocks it; no business transaction is signed</text>
       </g>
     </svg>
   );
@@ -142,21 +142,21 @@ export function ReceiptChain() {
   );
 }
 
-/** x402 on Arc through the Circle Facilitator. */
+/** x402 on Arc, settled by ArcPreflight's own relayer: the buyer signs, the merchant account submits the transfer and pays gas in USDC. */
 export function FacilitatorFlow() {
   return (
-    <svg className="ill" viewBox="0 0 560 220" role="img" aria-label="The agent signs an EIP-3009 authorization; ArcPreflight forwards it with a seller proof; the Circle Facilitator settles on Arc">
+    <svg className="ill" viewBox="0 0 560 220" role="img" aria-label="The agent signs an EIP-3009 authorization; ArcPreflight's merchant account relays it to the USDC contract on Arc and pays the gas in USDC; the report is delivered once the transfer is confirmed on-chain">
       <Sketch id="sk5" />
       <g filter="url(#sk5)">
         <rect x="20" y="70" width="110" height="56" rx="12" className="ink draw" /><text x="75" y="94" textAnchor="middle" fontSize="12" className="lbl">agent (buyer)</text><text x="75" y="112" textAnchor="middle" className="mono">signs EIP-3009</text>
-        <rect x="225" y="70" width="110" height="56" rx="12" className="ink teal draw d1" /><text x="280" y="94" textAnchor="middle" fontSize="12" className="lbl">ArcPreflight</text><text x="280" y="112" textAnchor="middle" className="mono">seller proof</text>
-        <rect x="430" y="70" width="110" height="56" rx="12" className="ink violet draw d2" /><text x="485" y="94" textAnchor="middle" fontSize="12" className="lbl">Circle Facilitator</text><text x="485" y="112" textAnchor="middle" className="mono">/settle on Arc</text>
+        <rect x="225" y="70" width="110" height="56" rx="12" className="ink teal draw d1" /><text x="280" y="94" textAnchor="middle" fontSize="12" className="lbl">ArcPreflight relayer</text><text x="280" y="112" textAnchor="middle" className="mono">submits, pays gas</text>
+        <rect x="430" y="70" width="110" height="56" rx="12" className="ink violet draw d2" /><text x="485" y="94" textAnchor="middle" fontSize="12" className="lbl">USDC on Arc</text><text x="485" y="112" textAnchor="middle" className="mono">transfer + logs</text>
         <path d="M132 98 L220 98" className="ink draw d1" markerEnd="url(#arrow)" style={{ color: "var(--ink-2)" }} /><text x="176" y="88" textAnchor="middle" fontSize="12">authorization</text>
-        <path d="M337 98 L425 98" className="ink draw d2" markerEnd="url(#arrow)" style={{ color: "var(--ink-2)" }} /><text x="381" y="88" textAnchor="middle" fontSize="12">settle</text>
+        <path d="M337 98 L425 98" className="ink draw d2" markerEnd="url(#arrow)" style={{ color: "var(--ink-2)" }} /><text x="381" y="88" textAnchor="middle" fontSize="12">relay</text>
         <path d="M485 128 C 485 160, 300 160, 280 180" className="ink mint dashed draw d3" markerEnd="url(#arrow)" style={{ color: "var(--mint)" }} />
-        <text x="420" y="178" textAnchor="middle" fontSize="12" className="fill-mint">tx on Arc → report delivered</text>
+        <text x="420" y="178" textAnchor="middle" fontSize="12" className="fill-mint">transfer confirmed → report delivered</text>
         <text x="75" y="160" textAnchor="middle" fontSize="15" className="fill-amber note">0.01 USDC, 6-dec</text>
-        <text x="75" y="180" textAnchor="middle" fontSize="14" className="fill-dim note">no allowance, no gas</text>
+        <text x="75" y="180" textAnchor="middle" fontSize="14" className="fill-dim note">no allowance, no gas for the buyer</text>
       </g>
     </svg>
   );

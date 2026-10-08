@@ -1,0 +1,43 @@
+- generic [ref=f10e2]:
+  - banner [ref=f10e3]:
+    - generic [ref=f10e4]:
+      - generic [ref=f10e5]:
+        - link "ArcPreflight" [ref=f10e6] [cursor=pointer]:
+          - /url: /
+        - generic [ref=f10e7]:
+          - generic [ref=f10e8]:
+            - text: connecting…
+            - generic "window.ethereum is a local test wallet injected for automated self-testing (open with ?testwallet=off to remove it)" [ref=f10e10]: test
+          - button "0xab1a…Fe03 test" [ref=f10e12] [cursor=pointer]:
+            - text: 0xab1a…Fe03
+            - generic [ref=f10e14]: test
+      - navigation [ref=f10e15]:
+        - link "Overview" [ref=f10e16] [cursor=pointer]:
+          - /url: /
+        - link "Live demo" [ref=f10e17] [cursor=pointer]:
+          - /url: /demo
+        - link "Inspect" [ref=f10e18] [cursor=pointer]:
+          - /url: /inspect
+        - link "Developer" [ref=f10e19] [cursor=pointer]:
+          - /url: /developer
+        - link "Verify" [ref=f10e20] [cursor=pointer]:
+          - /url: /verify
+        - link "Evidence" [ref=f10e21] [cursor=pointer]:
+          - /url: /evidence
+  - main [ref=f10e22]:
+    - paragraph [ref=f10e24]: finding the API instances this site fronts…
+  - contentinfo [ref=f10e26]:
+    - generic [ref=f10e27]:
+      - generic [ref=f10e28]:
+        - text: ArcPreflight · release
+        - code [ref=f10e29]: …
+        - text: ·
+        - code [ref=f10e30]: …
+        - text: ·
+      - generic [ref=f10e31]:
+        - link "OpenAPI" [ref=f10e32] [cursor=pointer]:
+          - /url: /openapi.json
+        - link "GitHub" [ref=f10e33] [cursor=pointer]:
+          - /url: https://github.com/a252937166/arcpreflight
+        - link "Arc docs" [ref=f10e34] [cursor=pointer]:
+          - /url: https://docs.arc.io

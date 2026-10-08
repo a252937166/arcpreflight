@@ -1,0 +1,78 @@
+{
+  "generatedBy": "packages/verifier/test/vectors/generate.ts",
+  "gas": [
+    {
+      "gasUsed": "87141",
+      "effectiveGasPrice": "25000000000",
+      "nativeAtomic": "2178525000000000",
+      "usdc": "0.002178525"
+    },
+    {
+      "gasUsed": "40364",
+      "effectiveGasPrice": "21000000000",
+      "nativeAtomic": "847644000000000",
+      "usdc": "0.000847644"
+    },
+    {
+      "gasUsed": "98107",
+      "effectiveGasPrice": "21000000000",
+      "nativeAtomic": "2060247000000000",
+      "usdc": "0.002060247"
+    },
+    {
+      "gasUsed": "1",
+      "effectiveGasPrice": "1",
+      "nativeAtomic": "1",
+      "usdc": "0.000000000000000001"
+    },
+    {
+      "gasUsed": "0",
+      "effectiveGasPrice": "21000000000",
+      "nativeAtomic": "0",
+      "usdc": "0"
+    },
+    {
+      "gasUsed": "123456789",
+      "effectiveGasPrice": "1000000001",
+      "nativeAtomic": "123456789123456789",
+      "usdc": "0.123456789123456789"
+    }
+  ],
+  "format": [
+    {
+      "atomic": "2178525000000000",
+      "decimals": 18,
+      "usdc": "0.002178525"
+    },
+    {
+      "atomic": "50000000000000000",
+      "decimals": 18,
+      "usdc": "0.05"
+    },
+    {
+      "atomic": "10000",
+      "decimals": 6,
+      "usdc": "0.01"
+    },
+    {
+      "atomic": "0",
+      "decimals": 18,
+      "usdc": "0"
+    },
+    {
+      "atomic": "1",
+      "decimals": 18,
+      "usdc": "0.000000000000000001"
+    },
+    {
+      "atomic": "1000000000000000000",
+      "decimals": 18,
+      "usdc": "1"
+    },
+    {
+      "atomic": "123456789012345678901",
+      "decimals": 18,
+      "usdc": "123.456789012345678901"
+    }
+  ]
+}

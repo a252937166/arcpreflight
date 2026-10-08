@@ -1,0 +1,33 @@
+{
+  "kind": "controlled interruption and recovery of a business transaction (design v3.2 §11, AP32-17 testnet exercise, AP32-33)",
+  "network": "testnet",
+  "chainId": 5042002,
+  "release": "v32-rehearsal (uncommitted working tree of 2026-10-08)",
+  "performedAtUTC": "2026-10-08T07:00:10Z",
+  "environment": "examples/merchant-agent CLI with its durable SQLite execution store (data/agent-v32-20261008.sqlite), buying the check from an isolated local API (127.0.0.1:4043, database data/selftest-v32-20261008.sqlite); project testnet funds only",
+  "procedure": [
+    "1. `merchant-agent run APPROVED_PAYMENT --crash-after-broadcast`: order created by the order-creator role, check fee paid, report delivered, decision NO_POLICY_VIOLATION, final validation PASS, business transaction signed, persisted (SIGNED), broadcast marker written with the head block, raw bytes sent — then the process ended with exit code 137 before any receipt was awaited",
+    "2. store state right after the crash: BROADCAST_ATTEMPTED, business_status empty, broadcast_block 66097023, tx 0x66ef771c…95dd09, nonce 13",
+    "3. next CLI invocation: reconciliation from the store ran first and closed the attempt from the original hash and the order state — CONFIRMED / SUCCESS at block 66097032, note 'reconciled from the original transaction hash and the order state'; nothing was re-signed",
+    "4. independent read of the original transaction's receipt from the testnet RPC: status 0x1, block 66097032, from the demo-runner, 2 logs"
+  ],
+  "attempt": {
+    "attemptId": "e2f42cd1-32da-4971-a487-02cce3dc0967",
+    "orderId": "0x05c77028ba382c1b075a6a8306b9524799742dd0fb317cea1882a2ce39ea312d",
+    "createOrderTx": "0x7c9659bbbb7e9c7432d9aa35ccf4269a48d164149a0d81805dbf05e66cc3c66f",
+    "createOrderBlock": "66096962",
+    "serviceFeeTx": "0x57ee90611cad4c8f7cbb6cb23138916b278af6944c9653d111846ab12b5f7446",
+    "feeConfirmedBlock": "66096995",
+    "finalValidationBlock": "66097015",
+    "signedTransactionHash": "0x66ef771c7843983d324340e45845f88dd1d0c552d122b7fe05a744e0fe95dd09",
+    "nonce": 13,
+    "broadcastBlock": "66097023",
+    "storeStateAfterCrash": "BROADCAST_ATTEMPTED",
+    "storeStateAfterReconcile": { "state": "CONFIRMED", "businessStatus": "SUCCESS", "block": "66097032", "consumedBy": null },
+    "independentReceipt": { "status": "0x1", "block": 66097032, "from": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace", "logs": 2 }
+  },
+  "counters": { "ordersCreatedByRecovery": 0, "checkFeeAuthorizationsByRecovery": 0, "businessSignaturesByRecovery": 0, "broadcastsOfOriginalBytesByRecovery": 0, "replacementSignatures": 0 },
+  "finding": "the rehearsal script expected the next `run` to be refused while the attempt was unresolved; the transaction had already confirmed (~9 s), so reconciliation closed it and that same `run` invocation then proceeded to a second, unrelated purchase (attempt 235486c1, nonce 14). The CLI was changed the same day: when the store holds open attempts, `run` reconciles them and exits (code 3) without starting a purchase; a new purchase needs its own explicit command after the old outcome has been seen",
+  "notInjected": "no crash between the broadcast marker and the send (that window rests on the runner/API fault-injection tests), no dropped-transaction rebroadcast, no same-nonce replacement; those paths are covered by unit tests against a fake chain",
+  "relatedEvidence": [ "evidence/selftest/testnet-2026-10-08T06-59-31-439Z.json" ]
+}

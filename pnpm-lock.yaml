@@ -137,6 +137,9 @@ importers:
       '@arcpreflight/observer':
         specifier: workspace:*
         version: link:../../packages/observer
+      '@arcpreflight/passport':
+        specifier: workspace:*
+        version: link:../../packages/passport
       '@arcpreflight/policy':
         specifier: workspace:*
         version: link:../../packages/policy
@@ -155,12 +158,18 @@ importers:
       '@arcpreflight/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@arcpreflight/passport':
+        specifier: workspace:*
+        version: link:../../packages/passport
       '@arcpreflight/policy':
         specifier: workspace:*
         version: link:../../packages/policy
       '@arcpreflight/schema':
         specifier: workspace:*
         version: link:../../packages/schema
+      '@arcpreflight/verifier':
+        specifier: workspace:*
+        version: link:../../packages/verifier
       react:
         specifier: ^19.1.0
         version: 19.3.0
@@ -229,6 +238,18 @@ importers:
         specifier: ^2.57.2
         version: 2.57.2(typescript@5.9.3)(zod@3.25.76)
 
+  packages/passport:
+    dependencies:
+      '@arcpreflight/client':
+        specifier: workspace:*
+        version: link:../client
+      '@arcpreflight/schema':
+        specifier: workspace:*
+        version: link:../schema
+      viem:
+        specifier: ^2.57.2
+        version: 2.57.2(typescript@5.9.3)(zod@3.25.76)
+
   packages/policy:
     dependencies:
       '@arcpreflight/schema':
@@ -265,6 +286,21 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
 
+  packages/verifier:
+    dependencies:
+      '@arcpreflight/client':
+        specifier: workspace:*
+        version: link:../client
+      '@arcpreflight/passport':
+        specifier: workspace:*
+        version: link:../passport
+      '@arcpreflight/schema':
+        specifier: workspace:*
+        version: link:../schema
+      viem:
+        specifier: ^2.57.2
+        version: 2.57.2(typescript@5.9.3)(zod@3.25.76)
+
   scripts:
     dependencies:
       '@arcpreflight/client':
@@ -273,12 +309,18 @@ importers:
       '@arcpreflight/observer':
         specifier: workspace:*
         version: link:../packages/observer
+      '@arcpreflight/passport':
+        specifier: workspace:*
+        version: link:../packages/passport
       '@arcpreflight/policy':
         specifier: workspace:*
         version: link:../packages/policy
       '@arcpreflight/schema':
         specifier: workspace:*
         version: link:../packages/schema
+      '@arcpreflight/verifier':
+        specifier: workspace:*
+        version: link:../packages/verifier
       viem:
         specifier: ^2.57.2
         version: 2.57.2(typescript@5.9.3)(zod@3.25.76)

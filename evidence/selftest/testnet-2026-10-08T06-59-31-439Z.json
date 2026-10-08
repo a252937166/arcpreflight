@@ -1,0 +1,41 @@
+{
+  "chainId": 5042002,
+  "release": "v32-rehearsal",
+  "testedAtUTC": "2026-10-08T06:59:31.441Z",
+  "repeats": 1,
+  "runs": [
+    {
+      "round": 1,
+      "fixture": "CHANGED_IMPLEMENTATION",
+      "runId": "303fec43-025d-465d-b416-1c2d7d5c1411",
+      "decision": "REVIEW_REQUIRED",
+      "serviceFeeTx": "0x8f3a42657d37e85bb901cb196f82dbad1f09d7d190fd1a641dfbcf376118821e",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 20517,
+      "reportDigest": "0x1124339d10c1a8a35f8791e9b277e9c48468e272eb2854529797c1de10cd718f"
+    },
+    {
+      "round": 1,
+      "fixture": "AMOUNT_UNIT_MISMATCH",
+      "runId": "07c1b2b6-2d71-48b3-a72c-be645dd0eeef",
+      "decision": "BLOCKED",
+      "serviceFeeTx": "0xc57182e031105c5a434f3c22a063581af87b19c1d25b7a177cfc8c66b631d1db",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 19394,
+      "reportDigest": "0x3459c6913b678cdc4017c5a09832ad58c0f28961403d2bb94207e87637268a7f"
+    },
+    {
+      "round": 1,
+      "fixture": "APPROVED_PAYMENT",
+      "runId": "cc4ab67c-6b64-4379-835c-c6ea7869401f",
+      "decision": "NO_POLICY_VIOLATION",
+      "serviceFeeTx": "0x0157baeb2e6990ff32f0ba301dc41f31b707edbddcd2f1c188ff5c6a40aefd12",
+      "businessTxHash": "0x80159a093ee50849578868ce7a94f614472f5719e22484504917dddd306a7dc3",
+      "businessStatus": "SUCCESS",
+      "durationMs": 31522,
+      "reportDigest": "0xa8a28e6d574cd782f3dd7c66b67bea4c4bbc3dd3ec8c9cf754232a1d708f7385"
+    }
+  ]
+}

@@ -12,9 +12,10 @@
   "dependencies": {
     "@arcpreflight/client": "workspace:*",
     "@arcpreflight/observer": "workspace:*",
+    "@arcpreflight/passport": "workspace:*",
     "@arcpreflight/policy": "workspace:*",
+    "@arcpreflight/runner": "workspace:*",
     "@arcpreflight/schema": "workspace:*",
-    "viem": "^2.57.2",
-    "@arcpreflight/runner": "workspace:*"
+    "viem": "^2.57.2"
   }
 }

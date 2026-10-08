@@ -1,0 +1,4 @@
+{ "name": "@arcpreflight/passport", "version": "0.1.0", "private": true, "type": "module", "main": "./src/index.ts", "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts", "./node": "./src/node.ts" },
+  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit -p tsconfig.json" },
+  "dependencies": { "@arcpreflight/client": "workspace:*", "@arcpreflight/schema": "workspace:*", "viem": "^2.57.2" } }

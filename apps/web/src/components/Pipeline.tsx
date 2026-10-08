@@ -1,13 +1,13 @@
 // The sense -> decide -> act -> verify loop drawn as a wandering path. Driven by the step names the runner emits.
 export const STAGES = [
-  { id: "createOrder", label: "approved order", steps: ["createOrder"] },
+  { id: "createOrder", label: "approved order", steps: ["orderPlanned", "createOrder"] },
   { id: "intent", label: "exact intent", steps: ["intent"] },
   { id: "report", label: "pinned report · x402", steps: ["quote", "staleObservation", "signServiceFee", "settlementPending", "reportDelivered"] },
   { id: "decision", label: "deterministic decision", steps: ["decision"] },
   { id: "finalValidation", label: "final validation", steps: ["finalValidation"] },
-  { id: "sign", label: "sign the exact plan", steps: ["signed"] },
-  { id: "broadcast", label: "broadcast", steps: ["broadcast"] },
-  { id: "verify", label: "verify the outcome", steps: ["postcondition"] },
+  { id: "sign", label: "sign the exact plan", steps: ["signed", "walletPrompted"] },
+  { id: "broadcast", label: "broadcast", steps: ["broadcastAttempted", "broadcast", "interruptedAfterBroadcast"] },
+  { id: "verify", label: "verify the outcome", steps: ["postcondition", "reconciled"] },
 ] as const;
 
 // node positions along a hand-drawn path (viewBox 1000 x 200)
@@ -16,7 +16,10 @@ const PATH = "M60 120 C 110 90, 140 70, 190 70 S 280 130, 320 130 S 410 60, 450 
 
 export function Pipeline({ steps, decision, running, idle }: { steps?: { step: string }[]; decision?: string | null; running?: boolean; idle?: boolean }) {
   const seen = new Set((steps ?? []).map((s) => s.step));
-  const stopped = seen.has("notSigned") || seen.has("error");
+  const walletStop = seen.has("walletPlan") || seen.has("readyToExecute"); // a check-only wallet run stops at the decision; execution continues in the Developer workflow
+  const stopped = seen.has("notSigned") || seen.has("error") || walletStop;
+  const interrupted = seen.has("interruptedAfterBroadcast") && !seen.has("reconciled") && !seen.has("postcondition");
+  const reconciledOk = seen.has("reconciled") && (steps ?? []).some((s: any) => s.step === "reconciled" && s.businessStatus === "SUCCESS");
   let lastIdx = -1;
   STAGES.forEach((st, i) => { if (st.steps.some((x) => seen.has(x))) lastIdx = i; });
   return (
@@ -33,6 +36,8 @@ export function Pipeline({ steps, decision, running, idle }: { steps?: { step: s
           if (st.id === "decision" && seen.has("decision")) cls = decision === "BLOCKED" ? "stop" : decision === "REVIEW_REQUIRED" ? "review" : "ok";
           if (st.id === "verify" && seen.has("postcondition")) cls = "ok";
           if (st.id === "finalValidation" && seen.has("finalValidation") && seen.has("notSigned")) cls = "review";
+          if (st.id === "broadcast" && interrupted) cls = "review";
+          if (st.id === "verify" && reconciledOk) cls = "ok";
           if (stopped && i > lastIdx) cls = "skipped";
         }
         const [x, y] = PTS[i];
@@ -46,7 +51,8 @@ export function Pipeline({ steps, decision, running, idle }: { steps?: { step: s
           </g>
         );
       })}
-      {stopped && lastIdx >= 3 && <text x={PTS[3][0] + 30} y={PTS[3][1] + 50} className="note">stops here — nothing is signed</text>}
+      {stopped && lastIdx >= 3 && <text x={PTS[3][0] + 30} y={PTS[3][1] + 50} className="note">{walletStop ? "check ends here — execution continues in the Developer workflow" : "stops here — nothing is signed"}</text>}
+      {interrupted && <text x={PTS[6][0] - 150} y={PTS[6][1] + 62} className="note">simulated interruption — awaiting reconciliation</text>}
     </svg>
   );
 }

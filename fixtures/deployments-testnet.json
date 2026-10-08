@@ -3,34 +3,39 @@
   "chainId": 5042002,
   "deployer": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
   "runner": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
-  "deployedAtUTC": "2026-10-02T13:49:44.911Z",
+  "orderCreator": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b",
+  "deployedAtUTC": "2026-10-07T16:06:32.479Z",
   "implA": {
-    "address": "0xd067dfa0e459c63ef7317b461474a31ce2db1e74",
-    "tx": "0x9bd859fac6ac5d97c7523d3b0be7805c0ef7a7fc42fd9b667c928fd32d0d2bbf",
-    "codeHash": "0x55f4677c3ba0447b22996532638da9b80df95bf74989b79822081e6e582ac24a",
-    "block": "65125282"
+    "address": "0x342ab0e9f7951e4112e698ff69ac00ac18c009f9",
+    "tx": "0xdfc1a05a6bf336fa1da0dff714e0f9b8a3a167e29467e3c6d02d10e5d23061db",
+    "codeHash": "0x32e3f234bcc25a188c44298549f35cd029d00243b40e4dc5894b1c262248b8ca",
+    "block": "65991286"
   },
   "implB": {
-    "address": "0x9645f2a6f70a971ebcfdb588ac10ac70836872b6",
-    "tx": "0x68f77df7f9bfd3fe27aeb143b9fca00ae90ad4bc86362a08901c95a70438492b",
-    "codeHash": "0x430cdc447fd70cac21ff55ee1e335e4a51aa9601e11ce0c0f7bb50533a769ac5",
-    "block": "65125288"
+    "address": "0xac036236e8a67213faa95a99c0adbfd34c7b9bd2",
+    "tx": "0x25a4967df43ecb8b68c0e5c8e1ec2ac8959e6778e33470bc652fbec51b7a3d26",
+    "codeHash": "0x4590232d8a7c175225886499901f1bc8d11d80bd0b5dd3d6148dc0e97aec70cf",
+    "block": "65991293"
   },
   "proxies": {
     "MAIN": {
-      "address": "0x00e393acdcd8cfbef4ab5d0f826bebd87bf4ae14",
-      "tx": "0x24fc2d98be79cbc45003b40f288562e4a96b453b306fc7f29defa7eb75457d5d",
+      "address": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+      "tx": "0x0cc49157d8dd1b2cffe30b6ec6d7b957503a837f64c2f21b43a240fff27fc8d0",
       "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
-      "block": "65125295"
+      "block": "65991299",
+      "setOrderCreatorTx": "0x350dfc4e55db0ad1e37be005f098d5c6c99b4b036f1ba44c43b3a67ba0cb92a6",
+      "setOrderCreatorBlock": "65991311"
     },
     "CHANGED": {
-      "address": "0x816ca9da6d3a316d9b4cff414890b07cbc95b399",
-      "tx": "0x253ff4042e91cc23fd6f59ff9cb73ef8f79ff5c4102fa8c50438d8a623bb7185",
+      "address": "0x2ff113ede634f8dd274dec71735307ae218960c1",
+      "tx": "0xf6a9d6200f1b9f728eba1d65d936079af4c4ed3245fe52566c8c69610926842e",
       "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
-      "block": "65125301",
-      "upgradeTx": "0xe12bdc6c28afe29393145902c28b42832026914e9cd3841dd026eb065f07fbf3",
-      "upgradeBlock": "65125306",
-      "currentImpl": "0x9645f2a6f70a971ebcfdb588ac10ac70836872b6"
+      "block": "65991306",
+      "setOrderCreatorTx": "0xcd9f2e1b0feb62cad70cf249d0fe491d2b9d7dae24c78717f2bf5299c7719132",
+      "setOrderCreatorBlock": "65991315",
+      "upgradeTx": "0x3955633f68d299d570e2f3a17e802e6543777231cd497edb73d01c9fd7e95693",
+      "upgradeBlock": "65991320",
+      "currentImpl": "0xac036236e8a67213faa95a99c0adbfd34c7b9bd2"
     }
   },
   "compiler": {

@@ -1,0 +1,135 @@
+{
+  "generatedAt": "2026-10-08T12:34:57.267Z",
+  "api": "http://127.0.0.1:4041",
+  "network": "eip155:5042002",
+  "release": "ui-audit-testnet",
+  "scenarios": {
+    "wallet": {
+      "payer": "0xd1249e8a1E0b7E9963812ec6d1ad75e74c43D75b",
+      "order": {
+        "orderId": "0xcd6b863eb1293ebf44a53b88248e72bd8421640faa15e8cdd259e4003d4a52f7",
+        "tx": "0x5b8bb2865ddc9c8640a6f50e281ffe12227f8a0302b47b2796173fb702462338",
+        "block": "66136566",
+        "amountNativeAtomic": "5000000000000000",
+        "reference": "lifecycle rehearsal 2026-10-08T12-34-57"
+      },
+      "requestId": "5a7a4704-4812-4aef-98fb-eed11574cc8a",
+      "feeTx": "0x549595c09b8a45caa9238fdb9a860a656dc22f88f982cd683d4245e90fb2344a",
+      "attemptId": "b70e3e90-a69c-4a4c-992e-0814e5395f26",
+      "plan": {
+        "chainId": 5042002,
+        "from": "0xd1249e8a1e0b7e9963812ec6d1ad75e74c43d75b",
+        "type": 2,
+        "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+        "data": "0x8609cad1cd6b863eb1293ebf44a53b88248e72bd8421640faa15e8cdd259e4003d4a52f7",
+        "valueNativeAtomic": "5000000000000000",
+        "nonce": "3",
+        "gasLimit": "40723",
+        "maxFeePerGasNativeAtomic": "29000000000",
+        "maxPriorityFeePerGasNativeAtomic": "5000000000",
+        "accessList": [],
+        "authorizationList": []
+      },
+      "txHash": "0x0d38ddb60ec21abc5092cab6a6ecaa6a6bf100c13c2285088ab4f4a3c62c6d75",
+      "outcome": {
+        "state": "CONFIRMED",
+        "businessStatus": "SUCCESS",
+        "block": "66136631",
+        "deviations": {
+          "mismatch": [],
+          "deviations": {}
+        }
+      },
+      "costStatement": {
+        "costStatementVersion": "1.0",
+        "unit": "USDC",
+        "nativeDecimals": 18,
+        "tokenDecimals": 6,
+        "capturedAt": "2026-10-08T12:35:34.801Z",
+        "buyer": {
+          "address": "0xd1249e8a1E0b7E9963812ec6d1ad75e74c43D75b",
+          "businessPrincipal": {
+            "nativeAtomic": "5000000000000000",
+            "usdc": "0.005"
+          },
+          "checkFee": {
+            "tokenAtomic": "10000",
+            "nativeAtomicEquivalent": "10000000000000000",
+            "usdc": "0.01"
+          },
+          "businessGas": {
+            "nativeAtomic": "1008800000000000",
+            "usdc": "0.0010088",
+            "gasUsed": "40352",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0x0d38ddb60ec21abc5092cab6a6ecaa6a6bf100c13c2285088ab4f4a3c62c6d75"
+          },
+          "totalNativeAtomic": "16008800000000000",
+          "totalUsdc": "0.0160088"
+        },
+        "operator": {
+          "feeRelay": null,
+          "orderCreation": {
+            "nativeAtomic": "2507300000000000",
+            "usdc": "0.0025073",
+            "gasUsed": "100292",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0x5b8bb2865ddc9c8640a6f50e281ffe12227f8a0302b47b2796173fb702462338",
+            "address": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b"
+          },
+          "totalNativeAtomic": "2507300000000000",
+          "totalUsdc": "0.0025073"
+        },
+        "authorizedMaximum": {
+          "businessPrincipalNativeAtomic": "5000000000000000",
+          "checkFeeTokenAtomic": "10000",
+          "businessGasNativeAtomic": "1180967000000000"
+        },
+        "actual": {
+          "businessPrincipalNativeAtomic": "5000000000000000",
+          "checkFeeTokenAtomic": "10000",
+          "businessGasNativeAtomic": "1008800000000000"
+        },
+        "unresolvedReservation": {
+          "nativeAtomic": "0",
+          "note": "reservations released only after reconciliation"
+        },
+        "sources": {
+          "feeTx": "0x549595c09b8a45caa9238fdb9a860a656dc22f88f982cd683d4245e90fb2344a",
+          "createOrderTx": "0x5b8bb2865ddc9c8640a6f50e281ffe12227f8a0302b47b2796173fb702462338",
+          "businessTx": "0x0d38ddb60ec21abc5092cab6a6ecaa6a6bf100c13c2285088ab4f4a3c62c6d75"
+        },
+        "notes": [
+          "gas deductions are not payment Transfer events",
+          "the fee's native-system and ERC-20 event representations are one payment",
+          "sub-micro-USDC gas precision is preserved; usdc strings are exact decimal renderings of the atomic values",
+          "fee relay receipt unavailable at export: operator.feeRelay is null, not estimated"
+        ]
+      },
+      "passport": "/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/passports/testnet-wallet-2026-10-08T12-34-57-266Z.passport.json",
+      "verifier": {
+        "exit": 0,
+        "counts": {
+          "pass": 10,
+          "fail": 0,
+          "unverified": 0,
+          "notEvaluated": 1
+        },
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "PASS",
+          "ORDER_OUTCOME": "PASS",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "anchorsPath": "/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/passports/testnet-wallet-2026-10-08T12-34-57-266Z.anchors.json"
+      }
+    }
+  }
+}

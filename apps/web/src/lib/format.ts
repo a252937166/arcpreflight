@@ -14,3 +14,9 @@ export function decisionTone(d: string | null | undefined): Tone {
   return "neutral";
 }
 export const signalTone = (s: string): Tone => (s === "observed" ? "ok" : s === "not_observed" ? "bad" : "warn");
+/** 18-decimal native atomic → six-decimal USDC rendering (the primary screen shows money with six decimals, exact, no rounding up). */
+export const usdc6 = (atomic: string | bigint | null | undefined) => { if (atomic === null || atomic === undefined) return "—"; const v = BigInt(atomic); const neg = v < 0n; const a = neg ? -v : v; return `${neg ? "-" : ""}${a / 10n ** 18n}.${(a % 10n ** 18n).toString().padStart(18, "0").slice(0, 6)} USDC`; };
+/** 6-decimal token atomic → six-decimal USDC rendering */
+export const usdcToken6 = (atomic: string | bigint | null | undefined) => { if (atomic === null || atomic === undefined) return "—"; const v = BigInt(atomic); return `${v / 10n ** 6n}.${(v % 10n ** 6n).toString().padStart(6, "0")} USDC`; };
+/** exact decimal rendering of an 18-decimal atomic value (full precision, trailing zeros trimmed) — for gas lines */
+export const usdcExact = (atomic: string | bigint | null | undefined) => { if (atomic === null || atomic === undefined) return "—"; const v = BigInt(atomic); const frac = (v % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, ""); return `${v / 10n ** 18n}${frac ? `.${frac}` : ""} USDC`; };

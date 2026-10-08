@@ -1,0 +1,201 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - link "ArcPreflight for agents on Arc" [ref=e34] [cursor=pointer]:
+        - /url: /
+        - text: ArcPreflight
+        - generic [ref=e35]: for agents on Arc
+      - navigation [ref=e7]:
+        - link "Overview" [ref=e8] [cursor=pointer]:
+          - /url: /
+        - link "Live demo" [ref=e9] [cursor=pointer]:
+          - /url: /demo
+        - link "Inspect" [ref=e10] [cursor=pointer]:
+          - /url: /inspect
+        - link "Developer" [ref=e11] [cursor=pointer]:
+          - /url: /developer
+        - link "Verify" [ref=e12] [cursor=pointer]:
+          - /url: /verify
+        - link "Evidence" [ref=e13] [cursor=pointer]:
+          - /url: /evidence
+      - generic [ref=e14]:
+        - group "network" [ref=e36]:
+          - button "Arc mainnet" [ref=e37] [cursor=pointer]
+          - button "Arc testnet" [pressed] [ref=e38] [cursor=pointer]
+        - generic "eip155:5042002 · https://rpc.testnet.arc.io" [ref=e39]:
+          - text: Arc testnet
+          - generic [ref=e40]: "· #66143743"
+          - generic "window.ethereum is a local test wallet injected for automated self-testing (open with ?testwallet=off to remove it)" [ref=e17]: test
+        - button "0xab1a…Fe03 test" [active] [ref=e190] [cursor=pointer]:
+          - text: 0xab1a…Fe03
+          - generic [ref=e192]: test
+  - status [ref=e42]: Arc testnet — zero-cost demos on the project's testnet funds; mainnet proof lives on the mainnet side.
+  - main [ref=e43]:
+    - generic [ref=e45]:
+      - generic [ref=e47]:
+        - generic [ref=e48]: Developer workflow · Arc testnet
+        - heading [level=2] [ref=e49]:
+          - text: Your wallet.
+          - emphasis [ref=e50]: The whole lifecycle.
+        - paragraph [ref=e51]: "Seven steps: an order payable only by your wallet → the approval you reference → a pinned report bought with one fee signature → execution signed by your wallet after the service validated the exact plan → recovery if anything is interrupted → the Payment Passport → verification you can run anywhere."
+      - 'list "lifecycle: create order, review and approve, preflight check, execute payment, recover, export passport, verify independently" [ref=e53]':
+        - listitem [ref=e54]:
+          - 'button "create order: active" [ref=e55] [cursor=pointer]':
+            - generic [ref=e56]: "1"
+          - generic [ref=e57]: create order
+        - listitem [ref=e59]:
+          - 'button "review & approve: todo" [ref=e60] [cursor=pointer]':
+            - generic [ref=e61]: "2"
+          - generic [ref=e62]: review & approve
+        - listitem [ref=e64]:
+          - 'button "preflight check: todo" [ref=e65] [cursor=pointer]':
+            - generic [ref=e66]: "3"
+          - generic [ref=e67]: preflight check
+        - listitem [ref=e69]:
+          - 'button "execute payment: todo" [ref=e70] [cursor=pointer]':
+            - generic [ref=e71]: "4"
+          - generic [ref=e72]: execute payment
+        - listitem "not needed" [ref=e74]:
+          - 'button "recover: skipped — not needed" [ref=e75] [cursor=pointer]':
+            - generic [ref=e76]: –
+          - generic [ref=e77]:
+            - generic [ref=e78]: recover
+            - generic [ref=e79]: not needed
+        - listitem [ref=e80]:
+          - 'button "export passport: todo" [ref=e81] [cursor=pointer]':
+            - generic [ref=e82]: "6"
+          - generic [ref=e83]: export passport
+        - listitem [ref=e85]:
+          - 'button "verify independently: todo" [ref=e86] [cursor=pointer]':
+            - generic [ref=e87]: "7"
+          - generic [ref=e88]: verify independently
+      - generic [ref=e90]:
+        - text: A local test wallet is injected as
+        - code [ref=e91]: window.ethereum
+        - text: (automated self-test mode). Open with
+        - code [ref=e92]: "?testwallet=off"
+        - text: to remove it and use a real wallet.
+      - generic [ref=e94]:
+        - generic [ref=e193]:
+          - link "0xab1a2C…8FFe03" [ref=e194] [cursor=pointer]:
+            - /url: https://testnet.arcscan.app/address/0xab1a2C66Ad3b08E82e0a9e9c4D9033298b8FFe03
+            - text: 0xab1a2C…8FFe03↗
+          - generic [ref=e195]: test wallet
+          - generic [ref=e196]: Test wallet (local)
+          - generic [ref=e197]: Arc testnet · 5042002
+          - generic [ref=e198]: native USDC 0.0000 USDC (18-dec, pays gas and the order) · ERC-20 face 0.00 USDC
+          - button "disconnect" [ref=e199] [cursor=pointer]
+        - note [ref=e200]: no session yet — the first paid action creates one · your browser holds an anonymous session — it owns the orders, checks and attempts you make here (history, recovery, passports); clearing site data loses it
+        - region "testnet faucet" [ref=e201]:
+          - generic [ref=e202]:
+            - generic [ref=e203]:
+              - generic [ref=e204]:
+                - generic [ref=e205]: Your wallet holds 0.0000 USDC on Arc testnet
+                - text: — below the 0.05 USDC order this demo pays. The check fee (0.01 USDC) comes from your own balance.
+              - generic [ref=e206]: Testnet only · 0.20 USDC per claim from the project's testnet funds · one claim per wallet and per client every 24 h · 29 of 30 claims left today
+            - button "Claim testnet USDC" [ref=e207] [cursor=pointer]
+      - generic [ref=e98]:
+        - generic [ref=e99]:
+          - button "1 · Create order" [expanded] [ref=e101] [cursor=pointer]:
+            - generic [ref=e102]: "1"
+            - generic [ref=e104]: −
+          - generic [ref=e105]:
+            - paragraph [ref=e106]:
+              - text: The merchant's
+              - code [ref=e107]: order-creator
+              - text: role — a key that can only create orders, never upgrade, pause or withdraw — creates an order payable only by your address. Amount 0.001–1 USDC, an optional reference; the order's identity is recorded before the creation transaction is sent.
+            - button "Create order…" [ref=e109] [cursor=pointer]
+        - generic [ref=e110]:
+          - button "2 · Review & approve" [ref=e112] [cursor=pointer]:
+            - generic [ref=e113]: "2"
+            - generic [ref=e115]: +
+          - paragraph [ref=e117]: create an order first
+        - generic [ref=e118]:
+          - button "3 · Preflight check" [ref=e120] [cursor=pointer]:
+            - generic [ref=e121]: "3"
+            - generic [ref=e123]: +
+          - paragraph [ref=e125]: approve the policy first
+        - generic [ref=e126]:
+          - button "4 · Execute with your wallet" [ref=e128] [cursor=pointer]:
+            - generic [ref=e129]: "4"
+            - generic [ref=e131]: +
+          - generic [ref=e132]:
+            - paragraph [ref=e133]:
+              - text: The service re-validates your exact plan at a fresh pinned block — implementation vs the referenced approval, pause, exact-call simulation, balance, fees, nonce, your account carries no code — and records the attempt
+              - code [ref=e134]: VALIDATED
+              - text: with its plan
+              - emphasis [ref=e135]: before
+              - text: your wallet is asked. Your wallet signs exactly that plan (to, data, value, type 2; gas or nonce it sets are recorded as deviations); the hash is reported; the outcome is read from the receipt and the order state. Window 60 s.
+            - generic [ref=e136]:
+              - button "Execute with your wallet" [disabled] [ref=e137]
+              - generic [ref=e138]: run the preflight check first
+        - generic [ref=e139]:
+          - generic [ref=e140]:
+            - button "5 · Recover · My workflow" [ref=e141] [cursor=pointer]:
+              - generic [ref=e142]: –
+              - generic [ref=e144]: +
+            - generic [ref=e145]:
+              - generic [ref=e208]: 0 attempts · 0 orders in this browser's session
+              - button "refresh" [ref=e146] [cursor=pointer]
+          - generic [ref=e147]:
+            - paragraph [ref=e148]:
+              - text: Recovery reads the hash, the order state and the merchant's
+              - code [ref=e149]: OrderPaid
+              - text: event; it never re-signs or re-sends. An attempt left
+              - code [ref=e150]: VALIDATED
+              - text: or
+              - code [ref=e151]: BROADCAST_ATTEMPTED
+              - text: after a refresh is listed here and can be continued, abandoned or recovered. Reads only; the recovery worker does the same every 30 s.
+            - paragraph [ref=e152]: no session yet — the first paid action creates one for this browser
+            - group [ref=e153]:
+              - generic "My checks — fee history (0)" [ref=e154] [cursor=pointer]
+        - generic [ref=e155]:
+          - button "6 · Export the Payment Passport" [ref=e157] [cursor=pointer]:
+            - generic [ref=e158]: "6"
+            - generic [ref=e160]: +
+          - generic [ref=e161]:
+            - paragraph [ref=e162]: Available once a check is delivered or an attempt has finished or stopped.
+            - button "Download Payment Passport" [disabled] [ref=e164]
+        - generic [ref=e165]:
+          - button "7 · Verify independently" [ref=e167] [cursor=pointer]:
+            - generic [ref=e168]: "7"
+            - generic [ref=e170]: +
+          - generic [ref=e171]:
+            - paragraph [ref=e172]:
+              - text: The verifier (
+              - code [ref=e173]: packages/verifier
+              - text: ) runs here on the downloaded bundle against
+              - code [ref=e174]: https://rpc.testnet.arc.io
+              - text: . The anchors below are this site's own digests — a consistency check, labelled as such; for independence run the CLI with anchors you kept yourself.
+            - generic [ref=e175]:
+              - generic [ref=e176]:
+                - button "Verify in browser" [disabled] [ref=e177]
+                - generic [ref=e178]:
+                  - text: RPC
+                  - code [ref=e179]: https://rpc.testnet.arc.io
+                  - text: (online findings) · same verifier code as the CLI
+              - generic [ref=e180]:
+                - generic [ref=e181]: anchors
+                - generic [ref=e182]: none — APPROVAL_SOURCE stays UNVERIFIED
+              - group [ref=e184]:
+                - generic "Same check in a clean process (CLI)" [ref=e185] [cursor=pointer]
+      - group [ref=e186]:
+        - generic "Integrate (curl) — the same lifecycle over HTTP" [ref=e187] [cursor=pointer]
+  - contentinfo [ref=e25]:
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - text: ArcPreflight · release
+        - code [ref=e28]: ui-audit-testnet
+        - text: ·
+        - code [ref=e29]: SUBMISSION_RESTRICTED
+        - text: · eip155:5042002
+        - generic [ref=e188]:
+          - text: · served under
+          - code [ref=e189]: /testnet
+      - generic [ref=e30]:
+        - link "OpenAPI" [ref=e31] [cursor=pointer]:
+          - /url: /testnet/openapi.json
+        - link "GitHub" [ref=e32] [cursor=pointer]:
+          - /url: https://github.com/a252937166/arcpreflight
+        - link "Arc docs" [ref=e33] [cursor=pointer]:
+          - /url: https://docs.arc.io

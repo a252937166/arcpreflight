@@ -20,11 +20,16 @@ contract DemoMerchantV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     }
 
     mapping(bytes32 => Order) private _orders;
+    /// @notice Narrow role: may ONLY create orders. Lets the public API run without the owner key, which keeps
+    ///         pause / withdraw / upgrade authority out of that process. Takes the first slot of the former gap.
+    address public orderCreator;
 
     event OrderCreated(bytes32 indexed orderId, address indexed payer, uint256 amountNativeAtomic);
     event OrderPaid(bytes32 indexed orderId, address indexed payer, uint256 amountNativeAtomic);
     event Withdrawn(address indexed to, uint256 amountNativeAtomic);
+    event OrderCreatorSet(address indexed creator);
 
+    error NotOrderCreator(address caller);
     error OrderExists(bytes32 orderId);
     error OrderUnknown(bytes32 orderId);
     error OrderAlreadyPaid(bytes32 orderId);
@@ -52,7 +57,18 @@ contract DemoMerchantV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
     // ---- admin ----
 
-    function createOrder(bytes32 orderId, address payer, uint256 amountNativeAtomic) external onlyOwner {
+    modifier onlyOrderCreator() {
+        if (msg.sender != owner() && msg.sender != orderCreator) revert NotOrderCreator(msg.sender);
+        _;
+    }
+
+    /// @notice Owner-only. address(0) clears the role; the owner can always create orders itself.
+    function setOrderCreator(address creator) external onlyOwner {
+        orderCreator = creator;
+        emit OrderCreatorSet(creator);
+    }
+
+    function createOrder(bytes32 orderId, address payer, uint256 amountNativeAtomic) external onlyOrderCreator {
         if (payer == address(0)) revert ZeroAddress();
         if (amountNativeAtomic == 0) revert ZeroAmount();
         Order storage o = _orders[orderId];
@@ -110,5 +126,6 @@ contract DemoMerchantV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    uint256[48] private __gap;
+    uint256[47] private __gap; // 48 before orderCreator took one slot
+
 }

@@ -1,0 +1,44 @@
+- generic [ref=f5e2]:
+  - banner [ref=f5e3]:
+    - generic [ref=f5e5]:
+      - link "ArcPreflight for agents on Arc" [ref=f5e6] [cursor=pointer]:
+        - /url: /
+        - text: ArcPreflight
+        - generic [ref=f5e7]: for agents on Arc
+      - navigation [ref=f5e8]:
+        - link "Overview" [ref=f5e9] [cursor=pointer]:
+          - /url: /
+        - link "Live demo" [ref=f5e10] [cursor=pointer]:
+          - /url: /demo
+        - link "Inspect" [ref=f5e11] [cursor=pointer]:
+          - /url: /inspect
+        - link "Developer" [ref=f5e12] [cursor=pointer]:
+          - /url: /developer
+        - link "Verify" [ref=f5e13] [cursor=pointer]:
+          - /url: /verify
+        - link "Evidence" [ref=f5e14] [cursor=pointer]:
+          - /url: /evidence
+      - generic [ref=f5e15]:
+        - generic [ref=f5e16]:
+          - text: connecting…
+          - generic "window.ethereum is a local test wallet injected for automated self-testing (open with ?testwallet=off to remove it)" [ref=f5e18]: test
+        - button "0xab1a…Fe03 test" [ref=f5e20] [cursor=pointer]:
+          - text: 0xab1a…Fe03
+          - generic [ref=f5e22]: test
+  - main [ref=f5e23]:
+    - paragraph [ref=f5e25]: finding the API instances this site fronts…
+  - contentinfo [ref=f5e27]:
+    - generic [ref=f5e28]:
+      - generic [ref=f5e29]:
+        - text: ArcPreflight · release
+        - code [ref=f5e30]: …
+        - text: ·
+        - code [ref=f5e31]: …
+        - text: ·
+      - generic [ref=f5e32]:
+        - link "OpenAPI" [ref=f5e33] [cursor=pointer]:
+          - /url: /openapi.json
+        - link "GitHub" [ref=f5e34] [cursor=pointer]:
+          - /url: https://github.com/a252937166/arcpreflight
+        - link "Arc docs" [ref=f5e35] [cursor=pointer]:
+          - /url: https://docs.arc.io

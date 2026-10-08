@@ -11,8 +11,8 @@ export const net = (process.env.ARC_NET ?? "testnet") as ArcNet;
 export const chain: Chain = net === "mainnet" ? arc : arcTestnet;
 export const rpc = process.env.ARC_RPC_URL ?? ARC[net].rpc;
 export const publicClient: PublicClient = createPublicClient({ chain, transport: http(rpc, { timeout: 20_000 }) });
-export function account(role: "deployer-admin" | "merchant-payto" | "demo-runner") {
-  const envName = { "deployer-admin": "DEPLOYER_ADMIN_PRIVATE_KEY", "merchant-payto": "MERCHANT_PAYTO_PRIVATE_KEY", "demo-runner": "DEMO_RUNNER_PRIVATE_KEY" }[role];
+export function account(role: "deployer-admin" | "merchant-payto" | "demo-runner" | "order-creator") {
+  const envName = { "deployer-admin": "DEPLOYER_ADMIN_PRIVATE_KEY", "merchant-payto": "MERCHANT_PAYTO_PRIVATE_KEY", "demo-runner": "DEMO_RUNNER_PRIVATE_KEY", "order-creator": "ORDER_CREATOR_PRIVATE_KEY" }[role];
   const pk = (process.env[envName] as Hex | undefined) ?? JSON.parse(readFileSync(resolve(ROOT, "keys", `${role}.json`), "utf8")).privateKey;
   return privateKeyToAccount(pk);
 }

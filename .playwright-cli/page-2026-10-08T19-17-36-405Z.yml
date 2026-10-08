@@ -1,0 +1,519 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - link "ArcPreflight" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - navigation [ref=e7]:
+        - link "Overview" [ref=e8] [cursor=pointer]:
+          - /url: /
+        - link "Live demo" [ref=e9] [cursor=pointer]:
+          - /url: /demo
+        - link "Inspect" [ref=e10] [cursor=pointer]:
+          - /url: /inspect
+        - link "Developer" [ref=e11] [cursor=pointer]:
+          - /url: /developer
+        - link "Verify" [ref=e12] [cursor=pointer]:
+          - /url: /verify
+        - link "Evidence" [ref=e13] [cursor=pointer]:
+          - /url: /evidence
+      - generic [ref=e14]:
+        - group "network" [ref=e33]:
+          - button "Arc mainnet" [ref=e34] [cursor=pointer]
+          - button "Arc testnet" [pressed] [ref=e35] [cursor=pointer]
+        - generic "eip155:5042002 · https://rpc.testnet.arc.io" [ref=e36]: Arc testnet
+        - button "Connect wallet" [ref=e18] [cursor=pointer]
+  - status [ref=e38]: Arc testnet — zero-cost demos on the project's testnet funds; mainnet proof lives on the mainnet side.
+  - main [ref=e39]:
+    - generic [ref=e41]:
+      - status [ref=e388]:
+        - generic "loading" [ref=e389]
+        - generic [ref=e390]: running · Approved payment, exact plan, verified outcome · project runner · step 1/8
+        - button "view" [ref=e391] [cursor=pointer]
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - generic [ref=e44]: Live demo · Arc testnet
+          - heading [level=2] [ref=e45]:
+            - text: Pick a situation.
+            - emphasis [ref=e46]: Watch the payment handled, on-chain.
+        - paragraph [ref=e47]:
+          - generic [ref=e48]:
+            - text: live runs today
+            - generic [ref=e49]: 20/60
+          - generic [ref=e50]:
+            - text: cooldown
+            - generic [ref=e51]: 0s
+          - generic [ref=e52]:
+            - text: business payment
+            - generic [ref=e53]: 0.05 USDC
+      - group "two ways to use the demo" [ref=e54]:
+        - region "Watch a project-funded demo" [ref=e55]:
+          - paragraph [ref=e57]: "The project's own runner 0xC618…2ACE pays everything from project funds: the 0.01 USDC check fee, the 0.05 USDC order and the gas. Your wallet is not involved — connected or not, it never pays here. Pick a situation below and press Run; one admission key per click, so a retry returns the same run, never a second order."
+          - generic [ref=e58]:
+            - link "Watch a project-funded demo ↓" [ref=e59] [cursor=pointer]:
+              - /url: "#situations"
+            - generic [ref=e60]: no wallet needed
+        - region "Try with my wallet" [ref=e61]:
+          - paragraph [ref=e63]:
+            - text: The
+            - link "Developer workflow" [ref=e64] [cursor=pointer]:
+              - /url: /developer?net=testnet
+            - text: "runs the same seven steps with your wallet on Arc testnet: you pay the check fee (0.01 USDC), the order amount and the gas of your own payment from your own wallet — the testnet faucet gives you testnet USDC; the service validates the exact plan and records the attempt before your wallet is asked; the passport is yours."
+          - link "Try with my wallet →" [ref=e66] [cursor=pointer]:
+            - /url: /developer?net=testnet
+          - generic [ref=e67]: or connect a wallet in the header to run only the check from here with your own fee signature
+      - generic [ref=e106]:
+        - generic [ref=e107]:
+          - generic [ref=e108]: Watch a project-funded demo · pick a situation
+          - generic [ref=e392]: project runner · project funds
+        - tablist "situation" [ref=e393]:
+          - tab "☞ Approved payment, exact plan, verified outcome ✓ confirmed" [selected] [ref=e394] [cursor=pointer]:
+            - generic [ref=e111]: ☞
+            - generic [ref=e114]: Approved payment, exact plan, verified outcome
+            - generic [ref=e395]: ✓ confirmed
+          - tab "6-decimal amount on the 18-decimal path ✕ blocked" [ref=e396] [cursor=pointer]:
+            - generic [ref=e122]: 6-decimal amount on the 18-decimal path
+            - generic [ref=e397]: ✕ blocked
+          - tab "Unapproved implementation change ! review required" [ref=e398] [cursor=pointer]:
+            - generic [ref=e130]: Unapproved implementation change
+            - generic [ref=e399]: "! review required"
+      - generic [ref=e138]:
+        - button "loading running…" [disabled] [ref=e400]:
+          - generic "loading" [ref=e401]
+          - text: running…
+        - button "▶ Run with a simulated interruption" [disabled] [ref=e387]
+      - generic [ref=e402]: Started. The project's own runner is doing this on Arc testnet right now, from project funds.
+      - generic [ref=e407]:
+        - generic [ref=e408]:
+          - generic [ref=e409]:
+            - generic [ref=e410]: approved payment
+            - generic [ref=e411]:
+              - generic [ref=e412]: LIVE_REQUEST
+              - generic [ref=e413]: Arc testnet 5042002
+          - generic [ref=e414]:
+            - generic "loading" [ref=e415]
+            - generic [ref=e416]: live · 1 steps
+            - link "#7fa2bcf1" [ref=e417] [cursor=pointer]:
+              - /url: /runs/7fa2bcf1-70c4-4bc7-9349-0cc9f08f50fd?net=testnet
+        - 'list "lifecycle: create order, review and approve, preflight check, execute payment, recover, export passport, verify independently" [ref=e419]':
+          - listitem "identity recorded, creation pending" [ref=e420]:
+            - generic [ref=e421]: "1"
+            - generic [ref=e423]: create order
+          - listitem [ref=e425]:
+            - generic [ref=e426]: "2"
+            - generic [ref=e428]: review & approve
+          - listitem [ref=e430]:
+            - generic [ref=e431]: "3"
+            - generic [ref=e433]: preflight check
+          - listitem [ref=e435]:
+            - generic [ref=e436]: "4"
+            - generic [ref=e438]: execute payment
+          - 'listitem "not needed: no interruption" [ref=e440]':
+            - generic [ref=e441]: –
+            - generic [ref=e443]: recover
+          - listitem [ref=e445]:
+            - generic [ref=e446]: "6"
+            - generic [ref=e448]: export passport
+          - listitem [ref=e450]:
+            - generic [ref=e451]: "7"
+            - generic [ref=e453]: verify independently
+        - generic [ref=e455]:
+          - generic [ref=e456]:
+            - generic [ref=e457]:
+              - generic [ref=e458]: Order 0x2596c…ce931
+              - generic [ref=e459]: Arc testnet
+              - generic [ref=e460]: release ui-audit-testnet
+            - status [ref=e461]: Run in progress.
+          - generic [ref=e462]:
+            - generic [ref=e463]:
+              - generic [ref=e464]: approved implementation
+              - link "0x342ab…009f9" [ref=e466] [cursor=pointer]:
+                - /url: https://testnet.arcscan.app/address/0x342ab0e9f7951e4112e698ff69ac00ac18c009f9
+                - text: 0x342ab…009f9↗
+              - generic [ref=e467]: referenced approval
+              - generic [ref=e468]: —
+              - generic [ref=e469]: business amount
+              - generic [ref=e470]: 0.050000 USDC
+              - generic [ref=e471]: check fee
+              - generic [ref=e472]: 0.010000 USDC
+              - generic [ref=e473]: order creation
+              - generic [ref=e474]: —
+            - generic [ref=e475]:
+              - generic [ref=e476]: outcome
+              - generic [ref=e477]:
+                - generic [ref=e478]: running
+                - generic [ref=e479]: · from the state
+              - generic [ref=e480]: business execution
+              - generic "loading" [ref=e482]
+              - generic [ref=e483]: order result
+              - generic [ref=e484]: unknown
+              - generic [ref=e486]: service outcome
+              - generic [ref=e487]:
+                - generic [ref=e488]: not evaluated
+                - text: a paid order is not proof an offchain service was delivered
+              - generic [ref=e489]: recovery of this attempt
+              - generic [ref=e490]:
+                - generic [ref=e491]: "new orders created: — · new check-fee authorizations: — · new business signatures: —"
+                - generic [ref=e492]: "original transaction: —"
+                - generic [ref=e493]: not recorded for this run
+          - generic [ref=e494]:
+            - button "Download Payment Passport" [disabled] [ref=e495]
+            - link "Verify in browser" [ref=e496] [cursor=pointer]:
+              - /url: "#verify-here"
+            - link "Verify elsewhere" [ref=e497] [cursor=pointer]:
+              - /url: /verify?run=7fa2bcf1-70c4-4bc7-9349-0cc9f08f50fd&net=testnet
+            - link "Technical evidence" [ref=e498] [cursor=pointer]:
+              - /url: "#receipt-chain"
+          - generic [ref=e499]:
+            - heading "Cost disclosure" [level=3] [ref=e500]
+            - paragraph [ref=e501]: cost statement not available yet — it is written from receipts, never estimated
+          - generic [ref=e502]:
+            - heading "Verify independently" [level=3] [ref=e503]
+            - paragraph [ref=e504]: download the passport first — the verifier then runs here on the downloaded bundle, against https://rpc.testnet.arc.io, with this site's digests as anchors (labelled as not independent)
+        - generic [ref=e505]:
+          - generic [ref=e506]:
+            - paragraph [ref=e507]: the agent, thinking out loud — narration is generated from the receipts; the decision is code
+            - paragraph [ref=e509]: Before the order is even sent, its identity is wr▍
+          - generic [ref=e511]:
+            - generic [ref=e512]: …
+            - text: pending
+        - generic [ref=e514]:
+          - heading "Step by step" [level=3] [ref=e515]
+          - paragraph [ref=e516]: who did what, and why — straight from the runner
+          - 'img "Pipeline: approved order, exact intent, pinned report, decision, final validation, sign, broadcast, verify" [ref=e517]':
+            - generic [ref=e519]:
+              - generic [ref=e521]: "1"
+              - generic [ref=e522]: approved order
+            - generic [ref=e523]:
+              - generic [ref=e525]: "2"
+              - generic [ref=e526]: exact intent
+            - generic [ref=e527]:
+              - generic [ref=e529]: "3"
+              - generic [ref=e530]: pinned report · x402
+            - generic [ref=e531]:
+              - generic [ref=e533]: "4"
+              - generic [ref=e534]: deterministic decision
+            - generic [ref=e535]:
+              - generic [ref=e537]: "5"
+              - generic [ref=e538]: final validation
+            - generic [ref=e539]:
+              - generic [ref=e541]: "6"
+              - generic [ref=e542]: sign the exact plan
+            - generic [ref=e543]:
+              - generic [ref=e545]: "7"
+              - generic [ref=e546]: broadcast
+            - generic [ref=e547]:
+              - generic [ref=e549]: "8"
+              - generic [ref=e550]: verify the outcome
+          - generic [ref=e552]:
+            - generic [ref=e553]: "1"
+            - generic [ref=e554]:
+              - generic [ref=e555]:
+                - generic [ref=e556]: Order identity recorded before its creation is sent
+                - generic [ref=e557]: +0 ms
+                - generic [ref=e558]: order-creator
+              - generic [ref=e559]: the order's identity is recorded before its creation transaction is sent, so an interruption can be reconciled from the chain
+              - generic [ref=e560]:
+                - generic [ref=e561]:
+                  - generic [ref=e562]: "orderId:"
+                  - text: 0x2596c7…7ce931
+                - generic [ref=e563]:
+                  - generic [ref=e564]: "payer:"
+                  - text: 0xC618…2ACE
+                - generic "50000000000000000" [ref=e565]:
+                  - generic [ref=e566]: "amountNativeAtomic:"
+                  - text: 0.0500 USDC
+                - generic [ref=e567]:
+                  - generic [ref=e568]: "merchant:"
+                  - text: 0xA8eB…2252
+      - generic [ref=e144]:
+        - generic [ref=e145]:
+          - heading "Recent runs" [level=3] [ref=e146]
+          - generic [ref=e147]: every run is persisted with its receipts; open one for the permanent link, download its Payment Passport from the row
+        - generic [ref=e148]:
+          - table [ref=e150]:
+            - rowgroup [ref=e151]:
+              - row [ref=e152]:
+                - columnheader "when (UTC)" [ref=e153]
+                - columnheader "network" [ref=e154]
+                - columnheader "situation" [ref=e155]
+                - columnheader "outcome" [ref=e156]
+                - columnheader "check fee" [ref=e157]
+                - columnheader "business payment" [ref=e158]
+                - columnheader "business tx" [ref=e159]
+                - columnheader "service fee tx" [ref=e160]
+                - columnheader "took" [ref=e161]
+                - columnheader [ref=e162]
+            - rowgroup [ref=e163]:
+              - row [ref=e164]:
+                - cell "2026-10-08 17:31:32Z" [ref=e165]
+                - cell "Arc testnet 5042002" [ref=e166]
+                - cell "approved payment" [ref=e168]
+                - cell "✓ confirmed" [ref=e169]
+                - cell "0.01 USDC" [ref=e171]
+                - cell "0.05 USDC" [ref=e172]
+                - cell [ref=e173]:
+                  - link "0xc4d71…dc92f" [ref=e174] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xc4d7144e3f93bd42440ecd35b876dfdb7212cfc2fd18321e92010cdef5adc92f
+                    - text: 0xc4d71…dc92f↗
+                - cell [ref=e175]:
+                  - link "0xb0e1d…fad4b" [ref=e176] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xb0e1d360258b2a8e82160f4bcc8567993964ed2f4ed40fa20aa6988cd8afad4b
+                    - text: 0xb0e1d…fad4b↗
+                - cell "32.1 s" [ref=e177]
+                - cell [ref=e178]:
+                  - button "view" [ref=e179] [cursor=pointer]
+                  - link "open" [ref=e180] [cursor=pointer]:
+                    - /url: /runs/0453325b-efb7-47bd-a36a-f30bde471d43?net=testnet
+                  - link "passport" [ref=e181] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/0453325b-efb7-47bd-a36a-f30bde471d43/passport
+              - row [ref=e182]:
+                - cell "2026-10-08 12:34:15Z" [ref=e183]
+                - cell "Arc testnet 5042002" [ref=e184]
+                - cell "approved payment" [ref=e186]
+                - cell "✓ confirmed" [ref=e187]
+                - cell "0.01 USDC" [ref=e189]
+                - cell "0.05 USDC" [ref=e190]
+                - cell [ref=e191]:
+                  - link "0xbb402…7fb2b" [ref=e192] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xbb40273fc1c0e3933aab719272def4a0ef6b2751c0cc80ca8c8e9ad467e7fb2b
+                    - text: 0xbb402…7fb2b↗
+                - cell [ref=e193]:
+                  - link "0x0985b…ed7dc" [ref=e194] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x0985b1037bef077c39c412e9ef5e7e0cfe75763c7343a1cbf5b728977afed7dc
+                    - text: 0x0985b…ed7dc↗
+                - cell "30.6 s" [ref=e195]
+                - cell [ref=e196]:
+                  - button "view" [ref=e197] [cursor=pointer]
+                  - link "open" [ref=e198] [cursor=pointer]:
+                    - /url: /runs/9768142a-8ffe-482b-a8a3-af2878f21a96?net=testnet
+                  - link "passport" [ref=e199] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/9768142a-8ffe-482b-a8a3-af2878f21a96/passport
+              - row [ref=e200]:
+                - cell "2026-10-08 12:33:26Z" [ref=e201]
+                - cell "Arc testnet 5042002" [ref=e202]
+                - cell "approved payment" [ref=e204]
+                - cell "✓ confirmed" [ref=e205]
+                - cell "0.01 USDC" [ref=e207]
+                - cell "0.05 USDC" [ref=e208]
+                - cell [ref=e209]:
+                  - link "0x10a7e…ac4cd" [ref=e210] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x10a7e8433b8d7006d683184540233bb81138175c34b301c1b1f9d1ad80cac4cd
+                    - text: 0x10a7e…ac4cd↗
+                - cell [ref=e211]:
+                  - link "0x00bce…17852" [ref=e212] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x00bce12ecfc1fcc2f242fdfad9fe2125c96229dfbc5fee286869327262217852
+                    - text: 0x00bce…17852↗
+                - cell "38.5 s" [ref=e213]
+                - cell [ref=e214]:
+                  - button "view" [ref=e215] [cursor=pointer]
+                  - link "open" [ref=e216] [cursor=pointer]:
+                    - /url: /runs/69191a8f-08ee-4a37-baf2-485d42322a12?net=testnet
+                  - link "passport" [ref=e217] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/69191a8f-08ee-4a37-baf2-485d42322a12/passport
+              - row [ref=e218]:
+                - cell "2026-10-08 12:07:09Z" [ref=e219]
+                - cell "Arc testnet 5042002" [ref=e220]
+                - cell "approved payment" [ref=e222]
+                - cell "✓ confirmed" [ref=e223]
+                - cell "0.01 USDC" [ref=e225]
+                - cell "0.05 USDC" [ref=e226]
+                - cell [ref=e227]:
+                  - link "0xa07c0…6f73b" [ref=e228] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xa07c0b7524b3b1ddfd4dd364669cd6cc10220cab85cc52905184ae939996f73b
+                    - text: 0xa07c0…6f73b↗
+                - cell [ref=e229]:
+                  - link "0xb9221…dd5e7" [ref=e230] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xb92216b6926fab07c651d5b216f310ea939dbcd42490578a57495c4cdd1dd5e7
+                    - text: 0xb9221…dd5e7↗
+                - cell "31.0 s" [ref=e231]
+                - cell [ref=e232]:
+                  - button "view" [ref=e233] [cursor=pointer]
+                  - link "open" [ref=e234] [cursor=pointer]:
+                    - /url: /runs/8867305d-b844-4406-a3af-56f606b0c16c?net=testnet
+                  - link "passport" [ref=e235] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/8867305d-b844-4406-a3af-56f606b0c16c/passport
+              - row [ref=e236]:
+                - cell "2026-10-08 12:01:07Z" [ref=e237]
+                - cell "Arc testnet 5042002" [ref=e238]
+                - cell "approved payment" [ref=e240]
+                - cell "✓ confirmed" [ref=e241]
+                - cell "0.01 USDC" [ref=e243]
+                - cell "0.05 USDC" [ref=e244]
+                - cell [ref=e245]:
+                  - link "0xf10a2…48626" [ref=e246] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xf10a29dd1db83168b35bf673e850e8a5e967ffb78063bdaf65483defd2848626
+                    - text: 0xf10a2…48626↗
+                - cell [ref=e247]:
+                  - link "0x17fa4…f179d" [ref=e248] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x17fa41afe7c0d96da82657bfe7de5bf121d33c2acedb9ddfa834e4ba6e5f179d
+                    - text: 0x17fa4…f179d↗
+                - cell "33.1 s" [ref=e249]
+                - cell [ref=e250]:
+                  - button "view" [ref=e251] [cursor=pointer]
+                  - link "open" [ref=e252] [cursor=pointer]:
+                    - /url: /runs/95eacbcb-83c7-4cdd-a9a9-f1b289aaa085?net=testnet
+                  - link "passport" [ref=e253] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/95eacbcb-83c7-4cdd-a9a9-f1b289aaa085/passport
+              - row [ref=e254]:
+                - cell "2026-10-08 10:51:24Z" [ref=e255]
+                - cell "Arc testnet 5042002" [ref=e256]
+                - cell "approved payment" [ref=e258]
+                - cell "✓ confirmed" [ref=e259]
+                - cell "0.01 USDC" [ref=e261]
+                - cell "0.05 USDC" [ref=e262]
+                - cell [ref=e263]:
+                  - link "0x5c81a…9721b" [ref=e264] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x5c81ae74d072412b5474baa276bbb5283ccb31fa36f420e75a47d386a1c9721b
+                    - text: 0x5c81a…9721b↗
+                - cell [ref=e265]:
+                  - link "0x926a4…1d9aa" [ref=e266] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x926a4bec4033e2300e551efc153641b6733d7248f98be57ca258b0978ba1d9aa
+                    - text: 0x926a4…1d9aa↗
+                - cell "33.1 s" [ref=e267]
+                - cell [ref=e268]:
+                  - button "view" [ref=e269] [cursor=pointer]
+                  - link "open" [ref=e270] [cursor=pointer]:
+                    - /url: /runs/90cabead-5cf5-4ffb-a441-02d1025f5aaf?net=testnet
+                  - link "passport" [ref=e271] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/90cabead-5cf5-4ffb-a441-02d1025f5aaf/passport
+              - row [ref=e272]:
+                - cell "2026-10-08 10:00:55Z" [ref=e273]
+                - cell "Arc testnet 5042002" [ref=e274]
+                - cell "changed implementation" [ref=e276]
+                - cell "! review required" [ref=e277]
+                - cell "0.01 USDC" [ref=e279]
+                - cell "—" [ref=e280]
+                - cell "not signed" [ref=e281]
+                - cell [ref=e282]:
+                  - link "0xbaace…489b1" [ref=e283] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xbaacef313aabb17f88f43b1e8358e6ef5921299dfa4778a6807b5e7fb81489b1
+                    - text: 0xbaace…489b1↗
+                - cell "21.8 s" [ref=e284]
+                - cell [ref=e285]:
+                  - button "view" [ref=e286] [cursor=pointer]
+                  - link "open" [ref=e287] [cursor=pointer]:
+                    - /url: /runs/58d81e87-2fb6-4446-8cc4-658425d7611a?net=testnet
+                  - link "passport" [ref=e288] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/58d81e87-2fb6-4446-8cc4-658425d7611a/passport
+              - row [ref=e289]:
+                - cell "2026-10-08 09:01:29Z" [ref=e290]
+                - cell "Arc testnet 5042002" [ref=e291]
+                - cell "approved payment" [ref=e293]
+                - cell "✓ confirmed" [ref=e294]
+                - cell "0.01 USDC" [ref=e296]
+                - cell "0.05 USDC" [ref=e297]
+                - cell [ref=e298]:
+                  - link "0x970d6…81c88" [ref=e299] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x970d6641d299ba658f1e878fd92df6dfb970bc138e73f168addb83e67e581c88
+                    - text: 0x970d6…81c88↗
+                - cell [ref=e300]:
+                  - link "0x859c2…9d6ec" [ref=e301] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x859c2bc8839c1e0c7d67c2b3a36e9527f68dff52d880253d5cd3f4ea8e29d6ec
+                    - text: 0x859c2…9d6ec↗
+                - cell "38.6 s" [ref=e302]
+                - cell [ref=e303]:
+                  - button "view" [ref=e304] [cursor=pointer]
+                  - link "open" [ref=e305] [cursor=pointer]:
+                    - /url: /runs/92385e67-8af3-4078-8a8c-6efe35ae2485?net=testnet
+                  - link "passport" [ref=e306] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/92385e67-8af3-4078-8a8c-6efe35ae2485/passport
+              - row [ref=e307]:
+                - cell "2026-10-08 08:56:14Z" [ref=e308]
+                - cell "Arc testnet 5042002" [ref=e309]
+                - cell "changed implementation" [ref=e311]
+                - cell "! review required" [ref=e312]
+                - cell "0.01 USDC" [ref=e314]
+                - cell "—" [ref=e315]
+                - cell "not signed" [ref=e316]
+                - cell [ref=e317]:
+                  - link "0x3d624…829a0" [ref=e318] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x3d624ec3086b637c288ae72e22797a25c10d08dd1c8ecfcf7973ca7d73d829a0
+                    - text: 0x3d624…829a0↗
+                - cell "19.0 s" [ref=e319]
+                - cell [ref=e320]:
+                  - button "view" [ref=e321] [cursor=pointer]
+                  - link "open" [ref=e322] [cursor=pointer]:
+                    - /url: /runs/bb38b2e9-06ff-422c-9c79-202b8e44a8f1?net=testnet
+                  - link "passport" [ref=e323] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/bb38b2e9-06ff-422c-9c79-202b8e44a8f1/passport
+              - row [ref=e324]:
+                - cell "2026-10-08 08:55:52Z" [ref=e325]
+                - cell "Arc testnet 5042002" [ref=e326]
+                - cell "changed implementation" [ref=e328]
+                - cell "! review required" [ref=e329]
+                - cell "0.01 USDC" [ref=e331]
+                - cell "—" [ref=e332]
+                - cell "not signed" [ref=e333]
+                - cell [ref=e334]:
+                  - link "0x09c65…e5857" [ref=e335] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0x09c65d562fbc7504c1ada16895d4b8e6aa4f2da1b26473e960c42b030e8e5857
+                    - text: 0x09c65…e5857↗
+                - cell "20.6 s" [ref=e336]
+                - cell [ref=e337]:
+                  - button "view" [ref=e338] [cursor=pointer]
+                  - link "open" [ref=e339] [cursor=pointer]:
+                    - /url: /runs/cd6dd06b-e268-4e62-b6a2-13aeaf99e6f7?net=testnet
+                  - link "passport" [ref=e340] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/cd6dd06b-e268-4e62-b6a2-13aeaf99e6f7/passport
+              - row [ref=e341]:
+                - cell "2026-10-08 08:54:44Z" [ref=e342]
+                - cell "Arc testnet 5042002" [ref=e343]
+                - cell "changed implementation" [ref=e345]
+                - cell "! review required" [ref=e346]
+                - cell "0.01 USDC" [ref=e348]
+                - cell "—" [ref=e349]
+                - cell "not signed" [ref=e350]
+                - cell [ref=e351]:
+                  - link "0xa078f…78537" [ref=e352] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xa078fc7e25e8df85a5169dc6695333947943a76b68d0816aa32e20d72d578537
+                    - text: 0xa078f…78537↗
+                - cell "20.1 s" [ref=e353]
+                - cell [ref=e354]:
+                  - button "view" [ref=e355] [cursor=pointer]
+                  - link "open" [ref=e356] [cursor=pointer]:
+                    - /url: /runs/b4afa1bc-97aa-4a7e-838f-608af819b7fc?net=testnet
+                  - link "passport" [ref=e357] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/b4afa1bc-97aa-4a7e-838f-608af819b7fc/passport
+              - row [ref=e358]:
+                - cell "2026-10-08 08:43:18Z" [ref=e359]
+                - cell "Arc testnet 5042002" [ref=e360]
+                - cell "approved payment" [ref=e362]
+                - cell "✓ confirmed" [ref=e363]
+                - cell "0.01 USDC" [ref=e365]
+                - cell "0.05 USDC" [ref=e366]
+                - cell [ref=e367]:
+                  - link "0xfa0f4…ce8c1" [ref=e368] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xfa0f4420152bb54c3602dd5f41c819bdc5722a3ce4dc71c9a7b4df132d2ce8c1
+                    - text: 0xfa0f4…ce8c1↗
+                - cell [ref=e369]:
+                  - link "0xfa47d…a1dce" [ref=e370] [cursor=pointer]:
+                    - /url: https://testnet.arcscan.app/tx/0xfa47d6d05516a36ed4a787cfa38b78d51de616592d421e8b0dc9ae45ae9a1dce
+                    - text: 0xfa47d…a1dce↗
+                - cell "34.2 s" [ref=e371]
+                - cell [ref=e372]:
+                  - button "view" [ref=e373] [cursor=pointer]
+                  - link "open" [ref=e374] [cursor=pointer]:
+                    - /url: /runs/8aaf0f76-9bf8-4561-a3c9-491e690fa940?net=testnet
+                  - link "passport" [ref=e375] [cursor=pointer]:
+                    - /url: /testnet/v1/demo/runs/8aaf0f76-9bf8-4561-a3c9-491e690fa940/passport
+          - generic [ref=e376]:
+            - generic [ref=e377]: 12 of 29 runs
+            - button "show more" [ref=e378] [cursor=pointer]
+  - contentinfo [ref=e24]:
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - text: ArcPreflight · release
+        - code [ref=e27]: ui-audit-testnet
+        - text: ·
+        - code [ref=e28]: SUBMISSION_RESTRICTED
+        - text: · eip155:5042002
+        - generic [ref=e379]:
+          - text: · served under
+          - code [ref=e380]: /testnet
+      - generic [ref=e29]:
+        - link "OpenAPI" [ref=e30] [cursor=pointer]:
+          - /url: /testnet/openapi.json
+        - link "GitHub" [ref=e31] [cursor=pointer]:
+          - /url: https://github.com/a252937166/arcpreflight
+        - link "Arc docs" [ref=e32] [cursor=pointer]:
+          - /url: https://docs.arc.io
