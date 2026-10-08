@@ -20,8 +20,15 @@ const runs: any[] = [];
 for (let round = 1; round <= repeats; round++) {
   for (const [i, fixture] of fixtures.entries()) {
     const clientRunRequestId = `tn-${crypto.randomUUID()}`;
-    const response = await fetch(`${api}/v1/demo/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fixture, clientRunRequestId }) });
-    const start = await response.json() as any;
+    // the public instance enforces a per-client cooldown between live runs (DEMO_CLIENT_COOLDOWN_SECONDS); wait it out, never retry blindly
+    let response = await fetch(`${api}/v1/demo/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fixture, clientRunRequestId }) });
+    let start = await response.json() as any;
+    if (response.status === 429 && start.error === "DEMO_COOLDOWN") {
+      const wait = (Number(network.budget?.clientCooldownSeconds ?? 45) + 2) * 1000;
+      console.log(`cooldown: waiting ${wait / 1000}s before ${fixture}`); await new Promise((s) => setTimeout(s, wait));
+      response = await fetch(`${api}/v1/demo/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fixture, clientRunRequestId }) });
+      start = await response.json() as any;
+    }
     assert.equal(response.status, 202, JSON.stringify(start));
     // AP32-08: the same admission key re-sent returns the same run (200, existing) and starts nothing
     const replay = await fetch(`${api}/v1/demo/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fixture, clientRunRequestId }) });

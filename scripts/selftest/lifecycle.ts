@@ -129,7 +129,11 @@ if (scenarios.includes("wallet")) {
 
 if (scenarios.includes("interrupt")) {
   const clientRunRequestId = `lc-${crypto.randomUUID()}`;
-  const started = await post("/v1/demo/run", { fixture: "APPROVED_PAYMENT", clientRunRequestId, interruptAfterBroadcast: true });
+  let started = await post("/v1/demo/run", { fixture: "APPROVED_PAYMENT", clientRunRequestId, interruptAfterBroadcast: true });
+  if (started.status === 429 && started.body?.error === "DEMO_COOLDOWN") { // the public instance's per-client cooldown: wait it out
+    const wait = (Number(network.budget?.clientCooldownSeconds ?? 45) + 2) * 1000; log(`cooldown: waiting ${wait / 1000}s`); await sleep(wait);
+    started = await post("/v1/demo/run", { fixture: "APPROVED_PAYMENT", clientRunRequestId, interruptAfterBroadcast: true });
+  }
   assert.equal(started.status, 202, JSON.stringify(started.body)); const runId = started.body.runId as string;
   log(`live demo run ${runId} started with a labelled interruption after the broadcast`);
   let run: any;

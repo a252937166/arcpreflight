@@ -34,6 +34,11 @@ silently: without `keys/order-creator.json` it falls back to deployer-admin with
 
 ## Each release
 
+The public **testnet preview** (root instance on Arc testnet, before the mainnet cutover) is redeployed with
+`PREVIEW_GO=1 ops/testnet-preview.sh`: it installs the env derived from `keys/env.server-testnet` at the root (port 4040, a
+fresh database), puts the order-creator key on the server, removes the owner key from it, runs `ops/deploy.sh`, approves the
+baselines and prints the checks. The mainnet cutover stays `ops/mainnet-cutover.sh`.
+
 `ops/deploy.sh` builds API + web, rsyncs, bumps `RELEASE_SHA`, restarts the service and checks `/health/live`.
 After a fresh database, approve the baselines against the server:
 

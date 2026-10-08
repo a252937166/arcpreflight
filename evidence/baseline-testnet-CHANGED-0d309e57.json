@@ -1,0 +1,50 @@
+{
+  "baseline": {
+    "schemaVersion": "1.0",
+    "chainId": 5042002,
+    "subject": "0x2ff113ede634f8dd274dec71735307ae218960c1",
+    "approvedBy": "deployer-admin",
+    "approvedAt": "2026-10-08T19:35:56.202Z",
+    "validUntil": null,
+    "previousBaselineDigest": null,
+    "referenceSnapshot": {
+      "chainId": 5042002,
+      "blockNumber": "66186345",
+      "blockHash": "0xa242ce069ead04d4c3f6b23a1c0e304141f775be50ae48d51a0309a2675446bc",
+      "observedAt": "2026-10-08T19:35:53.341Z",
+      "providerId": "rpc.testnet",
+      "pinningMode": "BLOCK_HASH"
+    },
+    "dependencies": [
+      {
+        "address": "0x2ff113ede634f8dd274dec71735307ae218960c1",
+        "role": "TARGET",
+        "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
+        "adapterDigest": "0x731bdb9346a7d2b7874fba66dd6952d38ba99b37db1e47b02a2597a2669abdd6",
+        "resolution": "VERIFIED_TEMPLATE"
+      },
+      {
+        "address": "0x342ab0e9f7951e4112e698ff69ac00ac18c009f9",
+        "role": "IMPLEMENTATION",
+        "codeHash": "0x32e3f234bcc25a188c44298549f35cd029d00243b40e4dc5894b1c262248b8ca",
+        "adapterDigest": "0x731bdb9346a7d2b7874fba66dd6952d38ba99b37db1e47b02a2597a2669abdd6",
+        "resolution": "VERIFIED_TEMPLATE"
+      }
+    ],
+    "allowedSelectors": [
+      "0x8609cad1"
+    ],
+    "adapterManifestDigests": [
+      "0x731bdb9346a7d2b7874fba66dd6952d38ba99b37db1e47b02a2597a2669abdd6"
+    ],
+    "approvedState": [
+      {
+        "key": "paused",
+        "canonicalValue": "false"
+      }
+    ]
+  },
+  "baselineDigest": "0x0d309e57fe3e083336f21b3e530fb0456c813ca1f95f1892d203fd4fc3768351",
+  "approvedImplementation": "0x342AB0e9f7951E4112e698ff69Ac00aC18c009f9",
+  "liveImplementationAtApproval": "0xac036236e8a67213faa95a99c0adbfd34c7b9bd2"
+}

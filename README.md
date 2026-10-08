@@ -15,8 +15,9 @@ Three moments make the story: **A** — the address stayed, the approval did not
 signing); **B** — the response disappeared, not necessarily the money (the original attempt is recovered, never
 repeated); **C** — a new reader finds the payment (the passport verifies in a clean process).
 
-Live: **https://arcpreflight.axiqo.xyz** (Arc mainnet at the root after the cutover; the same site serves Arc testnet under
-`/testnet` for zero-cost demos — the network switch in the header only changes the API base path, explorer and wallet chain) ·
+Live: **https://arcpreflight.axiqo.xyz** — today the Arc **testnet preview** (free to try with your own wallet; the faucet gives
+testnet USDC); after the mainnet cutover Arc mainnet serves at the root and testnet stays under `/testnet` (the network switch in
+the header only changes the API base path, explorer and wallet chain) ·
 API: `/openapi.json` · Submission: Arc Microgrants (DoraHacks)
 
 ## Three outcomes, one code path

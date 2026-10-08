@@ -1,0 +1,185 @@
+{
+  "generatedAt": "2026-10-08T19:43:25.153Z",
+  "api": "https://arcpreflight.axiqo.xyz",
+  "network": "eip155:5042002",
+  "release": "f214802",
+  "scenarios": {
+    "interrupt": {
+      "runId": "ca2e8e89-82fb-4e65-bb43-25c2dc2375fe",
+      "clientRunRequestId": "lc-9a4ff386-3b33-454a-b6a5-575a053088f9",
+      "stateAtStop": "DONE",
+      "outcomeAtStop": {
+        "kind": "PAID",
+        "text": "confirmed: the order reads as paid by this payer for the exact amount",
+        "source": "store"
+      },
+      "steps": [
+        "orderPlanned",
+        "createOrder",
+        "intent",
+        "quote",
+        "signServiceFee",
+        "reportDelivered",
+        "decision",
+        "finalValidation",
+        "signed",
+        "broadcastAttempted",
+        "broadcast",
+        "interruptedAfterBroadcast",
+        "reconciled"
+      ],
+      "businessExecution": {
+        "attemptId": "38bda15d-ca29-484a-a61f-1b6b357e94e0",
+        "state": "CONFIRMED",
+        "txHash": "0xf552dee4c3cf4fc0299c171505a1def030cf22b4c7aa60915b5114540cb022a2",
+        "nonce": 26,
+        "broadcastBlock": "66187284",
+        "businessStatus": "SUCCESS",
+        "businessTxHash": "0xf552dee4c3cf4fc0299c171505a1def030cf22b4c7aa60915b5114540cb022a2",
+        "block": "66187288",
+        "consumedBy": null,
+        "note": "reconciled from the original transaction hash and the order state",
+        "validUntil": "2026-10-08T19:43:50.618Z",
+        "updatedAt": "2026-10-08T19:43:48.661Z"
+      },
+      "recovery": {
+        "recoveryVersion": "1.0",
+        "attemptId": "38bda15d-ca29-484a-a61f-1b6b357e94e0",
+        "interrupted": true,
+        "counters": {
+          "ordersCreated": 1,
+          "checkFeeAuthorizations": 1,
+          "businessSignatures": 1,
+          "broadcastsOfOriginalBytes": 1,
+          "replacementSignatures": 0
+        },
+        "addedByRecovery": {
+          "ordersCreated": 0,
+          "checkFeeAuthorizations": 0,
+          "businessSignatures": 0,
+          "broadcastsOfOriginalBytes": 0
+        },
+        "originalTransaction": {
+          "hash": "0xf552dee4c3cf4fc0299c171505a1def030cf22b4c7aa60915b5114540cb022a2",
+          "status": "recovered-confirmed"
+        },
+        "reconciliation": [
+          {
+            "at": "2026-10-08T19:43:48.664Z",
+            "chainStatus": "CONFIRMED",
+            "businessStatus": "SUCCESS",
+            "note": "reconciled from the original transaction hash and the order state"
+          }
+        ]
+      },
+      "reconciliation": [
+        {
+          "at": "2026-10-08T19:43:48.664Z",
+          "chainStatus": "CONFIRMED",
+          "businessStatus": "SUCCESS",
+          "note": "reconciled from the original transaction hash and the order state",
+          "consumedBy": null
+        }
+      ],
+      "costStatement": {
+        "costStatementVersion": "1.1",
+        "unit": "USDC",
+        "nativeDecimals": 18,
+        "tokenDecimals": 6,
+        "capturedAt": "2026-10-08T19:43:48.664Z",
+        "buyer": {
+          "address": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+          "role": "project-runner",
+          "businessPrincipal": {
+            "nativeAtomic": "50000000000000000",
+            "usdc": "0.05"
+          },
+          "checkFee": {
+            "tokenAtomic": "10000",
+            "nativeAtomicEquivalent": "10000000000000000",
+            "usdc": "0.01"
+          },
+          "businessGas": {
+            "nativeAtomic": "1009100000000000",
+            "usdc": "0.0010091",
+            "gasUsed": "40364",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0xf552dee4c3cf4fc0299c171505a1def030cf22b4c7aa60915b5114540cb022a2"
+          },
+          "totalNativeAtomic": "61009100000000000",
+          "totalUsdc": "0.0610091",
+          "complete": true
+        },
+        "operator": {
+          "feeRelay": {
+            "nativeAtomic": "2178525000000000",
+            "usdc": "0.002178525",
+            "gasUsed": "87141",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0x6244521b758db3e86b814d4bc9708d28ee5238e4f48b401ab998f193cded8bd0",
+            "address": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0"
+          },
+          "orderCreation": {
+            "nativeAtomic": "2507300000000000",
+            "usdc": "0.0025073",
+            "gasUsed": "100292",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0x4f2c7800771b5ed97095e8660d6d87449b3f7a73292dfdab8d83a6ffe8f7d329",
+            "address": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b"
+          },
+          "totalNativeAtomic": "4685825000000000",
+          "totalUsdc": "0.004685825",
+          "complete": true
+        },
+        "authorizedMaximum": {
+          "businessPrincipalNativeAtomic": "50000000000000000",
+          "checkFeeTokenAtomic": "10000",
+          "businessGasNativeAtomic": "1181315000000000"
+        },
+        "actual": {
+          "businessPrincipalNativeAtomic": "50000000000000000",
+          "checkFeeTokenAtomic": "10000",
+          "businessGasNativeAtomic": "1009100000000000"
+        },
+        "unresolvedReservation": {
+          "nativeAtomic": "0",
+          "note": "reservations released only after reconciliation"
+        },
+        "sources": {
+          "feeTx": "0x6244521b758db3e86b814d4bc9708d28ee5238e4f48b401ab998f193cded8bd0",
+          "createOrderTx": "0x4f2c7800771b5ed97095e8660d6d87449b3f7a73292dfdab8d83a6ffe8f7d329",
+          "businessTx": "0xf552dee4c3cf4fc0299c171505a1def030cf22b4c7aa60915b5114540cb022a2"
+        },
+        "notes": [
+          "gas deductions are not payment Transfer events",
+          "the fee's native-system and ERC-20 event representations are one payment",
+          "sub-micro-USDC gas precision is preserved; usdc strings are exact decimal renderings of the atomic values"
+        ]
+      },
+      "passport": "/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/passports/testnet-interrupt-2026-10-08T19-43-25-153Z.passport.json",
+      "verifier": {
+        "exit": 0,
+        "counts": {
+          "pass": 10,
+          "fail": 0,
+          "unverified": 0,
+          "notEvaluated": 1
+        },
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "PASS",
+          "ORDER_OUTCOME": "PASS",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "anchorsPath": "/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/passports/testnet-interrupt-2026-10-08T19-43-25-153Z.anchors.json"
+      }
+    }
+  }
+}

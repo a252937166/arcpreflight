@@ -3,7 +3,7 @@
 > **Status: DRAFT, not frozen.** This describes what the code at baseline `8c59d10` (the former `360f086`; commit identities (email and, for early commits, name) were corrected on 2026-10-07, trees unchanged) implements, plus the docs in this folder.
 > It becomes the release record only at the freeze step: set `releaseSha`, re-run the acceptance record
 > ([ACCEPTANCE.md](ACCEPTANCE.md)) against that SHA, and confirm the live `/health/live` reports the same SHA.
-> As of 2026-10-07 the public site still runs the **testnet preview**; the Arc mainnet cutover has not happened yet.
+> As of 2026-10-08 the public site runs the **testnet preview** of `f214802` (design v3.3 + review round 2, `ops/testnet-preview.sh`); the Arc mainnet cutover has not happened yet.
 
 Closing a capability here means the server route, principal check and signer path reject it — not that a button is hidden.
 
@@ -42,7 +42,7 @@ Closing a capability here means the server route, principal check and signer pat
 - **Public observation** (`OBJECT_OBSERVATION`: raw reads at a pinned block, `decisionEligible=false`) is limited to the curated list in `/v1/network` `observableSubjects`: the five external samples on mainnet (USDC, Circle GatewayWallet, StableFX FxEscrow, CCTP TokenMessengerV2, ERC-8004 IdentityRegistry) and the configured fixture proxies. Other addresses are refused, so the public report list stays a set of reviewed samples. External objects observed so far are listed in [EVIDENCE.md](EVIDENCE.md).
 - **Checks:** `INTENT_BINDING`, `AMOUNT_SEMANTICS`, allowlists, `BASELINE_STATUS`, `EXECUTION_IDENTITY`, `CALL_SIMULATION`, `EVIDENCE_FRESHNESS`, plus Arc runtime advisories (`basis: network_advisory`).
 - **Settlement backend:** self-relayed EIP-3009 — the merchant account submits the buyer's `TransferWithAuthorization` to the USDC contract and pays the gas in USDC; the buyer needs no gas for the check fee. This covers the check fee only; the business payment is the agent's own transaction. Low relayer balance stops new quotes and broadcasts. Previously accepted authorizations remain durably recorded and recoverable. Payments that may already have been submitted continue through reconciliation. One authorization → one quote → one report remains required. Legacy payment rows settled earlier through a hosted facilitator keep their original reconciliation path.
-- **Keys:** the API loads a narrowly scoped order-creator key (DemoMerchant `orderCreator` role, create orders only) and falls back to the deployer-admin key only when none is configured (start-up warning; `adminKeyInProcess` in `/v1/network`). The deployer-admin key (upgrade, pause, withdraw) is meant to stay on an operator machine. Testnet fixtures redeployed with the role on 2026-10-07; the public preview still runs the old fixtures until redeployed.
+- **Keys:** the API loads a narrowly scoped order-creator key (DemoMerchant `orderCreator` role, create orders only) and falls back to the deployer-admin key only when none is configured (start-up warning; `adminKeyInProcess` in `/v1/network`). The deployer-admin key (upgrade, pause, withdraw) is meant to stay on an operator machine. Testnet fixtures redeployed with the role on 2026-10-07; the public preview runs them since 2026-10-08, with the order-creator key on the server and the owner key off it.
 
 ## Wallet paths
 
