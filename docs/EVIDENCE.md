@@ -45,6 +45,7 @@ On 2026-10-07 the author and committer identity of every commit was corrected (t
 |---|---|---|
 | `89c269f` | `a5f1ba6` | the release the testnet preview reported in `/health/live` until the 2026-10-08 redeploy |
 | `f214802` | — | design v3.3 + review round 2, the release the public testnet preview reports since 2026-10-08 (local commit on top of `8c59d10`; not pushed) |
+| `8648e56` | — | `f214802` plus the documentation of its public acceptance and the self-tests' cooldown handling; the label the public preview reports after the second redeploy on 2026-10-08 (not pushed) |
 | `360f086` | `8c59d10` | the code baseline with the eight review fixes |
 
 `evidence/selftest/` files carry a label (`fix8-20261003-selftest`, `d07-rehearsal`), not a commit SHA.
