@@ -212,14 +212,14 @@ describe("business-transaction persistence and recovery (spec D07)", () => {
   });
   it("still confirms from the receipt when the broadcast call throws but the transaction propagated anyway", async () => {
     const { h, result } = await run({ fixture: "APPROVED_PAYMENT", broadcastThrows: true });
-    expect(h.calls).toEqual(["persistSigned", "markBroadcastAttempted", "send", "persistOutcome:CONFIRMED"]);
-    expect(result.steps.find((s: { step: string }) => s.step === "broadcast")).toMatchObject({ accepted: false, error: expect.stringContaining("socket hang up") });
+    expect(h.calls).toEqual(["persistSigned", "markBroadcastAttempted", "send", "send", "send", "persistOutcome:CONFIRMED"]); // the identical bytes, three times inside the window
+    expect(result.steps.find((s: { step: string }) => s.step === "broadcast")).toMatchObject({ accepted: false, attempts: 3, error: expect.stringContaining("socket hang up") });
     expect(result.execution).toMatchObject({ chainStatus: "CONFIRMED", businessStatus: "SUCCESS", businessTxHash: h.getSigned()!.txHash });
     expect(h.signTransaction).toHaveBeenCalledTimes(1); // no replacement is signed
   });
   it("records UNKNOWN, not a business failure, when the broadcast call throws and no receipt can be obtained", async () => {
     const { h, result } = await run({ fixture: "APPROVED_PAYMENT", broadcastThrows: true, receiptTimeout: true });
-    expect(h.calls).toEqual(["persistSigned", "markBroadcastAttempted", "send", "persistOutcome:UNKNOWN"]);
+    expect(h.calls).toEqual(["persistSigned", "markBroadcastAttempted", "send", "send", "send", "persistOutcome:UNKNOWN"]); // the identical bytes, three times inside the window
     expect(result.execution).toMatchObject({ chainStatus: "UNKNOWN", businessStatus: "UNKNOWN", businessTxHash: h.getSigned()!.txHash });
     expect(h.signTransaction).toHaveBeenCalledTimes(1);
     expect(result.steps.map((s: { step: string }) => s.step)).toContain("outcomeUnknown");
@@ -308,5 +308,27 @@ describe("Gate D: the order creation's per-transaction gas cap", () => {
     await vi.runAllTimersAsync(); await expectation;
     expect((opts.admin as any).writeContract).not.toHaveBeenCalled(); expect(h.signTransaction).not.toHaveBeenCalled(); expect(h.sendRawTransaction).not.toHaveBeenCalled();
     expect(h.calls).toEqual([]);
+  });
+});
+
+describe("sendIdentical — the identical signed bytes, again only inside the window (Gate D, 2026-10-09)", async () => {
+  const { sendIdentical } = await import("../src/index.js");
+  const RAW = "0x02f8aa" as Hex;
+  const client = (answers: (string | null)[]) => { const sent: string[] = []; return { sent, sendRawTransaction: vi.fn(async ({ serializedTransaction }: { serializedTransaction: Hex }) => { sent.push(serializedTransaction); const a = answers.shift(); if (a) throw new Error(a); return keccak256(serializedTransaction); }) }; };
+  it("retries a node that does not accept transactions, then stops at the first acknowledgement", async () => {
+    vi.useRealTimers();
+    const c = client(['The method "eth_sendRawTransaction" does not exist / is not available.', null]);
+    expect(await sendIdentical(c, RAW, () => true, 3, 0)).toEqual({ accepted: true, sendError: null, attempts: 2 });
+    expect(c.sent).toEqual([RAW, RAW]); // the same bytes every time
+  });
+  it("never retries after the window, never retries a definitive rejection, and treats 'already known' as acknowledged", async () => {
+    vi.useRealTimers();
+    let open = true; const c1 = client(["socket hang up", "socket hang up"]);
+    const r1 = sendIdentical(c1, RAW, () => open, 3, 0); open = false;
+    expect(await r1).toMatchObject({ accepted: false, attempts: 1 }); expect(c1.sent).toHaveLength(1); // the clock moved past the window before the retry
+    const c2 = client(["nonce too low: next nonce 45, tx nonce 44"]);
+    expect(await sendIdentical(c2, RAW, () => true, 3, 0)).toMatchObject({ accepted: false, attempts: 1, sendError: expect.stringMatching(/nonce too low/) });
+    const c3 = client(["already known"]);
+    expect(await sendIdentical(c3, RAW, () => true, 3, 0)).toMatchObject({ accepted: true, attempts: 1 });
   });
 });

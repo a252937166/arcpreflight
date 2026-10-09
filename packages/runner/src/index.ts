@@ -93,6 +93,24 @@ async function currentBaseline(o: Pick<RunOptions, "apiUrl" | "token" | "baselin
  *  anything is persisted or sent (Gate D) — no order row claims a creation that never left. */
 export type OrderCreation = { orderId: Hex; tx: Hex; block: string; from: Hex | null; gasUsed: string | null; effectiveGasPriceNativeAtomic: string | null };
 const receiptFacts = (r: any) => ({ from: (r?.from as Hex | undefined) ?? null, gasUsed: r?.gasUsed !== undefined && r?.gasUsed !== null ? String(r.gasUsed) : null, effectiveGasPriceNativeAtomic: r?.effectiveGasPrice !== undefined && r?.effectiveGasPrice !== null ? String(r.effectiveGasPrice) : null });
+/** Hands the same signed bytes to the node up to `maxAttempts` times while `inWindow()` holds (checked with a fresh clock before every
+ *  retry). Returns whether a node acknowledged them. "already known" counts as acknowledged; definitive rejections end the attempts. */
+export const SEND_ATTEMPTS = 3;
+const DEFINITIVE_SEND_ERROR = /nonce too low|insufficient funds|underpriced|intrinsic gas|exceeds block gas limit|invalid sender|chain ?id/i;
+export async function sendIdentical(client: { sendRawTransaction(a: { serializedTransaction: Hex }): Promise<unknown> }, raw: Hex, inWindow: () => boolean, maxAttempts = SEND_ATTEMPTS, pauseMs = 400): Promise<{ accepted: boolean; sendError: string | null; attempts: number }> {
+  let sendError: string | null = null, attempts = 0;
+  while (attempts < maxAttempts) {
+    if (attempts > 0) { await new Promise((r) => setTimeout(r, pauseMs)); if (!inWindow()) break; } // never after the window
+    attempts++;
+    try { await client.sendRawTransaction({ serializedTransaction: raw }); return { accepted: true, sendError: null, attempts }; }
+    catch (e: any) {
+      sendError = String(e?.shortMessage ?? e?.message ?? e).slice(0, 160);
+      if (/already known|known transaction|already imported/i.test(sendError)) return { accepted: true, sendError, attempts };
+      if (DEFINITIVE_SEND_ERROR.test(sendError)) break;
+    }
+  }
+  return { accepted: false, sendError, attempts };
+}
 export async function createOrder(o: Pick<RunOptions, "publicClient" | "admin" | "merchant" | "feeParams" | "maxOrderGasCostNativeAtomic">, payer: Hex, amount: bigint, store?: OrderStore): Promise<OrderCreation> {
   const orderId = toHex(randomBytes(32)) as Hex;
   const args = [orderId, payer, amount] as const;
@@ -257,10 +275,13 @@ export async function runFixture(o: RunOptions) {
           log("notBroadcast", { why: "final validation expired after the broadcast marker and before the send; the signed transaction is discarded and nothing reached the network" });
           execution.chainStatus = "SIGNED_NOT_BROADCAST"; execution.businessStatus = "NOT_EXECUTED";
         } else {
-          let accepted = true; let sendError: string | null = null;
-          try { await o.publicClient.sendRawTransaction({ serializedTransaction: raw }); } catch (e: any) { accepted = false; sendError = String(e?.shortMessage ?? e?.message ?? e).slice(0, 160); }
+          // The IDENTICAL signed bytes may be handed to the node again while the validation window is open (Gate D, 2026-10-09): a
+          // load-balanced RPC answered one call from a node that does not accept transactions ("eth_sendRawTransaction does not exist /
+          // is not available"). A fresh clock is read before every retry; "already known" means a node has it; a definitive rejection
+          // (nonce too low, insufficient funds, underpriced, intrinsic gas) is not retried. Never a different transaction.
+          const { accepted, sendError, attempts } = await sendIdentical(o.publicClient, raw, () => new Date(finalValidation.expiresAt) > new Date());
           execution.businessTxHash = txHash; execution.chainStatus = "PENDING"; execution.businessStatus = "PENDING";
-          log("broadcast", { businessTxHash: txHash, accepted, error: sendError, why: accepted ? "raw transaction handed to the node" : "the node did not acknowledge the broadcast; it may still have propagated, so the outcome is reconciled from this hash and the order state — never by signing a replacement" });
+          log("broadcast", { businessTxHash: txHash, accepted, error: sendError, attempts, why: accepted ? "raw transaction handed to the node" : "the node did not acknowledge the broadcast; it may still have propagated, so the outcome is reconciled from this hash and the order state — never by signing a replacement" });
           await artifact("execution", execution);
           if (o.interruptAfterBroadcast) {
             // labelled interruption (design v3.3 §4): the process stops waiting here, exactly like a crash after the send would
