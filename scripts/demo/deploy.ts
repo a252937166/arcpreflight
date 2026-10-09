@@ -9,7 +9,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { encodeDeployData, encodeFunctionData, getAddress, getContractAddress, keccak256, type Hex } from "viem";
-import { SpendRefused, waitForReceiptPatiently } from "@arcpreflight/client";
+import { SpendRefused, waitForReceiptPatiently, sendIdentical } from "@arcpreflight/client";
 import { ROOT, net, chain, publicClient, walletFor, artifact, deploymentsPath, writeJson, evidenceDir, feeParams } from "./common.js";
 import { limitsFrom, openGuard, usdc18 } from "../lib/spend-ledger.js";
 
@@ -74,15 +74,22 @@ const admin = walletFor("deployer-admin");
 if (getAddress(admin.account.address) !== deployer) throw new SpendRefused("the deployer key does not match keys/deployer-admin.json's address");
 let nonce = noncePending;
 const txs: Record<string, any> = {};
-async function send(key: string, label: string, bound: bigint, build: (gas: bigint, f: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }, n: number) => Promise<Hex>, estimate: () => Promise<bigint>) {
+// Every transaction is signed locally, its hash recorded, then the IDENTICAL bytes handed to the node up to 3 times: the public Arc RPC
+// sometimes routes eth_sendRawTransaction to a node that refuses it ("method does not exist / is not available"); the same signed bytes
+// have one hash and one nonce, so a re-send can never deploy or call twice.
+async function send(key: string, label: string, bound: bigint, tx: (gas: bigint, f: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }, n: number) => Promise<Hex>, estimate: () => Promise<bigint>) {
   const f = await feeParams();
   const live = await estimate();
   if (live > (bound * 15n) / 10n) throw new SpendRefused(`${label}: live gas estimate ${live} is above 1.5 × the planned ${bound} — stopping`);
   const gas = margin(live);
   const idx = guard.reserve({ purpose: label, gasLimit: gas, maxFeePerGas: f.maxFeePerGas }); save();
-  let hash: Hex;
-  try { hash = await build(gas, f, nonce); } catch (e) { guard.release(idx); save(); throw e; } // failed before anything was signed and sent
-  guard.sent(idx, hash); save(); nonce++;
+  let raw: Hex;
+  try { raw = await tx(gas, f, nonce); } catch (e) { guard.release(idx); save(); throw e; } // failed while signing: nothing was sent
+  const hash = keccak256(raw);
+  guard.sent(idx, hash); save(); // from here on it may reach the network: committed at its worst case until the receipt settles it
+  const sent = await sendIdentical(publicClient, raw, () => true, 3, 1500);
+  if (!sent.accepted && !(await publicClient.getTransaction({ hash }).catch(() => null))) throw new SpendRefused(`${label}: the node did not accept ${hash} after ${sent.attempts} attempt(s) (${sent.sendError}); it stays committed at its worst case in the ledger — stopping; re-run the step to continue from the same nonce`);
+  nonce++;
   const rcpt = await waitForReceiptPatiently(publicClient, hash, 120_000);
   const actual = rcpt.gasUsed * rcpt.effectiveGasPrice; guard.settle(idx, actual); save();
   if (rcpt.status !== "success") throw new SpendRefused(`${label} reverted: ${hash} — stopping`);
@@ -92,14 +99,14 @@ async function send(key: string, label: string, bound: bigint, build: (gas: bigi
 }
 async function deploy(key: string, label: string, abi: any, bytecode: Hex, args: unknown[] = []) {
   const data = encodeDeployData({ abi, bytecode, args });
-  const rcpt = await send(key, label, MEASURED[key], (gas, f, n) => admin.deployContract({ abi, bytecode, args, gas, nonce: n, ...f }), () => publicClient.estimateGas({ account: deployer, data }));
+  const rcpt = await send(key, label, MEASURED[key], (gas, f, n) => admin.signTransaction({ chain, data, gas, nonce: n, value: 0n, type: "eip1559", ...f } as any), () => publicClient.estimateGas({ account: deployer, data }));
   if (!rcpt.contractAddress) throw new SpendRefused(`${label}: no contract address in the receipt`);
   const code = await publicClient.getCode({ address: rcpt.contractAddress });
   return { address: rcpt.contractAddress, tx: rcpt.transactionHash, codeHash: keccak256(code!), block: rcpt.blockNumber.toString() };
 }
 async function call(key: string, label: string, address: Hex, functionName: string, args: unknown[]) {
   const data = encodeFunctionData({ abi: V1.abi, functionName, args } as any);
-  const rcpt = await send(key, label, MEASURED[key], (gas, f, n) => admin.writeContract({ address, abi: V1.abi, functionName, args, gas, nonce: n, ...f } as any), () => publicClient.estimateGas({ account: deployer, to: address, data }));
+  const rcpt = await send(key, label, MEASURED[key], (gas, f, n) => admin.signTransaction({ chain, to: address, data, gas, nonce: n, value: 0n, type: "eip1559", ...f } as any), () => publicClient.estimateGas({ account: deployer, to: address, data }));
   return { tx: rcpt.transactionHash, block: rcpt.blockNumber.toString() };
 }
 const implA = await deploy("implA", "implA (DemoMerchantV1)", V1.abi, V1.bytecode.object);

@@ -20,10 +20,9 @@ const ORDER_CREATOR = "0x0000000000000000000000000000000000000c33" as Hex;
 const pausedAbi = parseAbi(["function paused() view returns (bool)"]);
 const snapshot = () => ({ chainId: 5042002 as const, blockNumber: "150", blockHash: D, observedAt: new Date().toISOString(), providerId: "mock-rpc", pinningMode: "BLOCK_HASH" as const });
 
-vi.mock("@arcpreflight/client", () => ({
+vi.mock("@arcpreflight/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@arcpreflight/client")>()), // the real identical-bytes sender and patient receipt wait
   signTransferAuthorization: vi.fn(async () => ({ signature: "0x1234", authorization: { from: "mock", to: "mock", value: "10000", nonce: "mock" } })),
-  // the patient receipt wait delegates to the (mocked) client's waitForTransactionReceipt, as the real one does on its first call
-  waitForReceiptPatiently: (client: any, hash: string, timeoutMs: number) => client.waitForTransactionReceipt({ hash, timeout: timeoutMs }),
 }));
 vi.mock("@arcpreflight/observer", () => ({
   PIN_LAG: 8n,

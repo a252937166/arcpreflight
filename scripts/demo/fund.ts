@@ -6,10 +6,10 @@
 //   ARC_NET=mainnet MAINNET_GO=1 FUND_PLAN="…" pnpm exec tsx scripts/demo/fund.ts --execute
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { getAddress, type Hex } from "viem";
+import { getAddress, keccak256, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { createWalletClient, http } from "viem";
-import { SpendRefused, parseUsdc18, waitForReceiptPatiently } from "@arcpreflight/client";
+import { SpendRefused, parseUsdc18, waitForReceiptPatiently, sendIdentical } from "@arcpreflight/client";
 import { ROOT, net, chain, rpc, publicClient, writeJson, evidenceDir, feeParams } from "./common.js";
 import { limitsFrom, openGuard, usdc18 } from "../lib/spend-ledger.js";
 
@@ -49,9 +49,13 @@ let nonce = noncePending; const out: any[] = [];
 for (const r of rows) {
   const f = await feeParams();
   const idx = guard.reserve({ purpose: `fund ${r.role}`, to: r.to, valueNativeAtomic: r.value, gasLimit: r.gasLimit, maxFeePerGas: f.maxFeePerGas }); save();
-  let hash: Hex;
-  try { hash = await wallet.sendTransaction({ to: r.to, value: r.value, gas: r.gasLimit, nonce, ...f }); } catch (e) { guard.release(idx); save(); throw e; }
-  guard.sent(idx, hash); save(); nonce++;
+  let raw: Hex;
+  try { raw = await wallet.signTransaction({ chain, to: r.to, value: r.value, gas: r.gasLimit, nonce, type: "eip1559", ...f } as any); } catch (e) { guard.release(idx); save(); throw e; } // nothing was sent
+  const hash = keccak256(raw);
+  guard.sent(idx, hash); save(); // the identical bytes may be re-sent: one hash, one nonce, never a second transfer
+  const sent = await sendIdentical(publicClient, raw, () => true, 3, 1500);
+  if (!sent.accepted && !(await publicClient.getTransaction({ hash }).catch(() => null))) throw new SpendRefused(`transfer to ${r.role}: the node did not accept ${hash} after ${sent.attempts} attempt(s) (${sent.sendError}) — stopping; it stays committed at its worst case in the ledger`);
+  nonce++;
   const rc = await waitForReceiptPatiently(publicClient, hash, 120_000);
   const actual = r.value + rc.gasUsed * rc.effectiveGasPrice; guard.settle(idx, actual); save();
   if (rc.status !== "success") throw new SpendRefused(`transfer to ${r.role} reverted: ${hash} — stopping`);
