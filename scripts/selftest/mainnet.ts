@@ -5,7 +5,8 @@
 //   dry run : pnpm exec tsx scripts/selftest/mainnet.ts
 //   execute : API_URL=https://arcpreflight.axiqo.xyz EXPECTED_RELEASE=<release shown by /health/live> [DEMO_RUNNER_TOKEN=...] \
 //             pnpm exec tsx scripts/selftest/mainnet.ts --execute
-// Env: SELFTEST_REPEATS (1..5, default 3 = the G2 minimum), SPEND_CAP_USDC (fee+business, default 0.5, refused above 1),
+// Env: SELFTEST_REPEATS (1..5, default 3 = the G2 minimum), SPEND_CAP_USDC (fee + business + gas ceilings, default 0.35, refused above 1),
+//      ADMIN_TOKEN (required: acceptance runs while the instance is still gated, PUBLIC_EXECUTION=0; an already public instance is refused),
 //      RUNNER_FLOOR_USDC (the server's runner floor, default 0.15; not exposed by /v1/network), COOLDOWN_MARGIN_SECONDS (3),
 //      ARC_RPC_URL, SELFTEST_OUTPUT_DIR (default evidence/selftest), DEMO_RUNNER_TOKEN (optional authenticated recovery check).
 // Refuses anything that is not Arc mainnet (5042) under SUBMISSION_RESTRICTED. Runs are sequential and the first failed or
@@ -15,7 +16,7 @@ import crypto from "node:crypto";
 import { resolve } from "node:path";
 import { createPublicClient, http, keccak256, toHex, type Chain, type Hex, type PublicClient } from "viem";
 import { arc } from "viem/chains";
-import { ARC } from "@arcpreflight/client";
+import { ARC, OutflowMeter } from "@arcpreflight/client";
 import { SLOTS, slotToAddress } from "@arcpreflight/observer";
 import { PAY_SELECTOR } from "@arcpreflight/policy";
 import { executionDigest, intentDigest, reportDigest, decisionDigest, finalValidationDigest, transactionPlanDigest } from "@arcpreflight/schema";
@@ -38,6 +39,8 @@ const ROLE_ABI = [{ type: "function", name: "owner", stateMutability: "view", in
 const ADMISSION_KEY = () => `mn-${crypto.randomUUID()}`;
 // Gas assumptions for the spend list. Observed on the testnet rehearsal: createOrder 98,107 gas, pay 40,364 gas, 20-25 gwei.
 const GAS_CREATE_ORDER = 150_000n, GAS_PAY = 80_000n, GAS_PRICE_CEIL = 40n * 10n ** 9n;
+/** the relayer's per-transaction cap enforced by the API (RELAY_MAX_FEE_ATOMIC default): the fee relay's gas ceiling per run */
+const RELAY_GAS_CEIL = 5_000_000_000_000_000n;
 const GAS_CREATE_ORDER_OBSERVED = 98_107n, GAS_PAY_OBSERVED = 40_364n, GAS_PRICE_OBSERVED = 20n * 10n ** 9n;
 const FALLBACK_COOLDOWN_SECONDS = 48;
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -62,6 +65,7 @@ type Network = {
   accounts: { deployerAdmin: string | null; orderCreator: string | null; orderSignerRole?: string | null; adminKeyInProcess?: boolean; demoRunner: string | null; merchantPayTo: string | null };
   fixtures: { id: string; proxy: "MAIN" | "CHANGED"; merchant: string | null; implementation: string | null; approvedImplementation: string | null; baselineDigest: string | null }[];
   budget: { maxRunsPerDay: number; usedToday: number; clientCooldownSeconds?: number; amountNativeAtomic: string; activeRun: string | null };
+  access?: { publicExecution?: boolean; operatorAcceptance?: boolean; executionReady?: boolean; walletExecution?: boolean };
 };
 export type RunReport = {
   round?: number; fixture: FixtureId; runId: string; requestId: string; labels: string[]; decision: string; chainStatus: string; businessStatus: string; durationMs: number;
@@ -77,14 +81,18 @@ export type RunReport = {
   passport?: { file: string; findings: Record<string, string>; counts: { pass: number; fail: number; unverified: number; notEvaluated: number } };
 };
 
-/** Spend plan (pure): what `repeats` rounds of the three fixtures can cost at most. Fee + business is what the hard cap applies to. */
+/** Spend plan (pure): what `repeats` rounds of the three fixtures can cost at most. The hard cap applies to the TOTAL worst case:
+ *  fees + business payments + every gas ceiling (order creation, the business pay, the fee relay) — Gate D, 2026-10-09. */
 export function planSpend(o: { repeats: number; feeNative: bigint; businessNative: bigint; capNative: bigint; floorNative: bigint }) {
   const runs = BigInt(o.repeats * FIXTURES.length), approved = BigInt(o.repeats);
   const fees = runs * o.feeNative, business = approved * o.businessNative;
-  const gasCreateCeil = runs * GAS_CREATE_ORDER * GAS_PRICE_CEIL, gasPayCeil = approved * GAS_PAY * GAS_PRICE_CEIL;
+  const gasCreateCeil = runs * GAS_CREATE_ORDER * GAS_PRICE_CEIL, gasPayCeil = approved * GAS_PAY * GAS_PRICE_CEIL, gasRelayCeil = runs * RELAY_GAS_CEIL;
   const gasExpected = runs * GAS_CREATE_ORDER_OBSERVED * GAS_PRICE_OBSERVED + approved * GAS_PAY_OBSERVED * GAS_PRICE_OBSERVED;
+  const totalWorst = fees + business + gasCreateCeil + gasPayCeil + gasRelayCeil;
   return {
-    runs: Number(runs), approved: Number(approved), fees, business, feeAndBusiness: fees + business, withinCap: fees + business <= o.capNative, gasCreateCeil, gasPayCeil, gasExpected,
+    runs: Number(runs), approved: Number(approved), fees, business, feeAndBusiness: fees + business, totalWorst, withinCap: totalWorst <= o.capNative, gasCreateCeil, gasPayCeil, gasRelayCeil, gasExpected,
+    /** the worst case of ONE run, for the measured-outflow stop before each start */
+    worstPerRun: { approved: o.feeNative + o.businessNative + GAS_CREATE_ORDER * GAS_PRICE_CEIL + GAS_PAY * GAS_PRICE_CEIL + RELAY_GAS_CEIL, other: o.feeNative + GAS_CREATE_ORDER * GAS_PRICE_CEIL + RELAY_GAS_CEIL },
     // the server refuses any run that starts with runner balance < floor + order amount, so the LAST run still needs that after everything else was spent
     runnerNeed: fees + business + gasPayCeil + o.floorNative + o.businessNative, creatorNeed: gasCreateCeil,
   };
@@ -264,7 +272,7 @@ async function main(): Promise<number> {
   if (EXECUTE && !process.env.API_URL) throw new Refused("--execute needs API_URL set explicitly (there is no default target for spending runs)");
   const repeats = Number(process.env.SELFTEST_REPEATS ?? 3);
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 5) throw new Refused("SELFTEST_REPEATS must be an integer 1..5 (the G2 minimum is 3)");
-  const cap = parseUsdc(process.env.SPEND_CAP_USDC ?? "0.5");
+  const cap = parseUsdc(process.env.SPEND_CAP_USDC ?? "0.35");
   if (cap > E18) throw new Refused("SPEND_CAP_USDC above 1 USDC is refused");
   const floor = parseUsdc(process.env.RUNNER_FLOOR_USDC ?? "0.15");
   const marginS = Number(process.env.COOLDOWN_MARGIN_SECONDS ?? 3);
@@ -280,6 +288,10 @@ async function main(): Promise<number> {
   if (!same(net.usdc, ARC.mainnet.usdc)) throw new Refused(`USDC ${net.usdc} is not the Arc mainnet USDC ${ARC.mainnet.usdc}`);
   for (const [k, v] of Object.entries(ACCOUNTS)) if (!same((net.accounts as any)[k], v)) throw new Refused(`server ${k} ${(net.accounts as any)[k]} != the project's ${v}`);
   if (net.accounts.orderSignerRole !== "order-creator" || net.accounts.adminKeyInProcess) throw new Refused(`the API signs orders as ${net.accounts.orderSignerRole ?? "unknown"} (adminKeyInProcess=${String(net.accounts.adminKeyInProcess)}); the release requires the order-creator role with the deployer-admin key off the API (MN-01)`);
+  // Gate D: the acceptance runs BEFORE public execution opens — with the operator's admin token through a gate that must still be closed
+  if (net.access?.publicExecution !== false) throw new Refused(`public execution is ${net.access?.publicExecution === true ? "already open" : "not reported"} on ${api}; the mainnet acceptance must run while PUBLIC_EXECUTION=0`);
+  if (net.access?.executionReady === false) throw new Refused("the instance reports executionReady=false (deployments, order signer or runner missing)");
+  if (EXECUTE && !process.env.ADMIN_TOKEN) throw new Refused("--execute needs ADMIN_TOKEN: the gate stays closed during acceptance and only the operator's token passes it");
   const expectedRelease = process.env.EXPECTED_RELEASE;
   if (EXECUTE && !expectedRelease) throw new Refused("--execute needs EXPECTED_RELEASE (the release shown by /health/live) so the tested build is the one you mean");
   if (expectedRelease && expectedRelease !== net.release) throw new Refused(`server release ${net.release} != EXPECTED_RELEASE ${expectedRelease}`);
@@ -292,7 +304,7 @@ async function main(): Promise<number> {
   const [runnerBal, creatorBal] = await Promise.all([client.getBalance({ address: ACCOUNTS.demoRunner }), client.getBalance({ address: ACCOUNTS.orderCreator })]);
 
   const problems: string[] = [];
-  if (!plan.withinCap) problems.push(`plan fee+business ${usdc(plan.feeAndBusiness)} USDC exceeds the cap ${usdc(cap)}`);
+  if (!plan.withinCap) problems.push(`plan worst case ${usdc(plan.totalWorst)} USDC (fees + business + gas ceilings) exceeds the cap ${usdc(cap)}`);
   if (runnerBal < plan.runnerNeed) problems.push(`demo-runner holds ${usdc(runnerBal)} USDC, needs >= ${usdc(plan.runnerNeed)}`);
   if (creatorBal < plan.creatorNeed) problems.push(`order-creator holds ${usdc(creatorBal)} USDC, needs >= ${usdc(plan.creatorNeed)} for createOrder gas`);
   if (net.budget.usedToday + plan.runs > net.budget.maxRunsPerDay) problems.push(`daily live-run budget: ${net.budget.usedToday} used + ${plan.runs} planned > ${net.budget.maxRunsPerDay}`);
@@ -308,7 +320,9 @@ async function main(): Promise<number> {
   console.log(`spend list, worst case (project funds only; every transfer stays inside the project's own addresses):`);
   console.log(`  service fee       ${plan.runs} x ${usdc(feeNative)} = ${usdc(plan.fees)} USDC   demo-runner -> merchant-payto via x402 (the merchant relayer pays settlement gas in USDC)`);
   console.log(`  business payment  ${plan.approved} x ${usdc(businessNative)} = ${usdc(plan.business)} USDC   demo-runner -> MAIN proxy, APPROVED_PAYMENT only (owner-withdrawable)`);
-  console.log(`  fee + business    ${usdc(plan.feeAndBusiness)} USDC (hard cap ${usdc(cap)})`);
+  console.log(`  fee + business    ${usdc(plan.feeAndBusiness)} USDC`);
+  console.log(`  fee relay gas     ${plan.runs} x <= ${usdc(RELAY_GAS_CEIL)} = ${usdc(plan.gasRelayCeil)} USDC   merchant-payto (the API's per-relay cap)`);
+  console.log(`  TOTAL worst case  ${usdc(plan.totalWorst)} USDC (fees + business + all gas ceilings) · hard cap ${usdc(cap)} · stops before any run whose worst case would carry the measured outflow past it`);
   console.log(`  gas               createOrder ${plan.runs} x <=${GAS_CREATE_ORDER} gas (order-creator) + pay ${plan.approved} x <=${GAS_PAY} gas (demo-runner) at <=${Number(GAS_PRICE_CEIL) / 1e9} gwei: <= ${usdc(plan.gasCreateCeil + plan.gasPayCeil)} USDC (expected ~${usdc(plan.gasExpected)})`);
   console.log(`  demo-runner       ${usdc(runnerBal)} USDC (needs >= ${usdc(plan.runnerNeed)}: spend + server floor ${usdc(floor)} + order ${usdc(businessNative)})`);
   console.log(`  order-creator     ${usdc(creatorBal)} USDC (needs >= ${usdc(plan.creatorNeed)}; the deployer-admin key is not used by the demo)`);
@@ -339,24 +353,32 @@ async function main(): Promise<number> {
   const startedAtUTC = new Date().toISOString();
   const stamp = startedAtUTC.replace(/[:.]/g, "-");
   const dir = resolve(process.env.SELFTEST_OUTPUT_DIR ?? "evidence/selftest");
+  let measured: bigint | null = null;
   const save = (status: "PASS" | "INCOMPLETE", failure?: unknown) => {
     mkdirSync(dir, { recursive: true });
     const approved = reports.filter((r) => r.businessPayment.executed).length;
     const file = resolve(dir, `mainnet-${stamp}${status === "PASS" ? "" : "-INCOMPLETE"}.json`);
     writeFileSync(file, JSON.stringify({ status, chainId: 5042, network: "mainnet", release: net.release, profile: net.profile, api, startedAtUTC, finishedAtUTC: new Date().toISOString(), repeats, accounts: ACCOUNTS,
-      plan: { runs: plan.runs, serviceFeeUsdc: usdc(plan.fees), businessPaymentUsdc: usdc(plan.business), capUsdc: usdc(cap), gasCeilingUsdc: usdc(plan.gasCreateCeil + plan.gasPayCeil) },
+      plan: { runs: plan.runs, serviceFeeUsdc: usdc(plan.fees), businessPaymentUsdc: usdc(plan.business), capUsdc: usdc(cap), gasCeilingUsdc: usdc(plan.gasCreateCeil + plan.gasPayCeil + plan.gasRelayCeil), totalWorstUsdc: usdc(plan.totalWorst) },
+      measuredOutflowUsdc: measured === null ? null : usdc(measured),
       spent: { serviceFeeUsdc: usdc(BigInt(reports.length) * feeNative), businessPaymentUsdc: usdc(BigInt(approved) * businessNative), note: "service fees land in merchant-payto, business payments in the MAIN proxy; both stay inside the project" },
       runs: reports, failure: failure ?? null }, null, 2));
     return file;
   };
   const total = plan.runs;
+  // the aggregate limit, measured: the summed balances of the three project keys the runs touch (internal fee transfers net out)
+  const meterAddrs = [ACCOUNTS.demoRunner, ACCOUNTS.orderCreator, ACCOUNTS.merchantPayTo] as Hex[];
+  const sumBalances = async () => (await Promise.all(meterAddrs.map((a) => client.getBalance({ address: a })))).reduce((x, y) => x + y, 0n);
+  const meter = new OutflowMeter("mainnet acceptance outflow", cap, await sumBalances());
   let current: { fixture: FixtureId; runId?: string; run?: any } | null = null, lastStart = 0;
   try {
     for (let round = 1; round <= repeats; round++) {
       for (const fixture of FIXTURES) {
         const wait = lastStart ? lastStart + (cooldown + marginS) * 1000 - Date.now() : 0;
         if (wait > 0) { console.log(`  cooldown: waiting ${Math.ceil(wait / 1000)} s before the next start`); await sleep(wait); }
-        console.log(`[${reports.length + 1}/${total}] ${fixture}: starting a live mainnet run`);
+        const head = meter.headroomFor(await sumBalances(), fixture === "APPROVED_PAYMENT" ? plan.worstPerRun.approved : plan.worstPerRun.other);
+        if (!head.ok) throw new Refused(head.reason!);
+        console.log(`[${reports.length + 1}/${total}] ${fixture}: starting a live mainnet run (measured outflow so far ${usdc(head.outflow)} of ${usdc(cap)} USDC)`);
         current = { fixture };
         const { runId, startedAt, admission } = await startRun(api, fixture, (cooldown + marginS) * 1000);
         lastStart = startedAt; current.runId = runId;
@@ -372,10 +394,12 @@ async function main(): Promise<number> {
   } catch (e: any) {
     const failure = { message: String(e?.message ?? e), fixture: current?.fixture ?? null, runId: current?.runId ?? null, lastStep: current?.run?.steps?.at(-1)?.step ?? null,
       serviceFeeTx: current?.run?.result?.serviceFeeTx ?? null, businessTxHash: current?.run?.result?.execution?.businessTxHash ?? null };
+    measured = meter.outflow(await sumBalances().catch(() => meter.startTotal));
     console.error(`STOPPED after ${reports.length}/${total} verified runs: ${failure.message}`);
     console.error(`INCOMPLETE evidence (money trail of the failing run included): ${save("INCOMPLETE", failure)}`);
     return 1;
   }
+  measured = meter.outflow(await sumBalances());
   const file = save("PASS");
   console.log(`\n #  scenario                decision             service fee (0.01)   business payment (0.05)  order   ms      recovery`);
   reports.forEach((r, i) => console.log(`${String(i + 1).padStart(2)}  ${r.fixture.padEnd(22)}  ${r.decision.padEnd(19)}  ${short(r.serviceFee.tx).padEnd(18)}   ${short(r.businessPayment.tx).padEnd(22)}   ${r.order.paidOnChain ? "paid  " : "unpaid"}  ${String(r.durationMs).padStart(6)}  ${r.recovery?.authenticated.split(" ")[0]}  passport ${r.passport ? `${r.passport.counts.pass} pass / ${r.passport.counts.unverified} unverified / ${r.passport.counts.fail} fail` : "—"}`));

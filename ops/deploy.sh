@@ -5,8 +5,14 @@
 set -euo pipefail
 HOST="${1:-root@206.237.18.80}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SHA="$(git -C "$ROOT" rev-parse --short HEAD)"
+# the release label is the last commit that changed what runs on the server (the API and web bundles are built from these paths);
+# docs-only commits keep the label. The bundle must match a commit: uncommitted or untracked changes there (or in fixtures/) are refused.
+CODE_PATHS="apps packages package.json pnpm-lock.yaml pnpm-workspace.yaml"
 cd "$ROOT"
+if ! git diff --quiet HEAD -- $CODE_PATHS fixtures || [ -n "$(git ls-files --others --exclude-standard -- $CODE_PATHS fixtures)" ]; then
+  echo "refusing: uncommitted or untracked changes in $CODE_PATHS fixtures — commit first so the release label names the deployed code"; exit 1
+fi
+SHA="$(git log -1 --format=%h -- $CODE_PATHS)"
 pnpm --filter @arcpreflight/api run build
 pnpm --filter @arcpreflight/web run build
 rsync -az --delete "$ROOT/apps/api/dist/" "$HOST:/opt/arcpreflight/dist/"

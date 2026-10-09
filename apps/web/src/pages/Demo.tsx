@@ -12,7 +12,7 @@ import { useWallet } from "../lib/wallet";
 import { useWalletRun } from "../lib/walletRun";
 import { requiredNativeAtomic, useBalances } from "../lib/faucet";
 import { idleLifecycle } from "../lib/outcome";
-import { demoOrderUsdcText, feeUsdcText } from "../lib/orders";
+import { demoOrderUsdcText, feeUsdcText, ORDER_GATED_TEXT } from "../lib/orders";
 import { Chip, DecisionBadge, Hex, Spinner } from "../components/Badges";
 import { RunPanel } from "../components/RunPanel";
 import { WalletRunPanel } from "../components/WalletRunPanel";
@@ -25,6 +25,7 @@ import { guideFor, type CheckpointId } from "../lib/guide";
 import { usdcNative } from "../lib/format";
 import { fundsSummary, fundsWarning } from "../lib/funds";
 import { useRunLocal } from "../lib/runLocal";
+
 import { exactUsdc } from "../lib/costTable";
 import { STAGES } from "../components/Pipeline";
 import { HandRule } from "../components/Illustrations";
@@ -185,8 +186,8 @@ export default function Demo() {
             <div className="row" style={{ gap: 10 }}><Link to={link("/developer")} className="btn sm">{TRY_LABEL} →</Link></div>
             {w.account ? (onArc
               ? <div className="stack" style={{ gap: 6 }}>
-                  <div className="row" style={{ gap: 10 }}><button className="btn sm" disabled={walletBusy || busy || !net || !f?.merchant || unfunded} title={unfunded ? `this wallet cannot pay the ${feeText} USDC check fee yet — claim testnet USDC below` : `your wallet signs the ${feeText} USDC check fee (yours); execution continues in the Developer workflow`} onClick={startWallet}>{walletBusy ? <><Spinner /> checking…</> : `▶ Check "${headline}" with your wallet`}</button></div>
-                  <span className="tiny dim">a quicker look: your wallet signs the {feeText} USDC check fee — that fee is yours; nothing is executed here, execution continues in the Developer workflow</span>
+                  <div className="row" style={{ gap: 10 }}><button className="btn sm" disabled={walletBusy || busy || !net || !f?.merchant || unfunded || gated} title={gated ? `${ORDER_GATED_TEXT} — the quick check creates an order` : unfunded ? `this wallet cannot pay the ${feeText} USDC check fee yet — claim testnet USDC below` : `your wallet signs the ${feeText} USDC check fee (yours); execution continues in the Developer workflow`} onClick={startWallet}>{walletBusy ? <><Spinner /> checking…</> : `▶ Check "${headline}" with your wallet`}</button></div>
+                  <span className="tiny dim" data-testid="quick-check-note">{gated ? `${ORDER_GATED_TEXT}; the quick check creates an order, so it opens with execution` : `a quicker look: your wallet signs the ${feeText} USDC check fee — that fee is yours; nothing is executed here, execution continues in the Developer workflow`}</span>
                   <FaucetCard net={net} wallet={w} balance={bal} required={feeRequired} step="the check fee" onClaimed={refreshBal} />
                 </div>
               : <div className="row" style={{ gap: 10 }}><button className="btn sm" onClick={() => net && w.switchChain(net)} title={`your wallet is on chain ${w.chainId ?? "?"}; the demo runs on ${netLabel}`}>{`Switch to ${netLabel} first`}</button><span className="tiny dim">your connected wallet is on another chain</span></div>)

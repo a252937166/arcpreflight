@@ -117,3 +117,5 @@ export function orderCostsSoFar(o: OrderView, feeTokenAtomic: string | null): { 
   out.push({ label: "business principal", who: "buyer", usdc: o.paid === true ? nativeAtomicToUsdcText(o.amountNativeAtomic) : "0", detail: o.paid === true ? "paid" : o.paid === false ? "unpaid" : "payment state not read yet" });
   return out;
 }
+/** Gate D: an order is a project-paid transaction, gated with execution until the mainnet acceptance is recorded (Developer and Demo say the same) */
+export const ORDER_GATED_TEXT = "order creation is gated on this instance until the mainnet acceptance is recorded";

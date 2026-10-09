@@ -57,7 +57,11 @@ export type RunOptions = {
   orderReference?: string | null;
   /** labelled interruption (design v3.3 §4): persist, mark and send, then stop waiting — the attempt is left to reconciliation */
   interruptAfterBroadcast?: boolean;
+  /** per-transaction cap on the order creation's worst-case gas cost, gasLimit × maxFeePerGas (Gate D); default {@link DEFAULT_ORDER_GAS_COST_CAP} */
+  maxOrderGasCostNativeAtomic?: bigint;
 };
+/** createOrder ≤ 150k gas at ≤ 40 gwei = 0.006 USDC: the order creation refuses to send above this unless the caller passes another cap */
+export const DEFAULT_ORDER_GAS_COST_CAP = 150_000n * 40_000_000_000n;
 export type ArtifactName = "order" | "intent" | "quote" | "feeAuthorization" | "report" | "approval" | "decision" | "finalValidation" | "execution" | "postcondition";
 export type OrderStore = {
   planned(o: { orderId: Hex; payer: Hex; amountNativeAtomic: string; merchant: Hex }): Promise<void> | void;
@@ -84,14 +88,23 @@ async function currentBaseline(o: Pick<RunOptions, "apiUrl" | "token" | "baselin
   } catch { return unavailable; }
 }
 
-/** The order creator creates an order for `payer` (management transaction; budgeted by the caller). */
+/** The order creator creates an order for `payer` (management transaction; budgeted by the caller). The gas is estimated first and sent as an
+ *  explicit limit (estimate × 1.2); if that limit at the current maxFeePerGas exceeds the per-transaction cap the creation is refused before
+ *  anything is persisted or sent (Gate D) — no order row claims a creation that never left. */
 export type OrderCreation = { orderId: Hex; tx: Hex; block: string; from: Hex | null; gasUsed: string | null; effectiveGasPriceNativeAtomic: string | null };
 const receiptFacts = (r: any) => ({ from: (r?.from as Hex | undefined) ?? null, gasUsed: r?.gasUsed !== undefined && r?.gasUsed !== null ? String(r.gasUsed) : null, effectiveGasPriceNativeAtomic: r?.effectiveGasPrice !== undefined && r?.effectiveGasPrice !== null ? String(r.effectiveGasPrice) : null });
-export async function createOrder(o: Pick<RunOptions, "publicClient" | "admin" | "merchant" | "feeParams">, payer: Hex, amount: bigint, store?: OrderStore): Promise<OrderCreation> {
+export async function createOrder(o: Pick<RunOptions, "publicClient" | "admin" | "merchant" | "feeParams" | "maxOrderGasCostNativeAtomic">, payer: Hex, amount: bigint, store?: OrderStore): Promise<OrderCreation> {
   const orderId = toHex(randomBytes(32)) as Hex;
-  await store?.planned({ orderId, payer, amountNativeAtomic: amount.toString(), merchant: getAddress(o.merchant) as Hex }); // durable before anything is sent
+  const args = [orderId, payer, amount] as const;
   const fees = await o.feeParams();
-  const h = await o.admin.writeContract({ address: o.merchant, abi: CREATE_ORDER_ABI, functionName: "createOrder", args: [orderId, payer, amount], ...fees });
+  // transaction-level cap (Gate D): estimate, add 20 %, and refuse before anything is persisted or sent when the worst case is above the cap
+  const estimate = await o.publicClient.estimateGas({ account: o.admin.account?.address, to: o.merchant, data: encodeFunctionData({ abi: CREATE_ORDER_ABI, functionName: "createOrder", args }) } as any);
+  const gasLimit = (BigInt(estimate) * 12n + 9n) / 10n;
+  const cap = o.maxOrderGasCostNativeAtomic ?? DEFAULT_ORDER_GAS_COST_CAP;
+  const worst = gasLimit * fees.maxFeePerGas;
+  if (worst > cap) throw new Error(`createOrder refused: worst-case gas cost ${worst} (gas limit ${gasLimit} × maxFeePerGas ${fees.maxFeePerGas}) exceeds the per-transaction cap ${cap}; nothing was persisted or sent`);
+  await store?.planned({ orderId, payer, amountNativeAtomic: amount.toString(), merchant: getAddress(o.merchant) as Hex }); // durable before anything is sent
+  const h = await o.admin.writeContract({ address: o.merchant, abi: CREATE_ORDER_ABI, functionName: "createOrder", args, gas: gasLimit, ...fees });
   await store?.sent({ orderId, tx: h });
   const r = await o.publicClient.waitForTransactionReceipt({ hash: h });
   if (r.status !== "success") throw new Error(`createOrder failed: ${h}`);

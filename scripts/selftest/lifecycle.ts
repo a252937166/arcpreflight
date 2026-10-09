@@ -21,14 +21,26 @@ import { IntentCore, PolicyCore, intentDigest, policyDigest } from "@arcprefligh
 import { DEMO_MERCHANT_ABI, PAY_SELECTOR } from "@arcpreflight/policy";
 import { signTransferAuthorization, type ArcNet } from "@arcpreflight/client";
 import { PIN_LAG } from "@arcpreflight/observer";
+import { OutflowMeter, SpendGuard, SpendRefused, parseUsdc18, usdc18 } from "@arcpreflight/client";
+
+// Gate D (2026-10-09): `--preflight` is read-only (no session, no order, no signature): the gate state, the balances, the plan and the caps.
+// Execution enforces two limits: the visitor key's own spend (the fee authorization + its business transaction, gas included) through a
+// SpendGuard, and the measured outflow of every project key involved (visitor, demo-runner, order-creator, merchant-payto) through an
+// OutflowMeter that refuses a scenario whose worst case could carry the total past LIFECYCLE_PROJECT_CAP_USDC. On mainnet the instance must
+// still be gated (PUBLIC_EXECUTION=0): acceptance runs with the operator's admin token before public execution opens.
+const PREFLIGHT = process.argv.includes("--preflight");
 
 const api = process.env.API_URL ?? "http://127.0.0.1:4041";
 const scenarios = (process.env.SCENARIOS ?? "wallet,interrupt").split(",").map((s) => s.trim()).filter(Boolean);
 const network = await fetch(`${api}/v1/network`).then((r) => r.json()) as any;
 const net = network.network as ArcNet;
 assert.equal(process.env.ARC_NET, net, `ARC_NET must be explicit and equal to the API's network (${net})`);
-if (net === "mainnet") assert.equal(process.env.MAINNET_GO, "1", "mainnet lifecycle rehearsal needs MAINNET_GO=1 after the typed go");
-assert(network.access?.walletExecution === true || (network.access?.publicExecution === false && process.env.ADMIN_TOKEN), "the API must expose wallet execution (design v3.3), or be gated with ADMIN_TOKEN supplied to pass the gate");
+if (net === "mainnet" && !PREFLIGHT) assert.equal(process.env.MAINNET_GO, "1", "mainnet lifecycle rehearsal needs MAINNET_GO=1 after the typed go");
+if (net === "mainnet") { // acceptance precedes opening: the operator's token passes a gate that must still be closed
+  assert.equal(network.access?.publicExecution, false, "public execution is already open on this mainnet instance; the lifecycle acceptance must run before it opens (PUBLIC_EXECUTION=0)");
+  if (network.access?.executionReady !== undefined) assert.equal(network.access.executionReady, true, "the instance is not ready for execution (deployments, order signer or runner missing)");
+}
+if (!PREFLIGHT) assert(network.access?.walletExecution === true || (network.access?.publicExecution === false && process.env.ADMIN_TOKEN), "the API must expose wallet execution (design v3.3), or be gated with ADMIN_TOKEN supplied to pass the gate");
 const rpcUrl = network.rpc as string; const chainId = network.chainId as number;
 const client = createPublicClient({ transport: http(rpcUrl, { timeout: 20_000 }) });
 const sleep = (ms: number) => new Promise((s) => setTimeout(s, ms));
@@ -54,11 +66,45 @@ function verifyInCleanProcess(passportPath: string, anchors: { baselineDigests: 
 }
 async function waitForBlock(after: bigint) { for (let i = 0; i < 60; i++) { if ((await client.getBlockNumber()) >= after + BigInt(PIN_LAG) + 1n) return; await sleep(1000); } throw new Error("head did not advance past the required block"); }
 
+// ---- limits and the read-only preflight
+const GWEI = 10n ** 9n;
+const capFrom = (env: string, dflt: string, max: string) => { const v = parseUsdc18(process.env[env] ?? dflt); if (v > parseUsdc18(max)) throw new SpendRefused(`${env} above ${max} USDC is refused`); return v; };
+const walletAmount = BigInt(process.env.WALLET_AMOUNT_ATOMIC ?? "5000000000000000"); // 0.005 USDC
+const feeNative = BigInt(network.priceTokenAtomic ?? "10000") * 10n ** 12n;
+const walletLimits = { label: "lifecycle-wallet", network: net, perTxNativeAtomic: capFrom("WALLET_PER_TX_CAP_USDC", "0.03", "0.10"), totalNativeAtomic: capFrom("WALLET_SPEND_CAP_USDC", "0.05", "0.20"), maxFeePerGasCeiling: BigInt(process.env.MAX_FEE_GWEI ?? "40") * GWEI };
+const projectCap = capFrom("LIFECYCLE_PROJECT_CAP_USDC", "0.12", "0.30");
+// server-sent gas ceilings (enforced server-side per transaction): createOrder 150k × 40 gwei, relay 0.005 USDC, the business pay ≤ policy.maxGasCostNativeAtomic 0.002
+const ORDER_GAS_CEIL = 150_000n * 40n * GWEI, RELAY_GAS_CEIL = 5_000_000_000_000_000n, PAY_GAS_CEIL = 2_000_000_000_000_000n;
+const worstOf = { wallet: ORDER_GAS_CEIL + feeNative + RELAY_GAS_CEIL + walletAmount + PAY_GAS_CEIL, interrupt: ORDER_GAS_CEIL + feeNative + RELAY_GAS_CEIL + BigInt(network.budget?.amountNativeAtomic ?? "50000000000000000") + PAY_GAS_CEIL } as Record<string, bigint>;
+const walletAddress = (() => { const f = process.env.WALLET_KEY_FILE; if (!f || !scenarios.includes("wallet")) return null; const t = readFileSync(f, "utf8").trim(); if (t.startsWith("{")) { const j = JSON.parse(t); if (j.address) return j.address as string; return privateKeyToAccount(j.privateKey as Hex).address; } return privateKeyToAccount(t as Hex).address; })();
+const projectAddresses = Array.from(new Set([walletAddress, network.accounts?.demoRunner, network.accounts?.orderCreator, network.accounts?.merchantPayTo].filter((a): a is string => !!a).map((a) => a.toLowerCase())));
+const sumBalances = async () => (await Promise.all(projectAddresses.map((a) => client.getBalance({ address: a as Hex })))).reduce((x, y) => x + y, 0n);
+const meter = new OutflowMeter("lifecycle project outflow", projectCap, await sumBalances());
+const walletGuard = new SpendGuard(walletLimits);
+{
+  const fees = await client.estimateFeesPerGas().catch(() => null);
+  const rows = scenarios.map((sc) => `  ${sc.padEnd(10)} worst ${usdc18(worstOf[sc] ?? 0n)} USDC`);
+  const totalWorst = scenarios.reduce((a, sc) => a + (worstOf[sc] ?? 0n), 0n);
+  const problems: string[] = [];
+  if (totalWorst > projectCap) problems.push(`the scenarios' worst case ${usdc18(totalWorst)} USDC exceeds LIFECYCLE_PROJECT_CAP_USDC ${usdc18(projectCap)}`);
+  if (scenarios.includes("wallet")) { const need = walletAmount + feeNative + PAY_GAS_CEIL; if (feeNative + walletAmount + PAY_GAS_CEIL > walletLimits.totalNativeAtomic) problems.push(`the wallet scenario needs up to ${usdc18(need)} USDC, above WALLET_SPEND_CAP_USDC ${usdc18(walletLimits.totalNativeAtomic)}`); if (walletAddress) { const b = await client.getBalance({ address: walletAddress as Hex }); if (b < need && !network.faucet?.enabled) problems.push(`the visitor key ${walletAddress} holds ${usdc18(b)} USDC, below the ${usdc18(need)} USDC the wallet scenario needs`); } else problems.push("WALLET_KEY_FILE is required for the wallet scenario"); }
+  if (net === "mainnet" && !process.env.ADMIN_TOKEN) problems.push("ADMIN_TOKEN is required on mainnet (the gate stays closed during acceptance)");
+  if (fees?.maxFeePerGas && fees.maxFeePerGas > walletLimits.maxFeePerGasCeiling) problems.push(`network max fee ${fees.maxFeePerGas / GWEI} gwei is above the ${walletLimits.maxFeePerGasCeiling / GWEI} gwei ceiling`);
+  log(`${PREFLIGHT ? "PREFLIGHT (read-only: no session, no order, no signature)" : "limits"} · ${network.caip2} release ${network.release} · gate: publicExecution ${network.access?.publicExecution} · operatorAcceptance ${network.access?.operatorAcceptance ?? "?"} · executionReady ${network.access?.executionReady ?? "?"} · admin token ${process.env.ADMIN_TOKEN ? "supplied" : "absent"}`);
+  log(`caps: visitor key ${usdc18(walletLimits.perTxNativeAtomic)} per transaction / ${usdc18(walletLimits.totalNativeAtomic)} total (fee authorization + business tx + gas) · project outflow ${usdc18(projectCap)} (measured over ${projectAddresses.length} keys, now ${usdc18(meter.startTotal)} USDC)`);
+  for (const r of rows) log(r); log(`  total worst ${usdc18(totalWorst)} USDC`);
+  for (const pr of problems) log(`PROBLEM: ${pr}`);
+  if (PREFLIGHT) { log(problems.length ? `PREFLIGHT: NOT READY (${problems.length})` : "PREFLIGHT OK: nothing was created, signed or sent."); process.exit(problems.length ? 2 : 0); }
+  if (problems.length) throw new SpendRefused(problems.join("; "));
+}
+const beforeScenario = async (sc: string) => { const h = meter.headroomFor(await sumBalances(), worstOf[sc] ?? 0n); if (!h.ok) throw new SpendRefused(h.reason!); log(`${sc}: measured project outflow so far ${usdc18(h.outflow)} USDC; worst case of this scenario ${usdc18(worstOf[sc] ?? 0n)} USDC; cap ${usdc18(projectCap)} USDC`); };
+
 if (scenarios.includes("wallet")) {
+  await beforeScenario("wallet");
   const keyFile = process.env.WALLET_KEY_FILE; assert(keyFile, "WALLET_KEY_FILE (path to the scripted wallet's key) is required for the wallet scenario");
   const keyText = readFileSync(keyFile, "utf8").trim(); // a raw hex key, or a keys/*.json file with a privateKey field; never printed
   const wallet = privateKeyToAccount((keyText.startsWith("{") ? JSON.parse(keyText).privateKey : keyText) as Hex);
-  const amount = BigInt(process.env.WALLET_AMOUNT_ATOMIC ?? "5000000000000000"); // 0.005 USDC
+  const amount = walletAmount;
   const reference = process.env.WALLET_REFERENCE ?? `lifecycle rehearsal ${stamp.slice(0, 19)}`;
   log(`wallet scenario: payer ${wallet.address}, amount ${amount} native units, reference "${reference}"`);
   let balance = await client.getBalance({ address: wallet.address });
@@ -87,11 +133,13 @@ if (scenarios.includes("wallet")) {
   for (let i = 0; i < 5 && quoted.status === 402 && BigInt(quoted.body.pinnedBlock ?? 0) < BigInt(order.body.block); i++) { log("quote pinned before the order; re-requesting under a new clientRequestId (nothing paid)"); await sleep(1500); intent = makeIntent(); quoted = await post("/v1/preflight", { intent }, token); }
   assert.equal(quoted.status, 402, JSON.stringify(quoted.body)); assert(BigInt(quoted.body.pinnedBlock) >= BigInt(order.body.block));
   // 3. ONE fee authorization signed by the wallet; the report is delivered once the fee settles
+  const feeIdx = walletGuard.reserve({ purpose: "check fee authorization", to: quoted.body.quote.payTo, tokenNativeEquivalent: BigInt(quoted.body.quote.amountTokenAtomic) * 10n ** 12n, gasLimit: 0n, maxFeePerGas: 0n, authorization: true });
   const { signature, authorization } = await signTransferAuthorization(wallet, net, { payTo: quoted.body.quote.payTo, valueTokenAtomic: BigInt(quoted.body.quote.amountTokenAtomic) });
   let delivered = await post("/v1/preflight", { intent, payment: { signature, authorization } }, token);
   for (let i = 0; i < 20 && delivered.status === 202; i++) { await sleep(1500); delivered = await get(`/v1/requests/${quoted.body.requestId}`, token); }
   assert.equal(delivered.status, 200, JSON.stringify(delivered.body).slice(0, 300)); assert.equal(delivered.body.delivery, "DELIVERED");
   log(`report delivered; fee settled in ${delivered.body.payment.transaction}; baselineResult ${delivered.body.report.baselineResult}`);
+  walletGuard.settle(feeIdx, BigInt(quoted.body.quote.amountTokenAtomic) * 10n ** 12n);
   // 4. the wallet attempt: VALIDATED with its plan before any signature exists
   const attempt = await post("/v1/wallet/attempts", { requestId: quoted.body.requestId, orderId: order.body.orderId, policy }, token);
   assert.equal(attempt.status, 201, JSON.stringify(attempt.body).slice(0, 400));
@@ -113,10 +161,13 @@ if (scenarios.includes("wallet")) {
   assert.equal(c4.status, 200, JSON.stringify(c4.body).slice(0, 200)); assert.equal(c4.body.prompt, null); assert.equal(c4.body.state, "VALIDATED");
   const claimProbe = { granted: c1.status, secondClaim: `${c2.status} ${c2.body.error}`, strangerHandBack: `${c3.status} ${c3.body.error}`, holderHandBack: `${c4.status} prompt=${c4.body.prompt}` };
   log(`prompt claim probe: granted once (200), second claim ${claimProbe.secondClaim}, stranger's hand-back ${claimProbe.strangerHandBack}, holder's hand-back 200 → plain VALIDATED again`);
-  // 5. the "wallet" signs EXACTLY the plan and broadcasts it itself (the service never sees the bytes), then reports the hash
+  // 5. the "wallet" signs EXACTLY the plan and broadcasts it itself (the service never sees the bytes), then reports the hash —
+  //    within the visitor key's caps (value + gasLimit × maxFee per transaction, and the step total with the fee authorization)
+  const payIdx = walletGuard.reserve({ purpose: "business payment", to: plan.to, valueNativeAtomic: BigInt(plan.valueNativeAtomic), gasLimit: BigInt(plan.gasLimit), maxFeePerGas: BigInt(plan.maxFeePerGasNativeAtomic) });
   const raw = await wallet.signTransaction({ chainId: plan.chainId, type: "eip1559", to: plan.to as Hex, data: plan.data as Hex, value: BigInt(plan.valueNativeAtomic), nonce: Number(plan.nonce), gas: BigInt(plan.gasLimit), maxFeePerGas: BigInt(plan.maxFeePerGasNativeAtomic), maxPriorityFeePerGas: BigInt(plan.maxPriorityFeePerGasNativeAtomic), accessList: [] });
   const parsed = parseTransaction(raw); assert.equal(parsed.to?.toLowerCase(), plan.to.toLowerCase()); assert.equal(parsed.data?.toLowerCase(), plan.data.toLowerCase());
   const txHash = keccak256(raw);
+  walletGuard.sent(payIdx, txHash);
   await client.sendRawTransaction({ serializedTransaction: raw });
   log(`wallet broadcast ${txHash}`);
   const sent = await post(`/v1/wallet/attempts/${attemptId}/sent`, { txHash }, token);
@@ -128,6 +179,7 @@ if (scenarios.includes("wallet")) {
   assert.deepEqual(a.body.deviations?.mismatch ?? [], [], "the wallet sent exactly the plan");
   assert.equal(a.body.recovery.interrupted, false); assert.equal(a.body.recovery.counters.businessSignatures, 0);
   log(`attempt CONFIRMED: order paid in block ${a.body.block}; cost statement buyer total ${a.body.costStatement?.buyer?.totalUsdc} USDC`);
+  { const rc = await client.getTransactionReceipt({ hash: txHash }); walletGuard.settle(payIdx, BigInt(plan.valueNativeAtomic) + rc.gasUsed * rc.effectiveGasPrice); log(`visitor key spend: ${walletGuard.summary().committedUsdc} USDC of the ${usdc18(walletLimits.totalNativeAtomic)} USDC cap`); }
   const shownOrder = await get(`/v1/demo/orders/${order.body.orderId}`, token); assert.equal(shownOrder.body.paid, true); assert(shownOrder.body.attempts.some((x: any) => x.attemptId === attemptId));
   // 6. passport + independent verification in a clean process
   const passport = await get(`/v1/wallet/attempts/${attemptId}/passport`, token); assert.equal(passport.status, 200);
@@ -140,6 +192,7 @@ if (scenarios.includes("wallet")) {
 }
 
 if (scenarios.includes("interrupt")) {
+  await beforeScenario("interrupt");
   const clientRunRequestId = `lc-${crypto.randomUUID()}`;
   let started = await post("/v1/demo/run", { fixture: "APPROVED_PAYMENT", clientRunRequestId, interruptAfterBroadcast: true });
   if (started.status === 429 && started.body?.error === "DEMO_COOLDOWN") { // the public instance's per-client cooldown: wait it out
@@ -170,6 +223,8 @@ if (scenarios.includes("interrupt")) {
   evidence.scenarios.interrupt = { runId, clientRunRequestId, stateAtStop: interruptedState, outcomeAtStop, steps: stepNames, businessExecution: run.businessExecution, recovery: run.recovery, reconciliation: run.result.reconciliation, costStatement: run.result.costStatement, passport: passportPath, verifier: v };
 }
 
+evidence.spend = { visitorKey: walletGuard.summary(), projectOutflow: { capUsdc: usdc18(projectCap), measuredUsdc: usdc18(meter.outflow(await sumBalances())), addresses: projectAddresses } };
+log(`measured project outflow: ${evidence.spend.projectOutflow.measuredUsdc} USDC of the ${usdc18(projectCap)} USDC cap`);
 const outPath = resolve(outDir, `${net}-lifecycle-${stamp}.json`);
 writeFileSync(outPath, JSON.stringify(evidence, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2));
 log(`evidence written to ${outPath}`);

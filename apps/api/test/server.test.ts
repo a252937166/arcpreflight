@@ -362,22 +362,54 @@ describe("the complete lifecycle for every session (design v3.3): orders and wal
     expect(await call("GET", `/v1/wallet/attempts/${ATT}/passport`)).toMatchObject({ status: 200 }); expect(mocks.walletPassport.mock.calls[0].slice(1)).toEqual([ATT, "buyer"]);
     expect(await call("DELETE", `/v1/wallet/attempts/${ATT}`)).toMatchObject({ status: 405 });
   });
-  it("while public execution is gated, live runs and wallet attempts answer 503 unless the operator's admin token is present; everything else stays open", async () => {
+  /** a request with arbitrary headers (the admin token travels as x-admin-token) */
+  async function callWith(method: string, url: string, body: unknown, headers: Record<string, string>) {
+    const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
+    Object.assign(req, { method, url, headers, socket: { remoteAddress: "127.0.0.1" } });
+    let status = 0; let result: any;
+    const res = { writeHead(s: number) { status = s; }, end(x?: string) { result = x ? JSON.parse(x) : null; } };
+    await handle(req as unknown as IncomingMessage, res as unknown as ServerResponse);
+    return { status, body: result };
+  }
+  it("while public execution is gated, live runs, wallet attempts and order creation answer 503 unless the operator's admin token is present; checks and reads stay open", async () => {
     const { cfg } = await import("../src/config.js");
     (cfg as any).publicExecution = false;
     try {
       expect(await call("POST", "/v1/demo/run", { fixture: "APPROVED_PAYMENT", clientRunRequestId: "k".repeat(20) }, null)).toMatchObject({ status: 503, body: { error: "EXECUTION_GATED" } });
       expect(await call("POST", "/v1/wallet/attempts", { requestId: ATT, orderId: D, policy: {} })).toMatchObject({ status: 503, body: { error: "EXECUTION_GATED" } });
-      expect(mocks.startRun).not.toHaveBeenCalled(); expect(mocks.attempt).not.toHaveBeenCalled();
-      mocks.order.mockResolvedValue({ ok: true, orderId: D, state: "CONFIRMED" });
-      expect((await call("POST", "/v1/demo/orders", { payer })).status).toBe(201); // orders, checks, recovery and passports are not gated
-      mocks.startRun.mockResolvedValue({ ok: true, runId: ATT }); mocks.attempt.mockResolvedValue({ ok: true, status: 201, attempt: { attemptId: ATT } });
-      const req = Readable.from([Buffer.from(JSON.stringify({ fixture: "APPROVED_PAYMENT", clientRunRequestId: "k".repeat(20) }))]);
-      Object.assign(req, { method: "POST", url: "/v1/demo/run", headers: { "x-admin-token": "admin-test" }, socket: { remoteAddress: "127.0.0.1" } });
-      let status = 0; const res = { writeHead(s: number) { status = s; }, end() {} };
-      await handle(req as unknown as IncomingMessage, res as unknown as ServerResponse);
-      expect(status).toBe(202); // the acceptance scripts pass the gate with the operator's token
+      // Gate D: an order is a project-paid transaction — gated with execution while public execution is closed
+      expect(await call("POST", "/v1/demo/orders", { payer })).toMatchObject({ status: 503, body: { error: "EXECUTION_GATED", reason: expect.stringContaining("order creation on this instance is gated") } });
+      expect(mocks.startRun).not.toHaveBeenCalled(); expect(mocks.attempt).not.toHaveBeenCalled(); expect(mocks.order).not.toHaveBeenCalled();
+      mocks.listOrders.mockResolvedValue({ orders: [] });
+      expect((await call("GET", "/v1/demo/orders")).status).toBe(200); // reads stay open
+      // the operator's token passes all three
+      mocks.startRun.mockResolvedValue({ ok: true, runId: ATT }); mocks.attempt.mockResolvedValue({ ok: true, status: 201, attempt: { attemptId: ATT } }); mocks.order.mockResolvedValue({ ok: true, orderId: D, state: "CONFIRMED" });
+      expect((await callWith("POST", "/v1/demo/run", { fixture: "APPROVED_PAYMENT", clientRunRequestId: "k".repeat(20) }, { "x-admin-token": "admin-test" })).status).toBe(202); // the acceptance scripts pass the gate with the operator's token
+      expect((await callWith("POST", "/v1/wallet/attempts", { requestId: ATT, orderId: D, policy: {} }, { authorization: "Bearer buyer-token", "x-admin-token": "admin-test" })).status).toBe(201);
+      expect((await callWith("POST", "/v1/demo/orders", { payer }, { authorization: "Bearer buyer-token", "x-admin-token": "admin-test" })).status).toBe(201);
+      expect((await callWith("POST", "/v1/demo/orders", { payer }, { authorization: "Bearer buyer-token", "x-admin-token": "wrong" })).status).toBe(503); // a wrong token is no token
     } finally { (cfg as any).publicExecution = true; }
+  });
+  it("gate probes are safe: empty bodies answer 503 while gated, validation errors when open or with the operator's token — never a run, an attempt or an order", async () => {
+    const { cfg } = await import("../src/config.js");
+    const visitor = { authorization: "Bearer buyer-token" }, operator = { authorization: "Bearer buyer-token", "x-admin-token": "admin-test" };
+    // the real createWalletAttempt refuses an empty body with 400 before any side effect (requestId is checked first); mirrored here
+    mocks.attempt.mockResolvedValue({ ok: false, status: 400, error: "INVALID_INPUT", reason: "requestId must be the id of a delivered check" });
+    const probe = (headers: Record<string, string>) => Promise.all([callWith("POST", "/v1/demo/run", {}, headers), callWith("POST", "/v1/demo/orders", {}, headers), callWith("POST", "/v1/wallet/attempts", {}, headers)]);
+    (cfg as any).publicExecution = false;
+    try {
+      const gated = await probe(visitor);
+      expect(gated.map((r) => `${r.status} ${r.body?.error}`)).toEqual(["503 EXECUTION_GATED", "503 EXECUTION_GATED", "503 EXECUTION_GATED"]);
+      expect((await callWith("POST", "/v1/demo/run", {}, {})).status).toBe(503); // no session needed for the run route's probe
+      const withToken = await probe(operator);
+      expect(withToken.map((r) => r.status)).toEqual([400, 400, 400]); // past the gate, the empty bodies fail validation
+      expect(mocks.startRun).not.toHaveBeenCalled(); expect(mocks.order).not.toHaveBeenCalled();
+    } finally { (cfg as any).publicExecution = true; }
+    const open = await probe(visitor);
+    expect(open.map((r) => r.status)).toEqual([400, 400, 400]);
+    expect(open.every((r) => r.status < 200 || r.status >= 300)).toBe(true);
+    expect((await callWith("POST", "/v1/demo/orders", {}, {})).status).toBe(401); // no session: unauthenticated, never created
+    expect(mocks.startRun).not.toHaveBeenCalled(); expect(mocks.order).not.toHaveBeenCalled();
   });
   it("the Live Demo accepts a labelled interruption flag and passes it to the run", async () => {
     mocks.startRun.mockResolvedValue({ ok: true, runId: ATT });

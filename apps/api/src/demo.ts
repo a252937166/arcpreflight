@@ -130,6 +130,9 @@ export async function networkInfo(db: Db) {
     faucet: faucetInfo(db),
     funds: fundsSnapshot(),
     access: { selfService: true, session: "/v1/session", publicExecution: cfg.publicExecution, walletExecution: cfg.publicExecution && !!dep && !!orderWallet,
+      // Gate D: readiness is independent of the public gate (deployments, order signer and runner configured); operatorAcceptance = the execution
+      // routes (runs, wallet attempts, orders) accept only the operator's admin token — the state the mainnet acceptance runs in
+      executionReady: !!dep && !!orderWallet && !!runnerAcct, operatorAcceptance: !cfg.publicExecution,
       note: cfg.publicExecution ? "any visitor: anonymous session, own orders, paid checks, wallet execution with after-the-fact plan comparison, recovery, private passports" : "business execution on this instance is gated until the operator records the mainnet acceptance (PUBLIC_EXECUTION); checks, orders, recovery and passports stay available" },
     orders: { minNativeAtomic: ORDER_LIMITS.minNativeAtomic.toString(), maxNativeAtomic: ORDER_LIMITS.maxNativeAtomic.toString(), stepNativeAtomic: ORDER_LIMITS.stepNativeAtomic.toString(), defaultNativeAtomic: ORDER_LIMITS.defaultNativeAtomic.toString(), maxReferenceLength: ORDER_LIMITS.maxReferenceLength },
     settlement: { backend: "relay", relayer: cfg.merchant?.address ?? null, feeAsset: "USDC", note: "the check fee is an EIP-3009 authorization relayed by the merchant account, which pays gas in USDC; the business payment is the agent's own transaction with its own gas" } };
@@ -256,7 +259,7 @@ export async function startRun(db: Db, fixture: Fixture, client: string, clientR
   (async () => {
     try {
       const out = await runFixture({ fixture, net: cfg.net, chain, publicClient, admin: orderWallet, runner: runnerAcct, merchant: getAddress(proxy.address) as Hex, baselineDigest,
-        apiUrl: `http://127.0.0.1:${cfg.port}`, token, amountNativeAtomic: demoBudget.amountNativeAtomic, feeParams, labels: labels as any, adminLock, orderSignerLabel: orderSignerRole ?? "order creator",
+        apiUrl: `http://127.0.0.1:${cfg.port}`, token, amountNativeAtomic: demoBudget.amountNativeAtomic, feeParams, labels: labels as any, adminLock, orderSignerLabel: orderSignerRole ?? "order creator", maxOrderGasCostNativeAtomic: demoBudget.gasCeilingPerOrderAtomic,
         executionStore: executionStore(db, runId), onStep: (s) => { steps.push(s); persist(); }, onArtifact: persistArtifact,
         orderStore: runnerOrderStore(db, runId, client, FIXTURES[fixture].proxy), interruptAfterBroadcast: !!runOpts.interruptAfterBroadcast && fixture === "APPROVED_PAYMENT" });
       const unresolved = out.execution?.chainStatus === "UNKNOWN" || out.execution?.businessStatus === "UNKNOWN";
@@ -452,8 +455,10 @@ export async function createOrderFor(db: Db, input: OrderInput & { owner: string
     confirmed: (o: any) => orderConfirmed(db, { orderId: o.orderId, tx: o.tx, block: o.block, from: o.from, gasUsed: o.gasUsed, effectiveGasPriceNativeAtomic: o.effectiveGasPriceNativeAtomic }),
   };
   let o;
-  try { o = await adminLock(() => createOrder({ publicClient, admin: orderWallet!, merchant, feeParams }, input.payer, input.amountNativeAtomic, store)); }
+  try { o = await adminLock(() => createOrder({ publicClient, admin: orderWallet!, merchant, feeParams, maxOrderGasCostNativeAtomic: demoBudget.gasCeilingPerOrderAtomic }, input.payer, input.amountNativeAtomic, store)); }
   catch (e: any) {
+    // refused before anything was persisted or sent (the per-transaction gas cap): no order row exists for it; say so plainly
+    if (/^createOrder refused:/.test(String(e?.message ?? e))) return { ok: false, status: 503, error: "GAS_CAP_EXCEEDED", reason: String(e.message).slice(0, 300) };
     const planned = row(db, "SELECT order_id FROM orders WHERE client_key = ? AND source = 'developer' AND state IN ('PLANNED','SENT') ORDER BY created_at DESC LIMIT 1", client);
     if (planned && /createOrder failed/.test(String(e?.message ?? e))) orderFailed(db, planned.order_id as Hex, "FAILED", "the creation transaction reverted");
     throw e; // anything else (RPC error, receipt timeout) stays PLANNED/SENT for order reconciliation: the chain decides, nothing is replaced here

@@ -34,7 +34,7 @@ vi.mock("@arcpreflight/runner", async () => ({ ...(await vi.importActual<any>("@
 vi.mock("../src/payments.js", () => ({ sealJson: async (o: unknown) => JSON.stringify(o), openJson: async (s: string) => JSON.parse(s) }));
 vi.mock("../src/report.js", () => ({ client: {} })); // the passport module's export-time captures are not exercised here
 import { ORDER_PAID_TOPIC } from "@arcpreflight/runner";
-import { createOrderFor, demoBudget, demoState, startRun, reconcileExecutions, observeExecutions, recoverRun, getRun, listRuns } from "../src/demo.js";
+import { createOrderFor, demoBudget, demoState, startRun, reconcileExecutions, observeExecutions, recoverRun, getRun, listRuns, networkInfo } from "../src/demo.js";
 import { buildRunPassport } from "../src/passport.js";
 import { syntheticRun } from "../../../packages/passport/test/fixture.js";
 const ORDER_IN = (client: string, extra: Partial<Parameters<typeof createOrderFor>[1]> = {}) => ({ payer: mocks.payer as `0x${string}`, proxy: "MAIN" as const, amountNativeAtomic: 50_000_000_000_000_000n, reference: null, owner: `visitor:${client}`, client, ...extra });
@@ -436,5 +436,34 @@ describe("testnet faucet (budgeted, testnet only)", () => {
     expect(faucetInfo(db)).toMatchObject({ usedToday: 2 });
     mocks.balance.mockResolvedValueOnce(10n ** 17n); // the faucet key is below its floor
     expect(await claimFaucet(db, "0x7777777777777777777777777777777777777777", "ip-4")).toMatchObject({ ok: false, status: 503, error: "FAUCET_EMPTY" });
+  });
+});
+
+describe("Gate D: readiness apart from the public gate, and the order creation's gas cap", () => {
+  it("network info reports executionReady (deployments, order signer, runner) independently of the gate, and operatorAcceptance while public execution is closed", async () => {
+    const { cfg } = await import("../src/config.js");
+    const open = (await networkInfo(db)).access as any;
+    expect(open).toMatchObject({ publicExecution: true, walletExecution: true, executionReady: true, operatorAcceptance: false });
+    (cfg as any).publicExecution = false;
+    try {
+      const gated = (await networkInfo(db)).access as any;
+      expect(gated).toMatchObject({ publicExecution: false, walletExecution: false, executionReady: true, operatorAcceptance: true }); // ready for the operator's acceptance, closed to the public
+    } finally { (cfg as any).publicExecution = true; }
+  });
+  it("both order-creation paths hand the per-transaction cap to createOrder", async () => {
+    await createOrderFor(db, ORDER_IN("client-cap"));
+    expect(mocks.order.mock.calls[0][0]).toMatchObject({ maxOrderGasCostNativeAtomic: demoBudget.gasCeilingPerOrderAtomic });
+    expect(await startRun(db, "APPROVED_PAYMENT", "client-run", "admission-cap-0000001")).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(mocks.fixture).toHaveBeenCalled());
+    expect(mocks.fixture.mock.calls[0][0]).toMatchObject({ maxOrderGasCostNativeAtomic: demoBudget.gasCeilingPerOrderAtomic });
+    finishRun.resolve({ execution: { chainStatus: "NOT_SIGNED", businessStatus: "NOT_EXECUTED" } });
+  });
+  it("a creation refused by the gas cap answers GAS_CAP_EXCEEDED and leaves no order row claiming a send", async () => {
+    // the real createOrder refuses before store.planned: nothing is persisted, nothing is sent
+    mocks.order.mockReset().mockRejectedValueOnce(new Error("createOrder refused: worst-case gas cost 12000000000000000 (gas limit 60000 × maxFeePerGas 200000000000) exceeds the per-transaction cap 6000000000000000; nothing was persisted or sent"));
+    const r = await createOrderFor(db, ORDER_IN("client-spike"));
+    expect(r).toMatchObject({ ok: false, status: 503, error: "GAS_CAP_EXCEEDED", reason: expect.stringContaining("exceeds the per-transaction cap") });
+    expect(db.prepare("SELECT COUNT(*) AS c FROM orders WHERE client_key = ?").get("client-spike")).toMatchObject({ c: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS c FROM orders WHERE state IN ('PLANNED','SENT')").get()).toMatchObject({ c: 0 });
   });
 });

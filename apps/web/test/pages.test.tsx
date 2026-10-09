@@ -399,6 +399,20 @@ it("amounts, balances and funding are told apart on the Demo (review 2026-10-09)
   expect(nodes(byTestId(tree, "faucet-help")).some((n) => n.type === "a" && n.props.href === "https://faucet.circle.com/" && n.props.target === "_blank")).toBe(true);
 });
 
+it("Gate D: on a gated instance the Demo's quick check (it creates an order) is disabled with the reason; the gate and gas-cap refusals read as sentences", async () => {
+  memStorage(); h.net.fixtures = [APPROVED_FIXTURE]; h.net.access = { selfService: true, session: "/v1/session", publicExecution: false, walletExecution: false, executionReady: true, operatorAcceptance: true };
+  vi.stubGlobal("fetch", vi.fn(async () => response({ runs: [], total: 0 })));
+  render(Demo); await flush(); const tree = render(Demo);
+  const quick = button(tree, "with your wallet");
+  expect(quick.props.disabled).toBe(true); expect(quick.props.title).toContain("order creation is gated on this instance until the mainnet acceptance is recorded");
+  expect(content(byTestId(tree, "quick-check-note"))).toContain("the quick check creates an order, so it opens with execution");
+  expect(button(tree, "live · project runner").props.disabled).toBe(true); // the runner is gated too
+  const gate = describeBody({ error: "EXECUTION_GATED", reason: "order creation on this instance is gated until the operator records the mainnet acceptance; checks, recovery and passports stay available" }, 503);
+  expect(gate.text).toContain("Execution is gated on this instance: order creation on this instance is gated"); expect(gate.text).toContain("Nothing was started or created"); expect(gate.text).not.toContain("orders, recovery");
+  const cap = describeBody({ error: "GAS_CAP_EXCEEDED", reason: "createOrder refused: worst-case gas cost 12000000000000000 exceeds the per-transaction cap 6000000000000000; nothing was persisted or sent" }, 503);
+  expect(cap.text).toMatch(/^The order was not created: createOrder refused/); expect(cap.text).toContain("Nothing was sent");
+});
+
 it("Verify's offline preview reproduces digests, flags a tampered file and an unsafe path, and shows counts instead of a verdict", async () => {
   const intent = IntentCore.parse({ schemaVersion: "1.0", clientRequestId: "demo", chainId: 5042002, walletMode: "EOA_DIRECT_NON_DELEGATED", from: ACCOUNT, operation: "CALL", to: MERCHANT, data: "0x12345678", valueNativeAtomic: "50000000000000000", businessExpectation: { sourceId: "order", sourceDigest: D, action: "MERCHANT_PAY", recipient: MERCHANT, asset: "ARC_NATIVE_USDC", amountNativeAtomic: "50000000000000000", orderId: D }, baselineDigest: D, policyDigest: D, expiresAt: "2026-10-03T12:10:00Z" });
   const sha = (s: string) => "0x" + createHash("sha256").update(s, "utf8").digest("hex");
@@ -501,6 +515,9 @@ describe("Developer: order-creator copy, readable refusals, my checks", () => {
     tree = render(Developer); await flush(); tree = render(Developer);
     expect(content(tree)).toContain("Execution is gated on this instance"); expect(content(tree)).toContain("Gated on this instance");
     expect(nodes(tree).some((n) => n.type === "button" && content(n).includes("Execute with your wallet"))).toBe(false);
+    // Gate D: an order is a project-paid transaction — "Create order…" is disabled on a gated instance and says why (the wallet is on the API's chain here)
+    const create = button(tree, "Create order"); expect(create.props.disabled).toBe(true); expect(create.props.title).toBe("order creation is gated on this instance until the mainnet acceptance is recorded");
+    expect(content(byTestId(tree, "order-gated"))).toContain("order creation is gated on this instance until the mainnet acceptance is recorded");
   });
   it("turns a refused fee settlement into a sentence (never raw JSON) and remembers the request", async () => {
     const api = developerApi(); const store = memStorage();

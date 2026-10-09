@@ -6,7 +6,7 @@ import { BaselineCore, ReportCore, baselineDigest, intentDigest, reportDigest, t
 import { PAY_SELECTOR } from "@arcpreflight/policy";
 import { signTransferAuthorization } from "@arcpreflight/client";
 import { captureSnapshot, readCode } from "@arcpreflight/observer";
-import { runFixture, type Fixture, type RunOptions, type SignedExecution, type ExecutionOutcome } from "../src/index.js";
+import { runFixture, createOrder, DEFAULT_ORDER_GAS_COST_CAP, type Fixture, type RunOptions, type SignedExecution, type ExecutionOutcome, type OrderStore } from "../src/index.js";
 
 const D = (`0x${"11".repeat(32)}`) as Hex;
 const T = (`0x${"22".repeat(32)}`) as Hex;
@@ -266,5 +266,47 @@ describe("review round 2 — evidence before the broadcast, the real snapshot ag
     const fresh = await run({ fixture: "APPROVED_PAYMENT" });
     const fv = fresh.result.finalValidation;
     expect(new Date(fv.expiresAt).getTime() - new Date(fv.snapshot.observedAt).getTime()).toBeLessThanOrEqual(5000); // expiry = observedAt + window, not "now + window"
+  });
+});
+
+describe("Gate D: the order creation's per-transaction gas cap", () => {
+  const PAYER = "0x00000000000000000000000000000000000000aa" as Hex;
+  const parts = (maxFeePerGas: bigint, estimate = 50_000n) => {
+    const order: string[] = [];
+    const writeContract = vi.fn(async (_a: any) => { order.push("send"); return D; });
+    const store: OrderStore = { planned: vi.fn(() => { order.push("planned"); }), sent: vi.fn(() => { order.push("sent"); }), confirmed: vi.fn(() => { order.push("confirmed"); }) };
+    const publicClient = { estimateGas: vi.fn(async () => { order.push("estimate"); return estimate; }), waitForTransactionReceipt: vi.fn(async () => ({ status: "success", blockNumber: 100n, gasUsed: 41_000n, effectiveGasPrice: maxFeePerGas, from: PAYER })) };
+    const o = { publicClient, admin: { account: { address: PAYER }, writeContract }, merchant: MERCHANT, feeParams: async () => ({ maxFeePerGas, maxPriorityFeePerGas: 1_000_000_000n }) } as any;
+    return { o, writeContract, store, publicClient, order };
+  };
+  it("estimates first and sends with an explicit gas limit of estimate × 1.2; the identity is durable before the send", async () => {
+    const { o, writeContract, store, publicClient, order } = parts(20_000_000_000n);
+    const created = await createOrder(o, PAYER, AMOUNT, store);
+    expect(created.tx).toBe(D);
+    expect(publicClient.estimateGas).toHaveBeenCalledWith(expect.objectContaining({ account: PAYER, to: MERCHANT, data: expect.stringMatching(/^0x/) }));
+    expect(writeContract).toHaveBeenCalledTimes(1);
+    expect(writeContract.mock.calls[0][0]).toMatchObject({ address: MERCHANT, functionName: "createOrder", gas: 60_000n, maxFeePerGas: 20_000_000_000n });
+    expect(order).toEqual(["estimate", "planned", "send", "sent", "confirmed"]);
+    expect(DEFAULT_ORDER_GAS_COST_CAP).toBe(6_000_000_000_000_000n); // 150k gas × 40 gwei = 0.006 USDC
+  });
+  it("a fee spike that puts gas limit × maxFeePerGas above the cap refuses before anything is persisted or sent", async () => {
+    const { o, writeContract, store, order } = parts(200_000_000_000n); // 60k × 200 gwei = 0.012 USDC > 0.006
+    await expect(createOrder(o, PAYER, AMOUNT, store)).rejects.toThrow(/^createOrder refused: worst-case gas cost 12000000000000000 \(gas limit 60000 × maxFeePerGas 200000000000\) exceeds the per-transaction cap 6000000000000000; nothing was persisted or sent$/);
+    expect(writeContract).not.toHaveBeenCalled(); expect(store.planned).not.toHaveBeenCalled(); expect(order).toEqual(["estimate"]);
+  });
+  it("the caller's cap is used when given: a tighter cap refuses at normal fees, an estimate above the default ceiling refuses too", async () => {
+    const tight = parts(20_000_000_000n);
+    await expect(createOrder({ ...tight.o, maxOrderGasCostNativeAtomic: 1_000_000_000_000_000n }, PAYER, AMOUNT, tight.store)).rejects.toThrow(/^createOrder refused:/); // 0.0012 > 0.001
+    expect(tight.writeContract).not.toHaveBeenCalled();
+    const heavy = parts(30_000_000_000n, 200_000n); // 240k × 30 gwei = 0.0072 > 0.006
+    await expect(createOrder(heavy.o, PAYER, AMOUNT, heavy.store)).rejects.toThrow(/^createOrder refused:/); expect(heavy.writeContract).not.toHaveBeenCalled();
+  });
+  it("the run path refuses the same way: runFixture stops before the order exists and nothing is signed or sent", async () => {
+    const h = harness({ fixture: "APPROVED_PAYMENT" });
+    const opts = { ...h.options, feeParams: async () => ({ maxFeePerGas: 200_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n }) } as RunOptions;
+    const expectation = expect(runFixture(opts)).rejects.toThrow(/^createOrder refused:/);
+    await vi.runAllTimersAsync(); await expectation;
+    expect((opts.admin as any).writeContract).not.toHaveBeenCalled(); expect(h.signTransaction).not.toHaveBeenCalled(); expect(h.sendRawTransaction).not.toHaveBeenCalled();
+    expect(h.calls).toEqual([]);
   });
 });

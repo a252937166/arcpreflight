@@ -34,7 +34,9 @@ export type NetworkInfo = {
   /** the worker's latest reading of the project keys' balances (operator decision 2026-10-09): reads only, thresholds are the operator's */
   funds?: FundsInfo;
   /** open self-service (P3): anyone who visits gets an anonymous session principal from `access.session` (POST); v3.3 adds wallet execution */
-  access?: { selfService: boolean; session: string; publicExecution?: boolean; walletExecution?: boolean; note?: string };
+  access?: { selfService: boolean; session: string; publicExecution?: boolean; walletExecution?: boolean; note?: string;
+    /** Gate D: deployments, order signer and runner are configured (independent of the public gate) */ executionReady?: boolean;
+    /** Gate D: execution routes (runs, wallet attempts, orders) accept only the operator's admin token — the mainnet acceptance runs in this state */ operatorAcceptance?: boolean };
   /** order limits (v3.3 §2): 18-decimal native units; the dialog mirrors these rules before the server sees the body */
   orders?: { minNativeAtomic: string; maxNativeAtomic: string; stepNativeAtomic: string; defaultNativeAtomic: string; maxReferenceLength: number };
 };

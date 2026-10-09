@@ -18,7 +18,9 @@ const SENTENCES: Record<string, (b: any) => string> = {
   DEMO_BUDGET_EXHAUSTED: (b) => `${reason(b) ?? "Today's live-run budget is used up"}. Recorded samples remain available.`,
   DEMO_UNAVAILABLE: (b) => `The live demo is unavailable right now: ${reason(b) ?? "a dependency is missing"}. Nothing was started.`,
   // v3.3 execution gate (docs/LIFECYCLE.md §8): business execution is closed on this instance until the mainnet acceptance is recorded
-  EXECUTION_GATED: (b) => `Execution is gated on this instance: ${reason(b) ?? "business execution opens after the mainnet acceptance"}. Nothing was started; checks, orders, recovery and passports stay available — use the testnet instance to execute.`,
+  EXECUTION_GATED: (b) => `Execution is gated on this instance: ${reason(b) ?? "business execution opens after the mainnet acceptance"}. Nothing was started or created; checks, recovery and passports stay available — use the testnet instance to execute.`,
+  // Gate D: the order creation's worst-case gas cost was above the per-transaction cap; it was refused before anything was persisted or sent
+  GAS_CAP_EXCEEDED: (b) => `The order was not created: ${reason(b) ?? "the transaction's worst-case gas cost is above the per-transaction cap"}. Nothing was sent; try again when the network fee is lower.`,
   // v3.3 wallet attempts
   VALIDATION_FAILED: (b) => `Validation did not pass: ${reason(b) ?? "the decision or the final validation refused"}. Nothing was handed to the wallet.`,
   ORDER_NOT_CONFIRMED: (b) => `${reason(b) ?? "The order is not confirmed yet"}; only a confirmed order can be paid.`,

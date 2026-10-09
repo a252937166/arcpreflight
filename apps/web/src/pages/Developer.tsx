@@ -17,7 +17,7 @@ import { describeBody, describeError, type Described } from "../lib/errors";
 import { storedSession, withSession, type Session } from "../lib/session";
 import { rememberedChecks } from "../lib/checks";
 import { saveJson } from "../lib/download";
-import { baselineDigestFor, fixtureForProxy, nativeAtomicToUsdcText, orderLimits, orderViewFromCreated, toDeveloperOrder, type OrderBody, type Proxy } from "../lib/orders";
+import { baselineDigestFor, fixtureForProxy, nativeAtomicToUsdcText, orderLimits, orderViewFromCreated, toDeveloperOrder, ORDER_GATED_TEXT, type OrderBody, type Proxy } from "../lib/orders";
 import { executeAttempt, executionInFlight, insideWindow, isOpen, isTerminal, isUncertain, reconcileUncertainAttempt, rememberedAttempts, sendValidatedAttempt, stateTone, type ExecutePhase, type Refusal } from "../lib/attempts";
 import { clearWorkflow, loadWorkflow, loadWorkflows, saveWorkflow } from "../lib/workflow";
 import { LIFECYCLE_LABELS, type LifecycleId, type LifecycleStage, type StageStatus } from "../lib/outcome";
@@ -402,7 +402,7 @@ export default function Developer() {
                 ? <>Created with the <code>deployer-admin</code> key <Chip tone="warn">admin key in process</Chip> — a fallback the release target does not use.</>
                 : <>Created by the merchant's <code>order-creator</code> role — a key that can only create orders, never upgrade, pause or withdraw.</>}</p>
               <details className="why"><summary className="tiny">why an order first</summary><p className="small muted">You get a pinned report, the payment outcome read from the chain and a verifiable passport. The order's identity is recorded before its creation transaction is sent; the operator pays that gas.</p></details>
-              <div className="row"><button className="btn primary" disabled={!account || !onArc || !fixturesDeployed || !!busy} onClick={() => setDialog(true)}>Create order…</button>{myOrders.length > 0 && <span className="tiny dim">or pick one of your {myOrders.length} orders in step 5</span>}</div>
+              <div className="row"><button className="btn primary" disabled={!account || !onArc || !fixturesDeployed || !!busy || gated} title={gated ? ORDER_GATED_TEXT : undefined} onClick={() => setDialog(true)}>Create order…</button>{gated ? <span className="tiny dim" data-testid="order-gated">{ORDER_GATED_TEXT}</span> : myOrders.length > 0 && <span className="tiny dim">or pick one of your {myOrders.length} orders in step 5</span>}</div>
             </>) : <OrderCard order={order} net={net} feeTokenAtomic={net?.priceTokenAtomic ?? null} onRefresh={() => void refreshOrder()} busy={!!busy} />}
           </StepSection>
 
