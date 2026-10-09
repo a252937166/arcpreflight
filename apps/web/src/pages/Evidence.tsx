@@ -5,7 +5,10 @@ import { api, apiPath, explorerAddr, explorerTx, type RunSummary } from "../lib/
 import { Chip, Hex, Labels } from "../components/Badges";
 import { HandRule, ReceiptChain } from "../components/Illustrations";
 import { RunsTable } from "../components/RunsTable";
-import { ago, utc } from "../lib/format";
+import { ago, utc, type Tone } from "../lib/format";
+import type { Capability } from "../lib/api";
+
+const CAP_TONE: Record<Capability["status"], Tone> = { MAINNET_VERIFIED: "violet", IMPLEMENTED_TESTNET: "info", PROPOSED: "warn", DISABLED: "neutral" };
 
 const PAGE = 50;
 
@@ -71,6 +74,15 @@ export default function Evidence() {
               <p className="muted small"><code>SUBMISSION_RESTRICTED</code>: external paid access closed (only configured principals buy reports), wallet-popup execution off, USDC-transfer intent path off, SCA buyers off. Each is a <em>deferred feature</em> with its rejection tested, not a hidden gap. Gates: G0 read-only probes · G1 contracts + schema + observer tests · G2 three fixtures live + recovery · G3 hardening. The live demo page is G2.</p>
               <ReceiptChain />
             </div>
+            {net?.capabilities && net.capabilities.length > 0 && (
+              <div className="stack" style={{ gap: 6 }} id="capabilities">
+                <h3>What is implemented where</h3>
+                <p className="tiny dim">per capability on this deployment · <code>IMPLEMENTED_TESTNET</code> rehearsed on Arc testnet · <code>MAINNET_VERIFIED</code> evidenced on Arc mainnet · <code>PROPOSED</code> designed, not shipped · <code>DISABLED</code> closed in this release</p>
+                <ul className="list">
+                  {net.capabilities.map((c) => <li key={c.id} className="row" style={{ gap: 8, alignItems: "baseline" }}><Chip tone={CAP_TONE[c.status] ?? "neutral"}>{c.status}</Chip><span className="small">{c.label}</span>{c.note && <span className="tiny dim">— {c.note}</span>}</li>)}
+                </ul>
+              </div>
+            )}
             <div className="stack" style={{ gap: 8 }}>
               <h3>Published evidence files</h3>
               {files.length === 0 ? <p className="dim small">none published</p> : <ul className="list plain small">{files.map((f) => <li key={f.path}><a href={apiPath(`/v1/evidence/${f.path}`)} target="_blank" rel="noreferrer" className="mono" style={{ overflowWrap: "anywhere" }}>{f.path}</a> <span className="tiny dim">{f.bytes} B</span></li>)}</ul>}

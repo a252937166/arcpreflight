@@ -6,14 +6,15 @@ import { Pipeline } from "./Pipeline";
 import { StepLog } from "./StepLog";
 import { ReportView } from "./Report";
 import { Typewriter, narrate } from "./Typewriter";
-import { Lifecycle } from "./Lifecycle";
+import { FlowCanvas } from "./FlowCanvas";
+import { RecoveryStrip, type RecoveryMoment } from "./RecoveryStrip";
 import { CostTable } from "./CostTable";
 import { VerifyInBrowser } from "./VerifyInBrowser";
 import { api, explorerAddr, explorerTx, type NetworkInfo, type PassportBundle, type Run, type RunResult } from "../lib/api";
 import { describeError } from "../lib/errors";
 import { runKeyFor } from "../lib/runKeys";
 import { saveJson } from "../lib/download";
-import { lifecycleFromRun, outcomeHeadline } from "../lib/outcome";
+import { lifecycleFromRun, outcomeHeadline, type LifecycleId } from "../lib/outcome";
 import { ago, ms, usdc6, usdcNative, usdcToken6, utc, type Tone } from "../lib/format";
 
 const FIXTURE_TITLES: Record<string, string> = { APPROVED_PAYMENT: "approved payment", CHANGED_IMPLEMENTATION: "unapproved implementation change", AMOUNT_UNIT_MISMATCH: "6-dec amount on the 18-dec path" };
@@ -84,9 +85,9 @@ export function RecoveryDesk({ run, net, onUpdate }: { run: Run; net: NetworkInf
     catch (e: any) { setState({ busy: false, err: errText(e), done: null }); }
   };
   return (
-    <div className="panel stack" style={{ gap: 10 }}>
+    <div className="panel stack" style={{ gap: 10 }} id="sec-recovery">
       <div className="card-title"><h3>Recovery desk</h3><Chip tone="warn">original attempt only</Chip></div>
-      <p className="small muted">Recovery re-examines the original transaction from its recorded hash and the order state. It never signs a replacement, never creates a new order and never buys another check. There is no "pay again" here. The recovery worker runs every 30 s; a read of this run also observes.</p>
+      <p className="small muted">Recovery re-reads the original transaction by its hash and the order state. It never signs a replacement, never creates an order, never buys another check. The worker runs every 30 s; reading this run observes too.</p>
       <div className="kv w190">
         <span className="k">original transaction</span><span>{hash ? <Hex value={hash} link={explorerTx(net, hash)} /> : <span className="dim">none signed</span>}</span>
         <span className="k">nonce</span><span>{be?.nonce ?? r?.plan?.nonce ?? "—"}</span>
@@ -104,7 +105,10 @@ export function RecoveryDesk({ run, net, onUpdate }: { run: Run; net: NetworkInf
   );
 }
 
-export function RunPanel({ run, net, sample, onUpdate }: { run: Run; net: NetworkInfo | null; sample?: boolean; onUpdate?: (run: Run) => void }) {
+/** `origin` (review of 2026-10-09, item 4): "live" = started in this session, "history" = opened from the records, "sample" = the API's fallback when
+ *  execution was unavailable (`reason` says why); `onLocal` reports what this browser did with the passport (export, verification state). */
+export type RunOrigin = "live" | "history" | "sample";
+export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = null, onLocal }: { run: Run; net: NetworkInfo | null; sample?: boolean; onUpdate?: (run: Run) => void; origin?: RunOrigin | null; reason?: string | null; onLocal?: (local: { exported: boolean; verified: "passed" | "failed" | "partial" | null }) => void }) {
   const { link = (to: string) => to } = useNet(); // permanent links carry ?net= when the selected instance is not the root (P2)
   const r = run.result;
   const running = run.state === "RUNNING";
@@ -118,7 +122,7 @@ export function RunPanel({ run, net, sample, onUpdate }: { run: Run; net: Networ
   const [verified, setVerified] = useState<"passed" | "failed" | "partial" | null>(null);
   const download = async () => {
     setDl((d) => ({ ...d, busy: true, err: null }));
-    try { const { __status: _s, ...bundle } = (await api.passport(run.runId)) as any; const name = `arcpreflight-passport-${run.runId.slice(0, 8)}.json`; saveJson(name, bundle); setDl({ busy: false, err: null, bundle, name }); setVerified(null); }
+    try { const { __status: _s, ...bundle } = (await api.passport(run.runId)) as any; const name = `arcpreflight-passport-${run.runId.slice(0, 8)}.json`; saveJson(name, bundle); setDl({ busy: false, err: null, bundle, name }); setVerified(null); onLocal?.({ exported: true, verified: null }); }
     catch (e: any) { setDl((d) => ({ ...d, busy: false, err: errText(e) })); }
   };
   const ex = r?.execution; const cost = r?.costStatement ?? null; const rec = run.recovery ?? null; const be = run.businessExecution ?? null;
@@ -140,12 +144,19 @@ export function RunPanel({ run, net, sample, onUpdate }: { run: Run; net: Networ
   const stages = useMemo(() => lifecycleFromRun(run, { exported: !!dl.bundle, verified }), [run, dl.bundle, verified]);
   const anchors = useMemo(() => ({ baselineDigests: Array.from(new Set((net?.fixtures ?? []).map((f) => f.baselineDigest).filter((x): x is string => !!x))), policyDigests: r?.policyDigest ? [r.policyDigest] : [] }), [net, r?.policyDigest]);
   const beTone: Tone = be?.state === "CONFIRMED" ? "ok" : be?.state === "REVERTED" || be?.state === "NOT_MINED" ? "bad" : be?.state === "BROADCAST_ATTEMPTED" ? "warn" : "neutral";
+  // the lifecycle diagram jumps to the section that holds the stage's result (review of 2026-10-09, item 5)
+  const SECTION: Record<LifecycleId, string> = { order: "sec-order", approve: "sec-order", check: "sec-check", execute: "sec-payment", recover: needsDesk ? "sec-recovery" : "sec-payment", passport: "btn-passport", verify: "sec-verify" };
+  const pick = (id: LifecycleId) => { if (typeof document === "undefined") return; document.getElementById(SECTION[id])?.scrollIntoView?.({ behavior: "smooth", block: "center" }); };
+  const recoveryBusiness = (reconciledStep?.businessStatus as string | undefined) ?? lastRec?.businessStatus ?? be?.businessStatus ?? null;
+  const recoveryMoment: RecoveryMoment = reconciling ? "recovering" : reconciledStep || lastRec || storeSettled ? (be?.state === "CONFIRMED" || recoveryBusiness === "SUCCESS" ? "resolved" : "failed") : "interrupted";
+  const recoveryOutcome = `${((reconciledStep?.chainStatus as string | undefined) ?? lastRec?.chainStatus ?? be?.state ?? "unknown")} / ${recoveryBusiness ?? "unknown"}`.toLowerCase().replace(/_/g, " ");
   return (
     <div className="stack fade" style={{ gap: 24 }}>
       <div className="row between" style={{ alignItems: "baseline" }}>
         <div className="row" style={{ gap: 12, alignItems: "baseline" }}>
           <span className="serif" style={{ fontSize: "1.5rem" }}>{FIXTURE_TITLES[run.fixture] ?? run.fixture}</span>
           <Labels labels={labels} network={r?.network ?? net?.network} />
+          {origin && <Chip tone={origin === "live" ? "ok" : "neutral"} title={origin === "live" ? "started in this session: real transactions on the chain named here" : "opened from the records; no new transaction was initiated"}>{origin === "live" ? "live testnet execution" : "recorded example"}</Chip>}
           {run.partial && <Chip tone="warn" title={`artefacts present: ${(run.artifactsPresent ?? []).join(", ")}`}>assembled from persisted artefacts</Chip>}
           {interrupted && <Chip tone="warn">simulated interruption</Chip>}
         </div>
@@ -154,7 +165,7 @@ export function RunPanel({ run, net, sample, onUpdate }: { run: Run; net: Networ
           <Link to={link(`/runs/${run.runId}`)} className="tiny dim" title="permanent link">#{run.runId.slice(0, 8)}</Link>
         </div>
       </div>
-      <Lifecycle stages={stages} compact />
+      <FlowCanvas stages={stages} onPick={pick} />
 
       {/* the primary screen (design §5): one order, its referenced approval, its money, its recovery facts */}
       <div className="panel outcome stack" style={{ gap: 14 }}>
@@ -167,22 +178,20 @@ export function RunPanel({ run, net, sample, onUpdate }: { run: Run; net: Networ
           <div className={`banner ${message.tone === "ok" || message.tone === "info" ? "info" : message.tone === "bad" ? "bad" : ""}`} style={{ margin: 0 }} role="status">{message.text}</div>
         </div>
         {interrupted && (
-          <div className="interruption" role="status" data-testid="interruption">
-            <b>Simulated interruption after broadcast</b> — the process stopped waiting right after the send; {reconciledStep || lastRec || be?.state === "CONFIRMED"
-              ? <>recovery resolved the outcome from the recorded hash and the order state: <code>{(reconciledStep?.chainStatus as string) ?? lastRec?.chainStatus ?? be?.state} / {(reconciledStep?.businessStatus as string) ?? lastRec?.businessStatus ?? be?.businessStatus}</code>{lastRec?.at ? ` at ${utc(lastRec.at)}` : ""}{lastRec?.note ? ` — ${lastRec.note}` : ""}</>
-              : <>recovery resolves the outcome from the recorded hash and the order state — pending (the recovery worker runs every 30 s; reading this run also observes)</>}
-            ; new orders created: <b>{added?.ordersCreated ?? 0}</b>, new signatures: <b>{added?.businessSignatures ?? 0}</b>.
+          <div className="interruption stack" role="status" data-testid="interruption" style={{ gap: 8 }}>
+            <RecoveryStrip moment={recoveryMoment} hash={be?.txHash ?? ex?.businessTxHash ?? null} net={net} outcome={recoveryOutcome} />
+            <span className="small"><b>Simulated interruption</b>: the runner stopped waiting right after the send.{recoveryMoment === "resolved" || recoveryMoment === "failed" ? <> Recovery resolved it from the recorded hash and the order state{lastRec?.at ? ` at ${utc(lastRec.at)}` : ""}.</> : <> Recovery resolves it from the recorded hash and the order state.</>} Added by recovery — orders: <b>{added?.ordersCreated ?? 0}</b>, signatures: <b>{added?.businessSignatures ?? 0}</b>.</span>
           </div>
         )}
         <div className="two" style={{ gap: 28 }}>
-          <div className="kv w190">
+          <div className="kv w190" id="sec-order">
             <span className="k">approved implementation</span><span>{approvedImpl ? <Hex value={approvedImpl} n={5} link={explorerAddr(net, approvedImpl)} /> : "—"}{observedImpl && approvedImpl && observedImpl.toLowerCase() !== approvedImpl.toLowerCase() && <> · observed <Hex value={observedImpl} n={5} link={explorerAddr(net, observedImpl)} /></>}</span>
             <span className="k">referenced approval</span><span>{r ? <><Hex value={r.intent.baselineDigest} n={6} /> <Chip tone={r.report.baselineResult === "MATCH" ? "ok" : r.report.baselineResult === "NO_BASELINE" ? "bad" : "warn"}>{r.report.baselineResult === "MATCH" ? "unchanged" : r.report.baselineResult.toLowerCase().replace(/_/g, " ")}</Chip>{r.approvalStatusAtValidation && <span className="tiny dim"> · at final validation: {r.approvalStatusAtValidation.revoked ? "REVOKED" : "valid"}{r.approvalStatusAtValidation.validUntil ? ` until ${utc(r.approvalStatusAtValidation.validUntil)}` : ""}</span>}</> : "—"}</span>
             <span className="k">business amount</span><span>{amount ? usdc6(amount) : "—"}{candidate && amount && candidate !== amount && <> <Chip tone="bad">candidate value {candidate} atomic</Chip></>}{run.order?.reference && <span className="tiny dim"> · “{run.order.reference}”</span>}</span>
             <span className="k">check fee</span><span>{feeAtomic ? usdcToken6(feeAtomic) : "—"}{r?.serviceFeeTx && <> · <Hex value={r.serviceFeeTx} link={explorerTx(net, r.serviceFeeTx)} /></>}</span>
             <span className="k">order creation</span><span>{run.order?.tx ? <><Hex value={run.order.tx} n={5} link={explorerTx(net, run.order.tx)} />{run.order.block && <> @ #{run.order.block}</>} <Chip tone={run.order.state === "CONFIRMED" ? "ok" : "warn"}>{run.order.state.toLowerCase().replace(/_/g, " ")}</Chip></> : r ? <span className="dim">recorded in the step log</span> : "—"}</span>
           </div>
-          <div className="kv w190">
+          <div className="kv w190" id="sec-payment">
             <span className="k">outcome</span><span><Chip tone={head.decision === "CONFIRMED" ? "ok" : head.decision === "BLOCKED" || head.decision === "FAILED" ? "bad" : head.decision ? "warn" : "info"}>{head.text.toLowerCase()}</Chip>{outcome && <span className="tiny dim"> · from the {outcome.source === "store" ? "execution store" : outcome.source}</span>}</span>
             <span className="k">business execution</span>
             <span>{be ? <span className="stack" style={{ gap: 2 }}>
@@ -191,7 +200,7 @@ export function RunPanel({ run, net, sample, onUpdate }: { run: Run; net: Networ
               {be.note && <span className="tiny dim">{be.note}</span>}
             </span> : ex ? <Chip tone={ex.chainStatus === "CONFIRMED" ? "ok" : ex.chainStatus === "REVERTED" ? "bad" : ex.chainStatus === "NOT_SIGNED" || ex.chainStatus === "SIGNED_NOT_BROADCAST" ? "neutral" : "warn"}>{ex.chainStatus.toLowerCase().replace(/_/g, " ")} · {ex.businessStatus.toLowerCase().replace(/_/g, " ")}</Chip> : running ? <Spinner /> : "—"}</span>
             <span className="k">order result</span><span>{r || run.order ? <Chip tone={ord === "paid" || run.order?.paid === true ? "ok" : ord === "unknown" && run.order?.paid !== false ? "warn" : "neutral"}>{run.order?.paid === true ? "paid" : ord}</Chip> : "—"}{r && ord === "unpaid" && (ex?.chainStatus === "NOT_SIGNED" || ex?.chainStatus === "SIGNED_NOT_BROADCAST") && <span className="tiny dim"> · nothing executed</span>}</span>
-            <span className="k">service outcome</span><span><Chip tone="neutral">not evaluated</Chip> <span className="tiny dim">a paid order is not proof an offchain service was delivered</span></span>
+            <span className="k">service outcome</span><span><Chip tone="neutral">not evaluated</Chip> <span className="tiny dim">a paid order is not proof of offchain delivery</span></span>
             <span className="k">recovery of this attempt</span>
             <span className="stack" style={{ gap: 2 }}>
               <span>new orders created: <b>{rec ? (rec.addedByRecovery?.ordersCreated ?? Math.max(0, rec.counters.ordersCreated - 1)) : "—"}</b> · new check-fee authorizations: <b>{rec ? (rec.addedByRecovery?.checkFeeAuthorizations ?? Math.max(0, rec.counters.checkFeeAuthorizations - 1)) : "—"}</b> · new business signatures: <b>{rec ? (rec.addedByRecovery?.businessSignatures ?? rec.counters.replacementSignatures) : "—"}</b></span>
@@ -201,18 +210,18 @@ export function RunPanel({ run, net, sample, onUpdate }: { run: Run; net: Networ
           </div>
         </div>
         <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <button className="btn primary" disabled={running || dl.busy} title={running ? "available once the run has ended" : unresolved ? "the outcome of this attempt is not established yet; the passport records it as unresolved" : "the passport's files as one JSON document"} onClick={download}>{dl.busy ? <><Spinner /> exporting…</> : unresolved ? "Download Payment Passport (outcome unresolved)" : dl.bundle ? "Download Payment Passport again" : "Download Payment Passport"}</button>
-          <a href="#verify-here" className="btn">Verify in browser</a>
+          <button className="btn primary" id="btn-passport" disabled={running || dl.busy} title={running ? "available once the run has ended" : unresolved ? "the outcome of this attempt is not established yet; the passport records it as unresolved" : "the passport's files as one JSON document"} onClick={download}>{dl.busy ? <><Spinner /> exporting…</> : unresolved ? "Download Payment Passport (outcome unresolved)" : dl.bundle ? "Download Payment Passport again" : "Download Payment Passport"}</button>
+          <a href="#sec-verify" className="btn">Verify in browser</a>
           <Link to={link(`/verify?run=${run.runId}`)} className="btn ghost">Verify elsewhere</Link>
           <a href="#receipt-chain" className="btn ghost">Technical evidence</a>
           {sample && <span className="tiny dim">recorded sample — the counters and costs are that run's, not today's</span>}
         </div>
         {dl.err && <div className="banner bad">{dl.err}</div>}
         <CostTable statement={cost} net={net} title="Cost disclosure" context={{ executionMode: run.executionMode ?? "runner", subjectKind: run.executionMode === "wallet" ? "wallet-run" : "demo-run" }} />
-        <div className="stack" style={{ gap: 6 }} id="verify-here">
+        <div className="stack" style={{ gap: 6 }} id="sec-verify">
           <h3>Verify independently</h3>
-          {dl.bundle ? <VerifyInBrowser bundle={dl.bundle} name={dl.name} net={net} anchors={anchors} anchorsSource="site" onVerified={(_r, s) => setVerified(s.kind)} compact />
-            : <p className="small dim">download the passport first — the verifier then runs here on the downloaded bundle, against {net?.rpc ?? "the Arc RPC"}, with this site's digests as anchors (labelled as not independent)</p>}
+          {dl.bundle ? <VerifyInBrowser bundle={dl.bundle} name={dl.name} net={net} anchors={anchors} anchorsSource="site" onVerified={(_r, s) => { setVerified(s.kind); onLocal?.({ exported: true, verified: s.kind }); }} compact />
+            : <p className="small dim">download the passport first; the verifier then runs here against {net?.rpc ?? "the Arc RPC"}, with this site's digests as anchors (not independent)</p>}
         </div>
       </div>
 
@@ -223,7 +232,7 @@ export function RunPanel({ run, net, sample, onUpdate }: { run: Run; net: Networ
           <p className="caption">the agent, thinking out loud — narration is generated from the receipts; the decision is code</p>
           <Typewriter lines={narration} speed={running ? 12 : 3} pause={running ? 350 : 90} className="monologue small" />
         </div>
-        <div className="stack" style={{ gap: 12 }}>
+        <div className="stack" style={{ gap: 12 }} id="sec-check">
           <DecisionBadge decision={head.text === "RUNNING" ? null : head.decision === "CONFIRMED" ? "CONFIRMED" : head.decision} />
           {run.expected && !running && r && <p className="small muted">expected <code>{run.expected}</code>, got <code>{r.decision.decision}</code> {r.decision.decision === run.expected ? <Chip tone="ok">as expected</Chip> : <Chip tone="bad">unexpected</Chip>}</p>}
           {reasons.length > 0 && <ul className="list">{reasons.map((x, i) => <li key={i}>{x}</li>)}</ul>}
@@ -240,9 +249,9 @@ export function RunPanel({ run, net, sample, onUpdate }: { run: Run; net: Networ
       </div>
 
       <div className="two stack-wide" style={{ gap: 44 }}>
-        <div className="stack" style={{ gap: 6 }}>
+        <div className="stack" style={{ gap: 6 }} id="sec-steps">
           <h3>Step by step</h3>
-          <p className="tiny dim">who did what, and why — straight from the runner</p>
+          <p className="tiny dim">who did what, and why — from the runner's own log; open a step for its recorded facts</p>
           <Pipeline steps={run.steps} decision={head.decision === "CONFIRMED" ? "NO_POLICY_VIOLATION" : head.decision} running={running} />
           <StepLog steps={run.steps} net={net} />
         </div>

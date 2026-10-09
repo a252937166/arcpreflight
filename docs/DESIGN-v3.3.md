@@ -72,6 +72,12 @@ Presentation rule (user feedback, 2026-10-08): concise text, a lifecycle diagram
 detail collapsed, hashes as explorer links, no letter-wrapping chips, desktop-fitting tables, phone width without
 horizontal scroll.
 
+Presentation rule, extended (user feedback, 2026-10-09): the Live Demo guides — a persistent next-step panel derived from the
+recorded run (what happened, what to click, what to inspect), every run labelled *live testnet execution* or *recorded example*,
+the interruption explained before it starts and drawn while it recovers, execution and costs stated before the first click; less
+prose everywhere, with explanations collapsed and graphics or canvas animation carrying the structure (lifecycle, who pays,
+recovery).
+
 ## 5. State: never collapse distinct facts (extends v3.2 §7)
 
 | Situation | Primary message | Permitted next action |

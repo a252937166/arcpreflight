@@ -362,29 +362,29 @@ export default function Developer() {
           <div className="stack" style={{ gap: 8 }}>
             <div className="kicker">Developer workflow · {netLabel} · try with my wallet</div>
             <h2>Your wallet. <em>The whole lifecycle.</em></h2>
-            <p className="muted small" style={{ maxWidth: 760 }}>Seven steps: an order payable only by your wallet → the approval you reference → a pinned report bought with one fee signature → execution signed by your wallet after the service validated the exact plan → recovery if anything is interrupted → the Payment Passport → verification you can run anywhere. You pay the check fee, the order amount and the gas of your own payment from your wallet{net?.network === "testnet" ? " — testnet USDC, from the faucet" : ""}.</p>
+            <p className="muted small" style={{ maxWidth: 760 }}>Seven steps with your own wallet: order → approval → check → execute → recover → passport → verify. You pay the check fee, the order amount and your gas{net?.network === "testnet" ? " — testnet USDC from the faucet" : ""}.</p>
           </div>
           {order && <button className="btn sm ghost" onClick={resetAll} title="forget this browser's workflow identity for this wallet; the server records stay in My workflow">start over</button>}
         </div>
         <Lifecycle stages={stages} onPick={jump} />
-        {TEST_WALLET_BUILD && testWallet && <div className="banner">A local test wallet is injected as <code>window.ethereum</code> (automated self-test build). Open with <code>?testwallet=off</code> to remove it and use a real wallet.</div>}
+        {TEST_WALLET_BUILD && testWallet && <div className="banner">Self-test build: a local test wallet is injected as <code>window.ethereum</code>. Open with <code>?testwallet=off</code> to use a real wallet.</div>}
 
         {/* gates: the instance, the wallet, the chain */}
         {net && !fixturesDeployed && <div className="banner" role="status">{describeBody({ error: "DEMO_UNAVAILABLE", reason: `fixtures are not deployed on ${netLabel}` }).text} Orders, checks and execution live on the testnet instance.{otherTestnet && <> <button className="btn sm" onClick={() => select("testnet")}>switch to Arc testnet</button></>}</div>}
-        {net && fixturesDeployed && gated && <div className="banner info" role="status">Execution is gated on this instance — it opens after the mainnet acceptance is recorded. Orders, checks, My workflow, passports and verification stay available here.{otherTestnet && <> <button className="btn sm" onClick={() => select("testnet")}>use the testnet instance to execute</button></>}</div>}
+        {net && fixturesDeployed && gated && <div className="banner info" role="status">Execution is gated on this instance until the mainnet acceptance is recorded. Orders, checks, My workflow, passports and verification work here.{otherTestnet && <> <button className="btn sm" onClick={() => select("testnet")}>use the testnet instance to execute</button></>}</div>}
         <div className="panel soft row between" style={{ gap: 14, alignItems: "center" }}>
           {!account ? (<>
-            <div className="stack" style={{ gap: 2 }}><b>Connect a wallet to start.</b><span className="small muted">Any EIP-1193 wallet — MetaMask, OKX Wallet, Rabby, Coinbase Wallet, Brave (picker when several are installed). Connecting is read-only; you sign only where a step says so.</span></div>
+            <div className="stack" style={{ gap: 2 }}><b>Connect a wallet to start.</b><span className="small muted">MetaMask, OKX Wallet, Rabby, Coinbase Wallet, Brave… Connecting is read-only; you sign only where a step says so.</span></div>
             <button className="btn primary" onClick={() => w.connect()} disabled={w.connecting}>{w.connecting ? <Spinner /> : "Connect wallet"}</button>
           </>) : (
             <div className="stack" style={{ gap: 6, width: "100%" }}>
               <div className="row" style={{ gap: 10, alignItems: "center" }}>
                 <Hex value={account} n={6} link={explorerAddr(net, account)} />{w.isTest && <Chip tone="warn">test wallet</Chip>}{w.info && <span className="tiny dim">{w.info.name}</span>}
                 {onArc ? <Chip tone="ok">{netLabel} · {w.chainId}</Chip> : <><Chip tone="warn">chain {w.chainId ?? "?"}</Chip><button className="btn sm" onClick={() => net && w.switchChain(net)}>Switch to {netLabel} ({net?.chainId})</button></>}
-                <span className="small muted">native USDC {bal.native !== null ? usdcNative(bal.native, 4) : "…"} <span className="tiny dim">(18-dec, pays gas and the order)</span> · ERC-20 face {bal.erc20 !== null ? usdcToken(bal.erc20) : "…"}</span>
+                <span className="small muted" title="one balance, two faces: the 18-decimal native USDC pays gas and the order; the ERC-20 face shows 6 decimals">USDC {bal.native !== null ? usdcNative(bal.native, 4) : "…"} <span className="tiny dim">· ERC-20 face {bal.erc20 !== null ? usdcToken(bal.erc20) : "…"}</span></span>
                 <button className="btn sm ghost" style={{ marginLeft: "auto" }} onClick={() => void w.disconnect()}>disconnect</button>
               </div>
-              <p className="tiny dim" role="note">{session ? <>session <code>{session.principal}</code></> : <>no session yet — the first paid action creates one</>} · your browser holds an anonymous session — it owns the orders, checks and attempts you make here (history, recovery, passports); clearing site data loses it · the workflow shown is this account's; another account's items stay listed under My workflow</p>
+              <p className="tiny dim" role="note">{session ? <>session <code>{session.principal}</code></> : <>no session yet — the first paid action creates one</>} · your browser holds an anonymous session that owns your orders, checks and attempts; clearing site data loses it · other accounts' items stay listed under My workflow</p>
               {stage <= 2 && <FaucetCard net={net} wallet={w} balance={bal.native} required={faucetRequired} step={faucetStep} needs={faucetNeeds} onClaimed={refreshBal} />}
             </div>
           )}
@@ -397,9 +397,11 @@ export default function Developer() {
           <StepSection n={1} id="step-1" title="Create order" status={stages[0].status} open={isStepOpen(1)} onToggle={() => toggle(1)}
             summary={order && <>order <Hex value={order.orderId} n={5} /> · {nativeAtomicToUsdcText(order.amountNativeAtomic)} USDC{order.tx && <> · tx <Hex value={order.tx} n={4} link={explorerTx(net, order.tx)} /></>} · <Chip tone={order.paid === true ? "ok" : "neutral"}>{order.paid === true ? "paid" : "unpaid"}</Chip></>}>
             {!order ? (<>
-              <p className="small muted">A <b>demonstration order</b> on the project's DemoMerchant contract — no goods or services are delivered; you get a pinned report, the payment outcome read from the chain and a verifiable passport. {adminInProcess
-                ? <>This deployment creates orders with the <code>deployer-admin</code> key <Chip tone="warn">admin key in process</Chip> — a fallback the release target does not use; the API flags it in <code>/v1/network</code>.</>
-                : <>The merchant's <code>order-creator</code> role — a key that can only create orders, never upgrade, pause or withdraw —</>} creates an order payable only by your address. Amount {nativeAtomicToUsdcText(limits.minNativeAtomic)}–{nativeAtomicToUsdcText(limits.maxNativeAtomic)} USDC, an optional reference; the order's identity is recorded before the creation transaction is sent.</p>
+              <p className="small muted">A <b>demonstration order</b> on the project's DemoMerchant — nothing is delivered. Payable only by your wallet, {nativeAtomicToUsdcText(limits.minNativeAtomic)}–{nativeAtomicToUsdcText(limits.maxNativeAtomic)} USDC, optional reference.</p>
+              <p className="small muted">{adminInProcess
+                ? <>Created with the <code>deployer-admin</code> key <Chip tone="warn">admin key in process</Chip> — a fallback the release target does not use.</>
+                : <>Created by the merchant's <code>order-creator</code> role — a key that can only create orders, never upgrade, pause or withdraw.</>}</p>
+              <details className="why"><summary className="tiny">why an order first</summary><p className="small muted">You get a pinned report, the payment outcome read from the chain and a verifiable passport. The order's identity is recorded before its creation transaction is sent; the operator pays that gas.</p></details>
               <div className="row"><button className="btn primary" disabled={!account || !onArc || !fixturesDeployed || !!busy} onClick={() => setDialog(true)}>Create order…</button>{myOrders.length > 0 && <span className="tiny dim">or pick one of your {myOrders.length} orders in step 5</span>}</div>
             </>) : <OrderCard order={order} net={net} feeTokenAtomic={net?.priceTokenAtomic ?? null} onRefresh={() => void refreshOrder()} busy={!!busy} />}
           </StepSection>
@@ -417,15 +419,15 @@ export default function Developer() {
                 </div>
                 <div className="kv w150">
                   <span className="k">your policy</span><span className="small">sender = your wallet · target = this merchant · selector <code>pay(bytes32)</code> · max payment {nativeAtomicToUsdcText(order.amountNativeAtomic)} USDC · max check fee 0.01 USDC · max gas 0.002 USDC</span>
-                  <span className="k">freshness</span><span className="small">report usable for {Math.round(WALLET_REPORT_AGE_SECONDS / 60)} min after its pinned observation · validation window {WALLET_VALIDATION_WINDOW_SECONDS} s once you press execute (human-paced wallet prompt; the service re-reads the critical state at a fresh block before anything is sent)</span>
+                  <span className="k">freshness</span><span className="small" title="the service re-reads the critical state at a fresh block before anything is sent">report usable {Math.round(WALLET_REPORT_AGE_SECONDS / 60)} min after its pinned observation · validation window {WALLET_VALIDATION_WINDOW_SECONDS} s after you press execute</span>
                   <span className="k">required signals</span><span className="small">PROXY_TEMPLATE_VERIFIED · SUPPORTED_STATE_ORDER_PAYABLE · CALL_SIMULATION</span>
                   <span className="k">on unknown · on change</span><span className="small">REVIEW_REQUIRED · REVIEW_REQUIRED · type-2 only · no authorization list</span>
-                  <span className="k">policyDigest</span><span>{pDigest ? <Hex value={pDigest} n={8} /> : "—"} <span className="tiny dim">travels inside the intent; the server checks exactly this digest when it validates your attempt</span></span>
+                  <span className="k">policyDigest</span><span>{pDigest ? <Hex value={pDigest} n={8} /> : "—"} <span className="tiny dim">checked by the server when it validates your attempt</span></span>
                 </div>
               </div>
               <div className="row" style={{ gap: 10, alignItems: "center" }}>
                 <button className="btn primary" disabled={approved} onClick={approve}>{approved ? "Approved ✓" : "Approve & continue"}</button>
-                <span className="tiny dim">no server call — this records that you consciously approve what will be checked and executed</span>
+                <span className="tiny dim">no server call — records your conscious approval of what will be checked and executed</span>
                 <details style={{ marginLeft: "auto" }}><summary className="tiny">policy JSON</summary><pre className="json">{JSON.stringify(policy, null, 2)}</pre></details>
               </div>
             </>)}
@@ -436,8 +438,8 @@ export default function Developer() {
             summary={(delivered || attempt) && <>{attempt ? <DecisionBadge decision={attempt.decision} size="sm" /> : decision ? <DecisionBadge decision={decision.decision} size="sm" /> : null}{delivered?.serviceFeeTx && <> · fee <Hex value={delivered.serviceFeeTx} n={4} link={explorerTx(net, delivered.serviceFeeTx)} /></>}{check && <> · request <code>{check.requestId.slice(0, 8)}</code></>}</>}>
             {!approved ? <p className="dim small">approve the policy first</p> : (<>
               <div className="row between" style={{ gap: 10 }}>
-                <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={unitMistake} disabled={!!busy} onChange={(e) => { setUnitMistake(e.target.checked); setCheck(null); setAttempt(null); setExec(IDLE); }} /> encode the value in 6-decimal units (the classic Arc mistake → BLOCKED)</label>
-                <span className="tiny dim">quote free · report {net ? usdcToken(net.priceTokenAtomic) : "0.01 USDC"} paid with one EIP-3009 signature from your wallet · a 402 in the console is the x402 price quote, not an error</span>
+                <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={unitMistake} disabled={!!busy} onChange={(e) => { setUnitMistake(e.target.checked); setCheck(null); setAttempt(null); setExec(IDLE); }} /> encode the value in 6-decimal units — the classic Arc mistake → BLOCKED</label>
+                <span className="tiny dim">quote free · report {net ? usdcToken(net.priceTokenAtomic) : "0.01 USDC"} with one EIP-3009 signature from your wallet · a 402 in the console is the x402 price quote, not an error</span>
               </div>
               <div className="row">
                 <button className="btn" disabled={!devOrder || !!busy || !onArc} onClick={getQuote}>{busy === "quote" ? <Spinner /> : "Get quote (HTTP 402)"}</button>
@@ -447,22 +449,22 @@ export default function Developer() {
               {stage === 3 && <FaucetCard net={net} wallet={w} balance={bal.native} required={budgetBuy.required} step="buying the report" onClaimed={refreshBal} />}
               {check?.quote && <div className="small muted">quote {usdcToken(check.quote.response.quote.amountTokenAtomic)} → payTo <Hex value={check.quote.response.quote.payTo} n={5} /> · report pinned at #{check.quote.response.pinnedBlock} · expires {utc(check.quote.response.quote.expiresAt)} · request <code>{check.requestId}</code>{delivered ? " · purchased" : !quoteOk && " · expired; request a new quote"}</div>}
               {delivered && (<>
-                <div className="small muted">fee settled on Arc by ArcPreflight's relayer: {delivered.serviceFeeTx ? <Hex value={delivered.serviceFeeTx} link={explorerTx(net, delivered.serviceFeeTx)} /> : "—"} · report digest recomputed here and bound to your intent ✓ · pinned #{delivered.report.observation.blockNumber}{freshLeft !== null && <> · <Chip tone={freshLeft > 60 ? "info" : "warn"}>{freshLeft > 0 ? `usable for ${Math.floor(freshLeft / 60)}:${String(freshLeft % 60).padStart(2, "0")}` : "report expired — get a new quote and buy again"}</Chip></>}</div>
+                <div className="small muted">fee settled by the project's relayer: {delivered.serviceFeeTx ? <Hex value={delivered.serviceFeeTx} link={explorerTx(net, delivered.serviceFeeTx)} /> : "—"} · digest recomputed here, bound to your intent ✓ · pinned #{delivered.report.observation.blockNumber}{freshLeft !== null && <> · <Chip tone={freshLeft > 60 ? "info" : "warn"}>{freshLeft > 0 ? `usable for ${Math.floor(freshLeft / 60)}:${String(freshLeft % 60).padStart(2, "0")}` : "report expired — get a new quote and buy again"}</Chip></>}</div>
                 {decision && !attempt && (
                   <div className="two" style={{ gap: 20 }}>
                     <div className="stack" style={{ gap: 8 }}>
                       <DecisionBadge decision={decision.decision} />
                       {decision.reasons.length > 0 && <ul className="list small">{decision.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
-                      <p className="tiny dim">deterministic policy from <code>@arcpreflight/policy</code>, run in this browser from the delivered bytes: hard violations block; unapproved change or unknowns require review; otherwise "no configured check fired" — never "safe"</p>
+                      <details className="why"><summary className="tiny">how this was decided</summary><p className="tiny dim">deterministic policy from <code>@arcpreflight/policy</code>, run in this browser from the delivered bytes: hard violations block; unapproved change or unknowns require review; otherwise "no configured check fired" — never "safe"</p></details>
                     </div>
                     <div className="tablewrap fit"><table className="t"><tbody>{decision.checks.map((c) => <tr key={c.id}><td className="mono small">{c.id}</td><td className="fit"><Chip tone={decisionTone(c.outcome)}>{c.outcome}</Chip></td></tr>)}</tbody></table></div>
                   </div>
                 )}
                 {attempt && (
                   <div className="stack" style={{ gap: 8 }}>
-                    <div className="row" style={{ gap: 10, alignItems: "baseline" }}><DecisionBadge decision={attempt.decision} /><span className="tiny dim">recorded for attempt <code>{attempt.attemptId.slice(0, 8)}</code> at validation time (server-side, same deterministic function)</span></div>
+                    <div className="row" style={{ gap: 10, alignItems: "baseline" }}><DecisionBadge decision={attempt.decision} /><span className="tiny dim">recorded for attempt <code>{attempt.attemptId.slice(0, 8)}</code> at validation (server-side, same function)</span></div>
                     {attempt.decisionReasons.length > 0 && <ul className="list small">{attempt.decisionReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
-                    {decision && decision.decision !== attempt.decision && <details><summary className="tiny">re-evaluated now in this browser: {decision.decision.replace(/_/g, " ").toLowerCase()} — the report has aged past the policy's {policy?.maxReportAgeSeconds ?? 60} s; a new payment needs a new check</summary><ul className="list small">{decision.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul></details>}
+                    {decision && decision.decision !== attempt.decision && <details><summary className="tiny">re-evaluated now: {decision.decision.replace(/_/g, " ").toLowerCase()} — the report aged past {policy?.maxReportAgeSeconds ?? 60} s; a new payment needs a new check</summary><ul className="list small">{decision.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul></details>}
                   </div>
                 )}
                 <details><summary className="small">the pinned report</summary><div style={{ marginTop: 8 }}><ReportView report={delivered.report} digest={delivered.digest} net={net} compact /></div></details>
@@ -475,11 +477,12 @@ export default function Developer() {
           <StepSection n={4} id="step-4" title="Execute with your wallet" status={stages[3].status} open={isStepOpen(4)} onToggle={() => toggle(4)}
             summary={attempt && <><Chip tone={stateTone(attempt.state)}>{attempt.state.replace(/_/g, " ").toLowerCase()}</Chip>{(attempt.businessTxHash ?? attempt.txHash) && <> · tx <Hex value={attempt.businessTxHash ?? attempt.txHash!} n={4} link={explorerTx(net, attempt.businessTxHash ?? attempt.txHash!)} /></>}{attempt.businessStatus && <> · order {attempt.businessStatus === "SUCCESS" ? "paid" : attempt.businessStatus.toLowerCase().replace(/_/g, " ")}</>}{ambiguous && <> · <Chip tone="warn">{exec.phase === "unknown-submission" ? "wallet answer unexplained" : "submission uncertain"}</Chip></>}</>}>
             {gated ? <div className="banner info">Gated on this instance — execution opens after the mainnet acceptance. {otherTestnet ? <button className="btn sm" onClick={() => select("testnet")}>use the testnet instance</button> : null} Everything else in this workflow works here.</div> : (<>
-              <p className="small muted">The service re-validates your exact plan at a fresh pinned block — implementation vs the referenced approval, pause, exact-call simulation, balance, fees, nonce, your account carries no code — and records the attempt <code>VALIDATED</code> with its plan <em>before</em> your wallet is asked. Right before the prompt this page re-reads your wallet's account and chain and the time left in the window; a mismatch stops without prompting. Your wallet signs exactly that plan (to, data, value, type 2; gas or nonce it sets are recorded as deviations); the hash is reported; the outcome is read from the receipt and the order state. Window {WALLET_VALIDATION_WINDOW_SECONDS} s.</p>
+              <p className="small muted">The service validates your exact plan at a fresh pinned block and records the attempt <code>VALIDATED</code> <em>before</em> your wallet is asked. Your wallet signs exactly that plan; the outcome is read from the receipt and the order state. Window {WALLET_VALIDATION_WINDOW_SECONDS} s.</p>
+              <details className="why"><summary className="tiny">what is re-checked before the prompt</summary><p className="small muted">Implementation vs the referenced approval, pause, exact-call simulation, balance, fees, nonce, and that your account carries no code. Right before the prompt the page re-reads your account, your chain and the time left; a mismatch stops without prompting. Gas or nonce your wallet sets are recorded as deviations.</p></details>
               <div className="row" style={{ gap: 10, alignItems: "center" }}>
                 <button className="btn primary" disabled={!executable || !onArc || !!busy || executing || attemptOpen || !w.provider || budgetExec.enough === false} title={execDisabledWhy} onClick={execute}>{executing ? <><Spinner /> {exec.phase === "unknown-submission" || exec.phase === "uncertain" ? "reconciling" : exec.phase}…</> : "Execute with your wallet"}</button>
                 {checkStopped && <span className="small muted">nothing to execute: the check decided <code>{decision?.decision ?? attempt?.decision}</code></span>}
-                {executable && !attemptOpen && !executing && freshLeft !== null && budgetExec.enough !== false && <span className="tiny dim">execute within {Math.floor(freshLeft / 60)}:{String(freshLeft % 60).padStart(2, "0")} — the report ages out after that and a new check is needed</span>}
+                {executable && !attemptOpen && !executing && freshLeft !== null && budgetExec.enough !== false && <span className="tiny dim">execute within {Math.floor(freshLeft / 60)}:{String(freshLeft % 60).padStart(2, "0")} — then the report ages out and a new check is needed</span>}
                 {executable && budgetExec.enough === false && !attemptOpen && <span className="tiny" style={{ color: "var(--amber)" }} role="status" data-testid="budget-exec">{budgetExec.sentence}</span>}
                 {!executable && !checkStopped && (!attempt || expired) && execDisabledWhy && <span className="tiny dim">{execDisabledWhy}</span>}
                 {expired && <button className="btn sm" disabled={!!busy || !onArc} onClick={() => { jump("check"); getQuote(); }}>Re-run the check ({net ? usdcToken(net.priceTokenAtomic) : "0.01 USDC"})</button>}
@@ -493,7 +496,8 @@ export default function Developer() {
           <StepSection n={5} id="step-5" title="Recover · My workflow" status={stages[4].status} open={isStepOpen(5)} onToggle={() => toggle(5)}
             summary={mine.loaded && <span className="tiny dim">{myAttempts.length} attempt{myAttempts.length === 1 ? "" : "s"} · {myOrders.length} order{myOrders.length === 1 ? "" : "s"} for this wallet{otherAttempts.length + otherOrders.length > 0 ? ` · ${otherAttempts.length + otherOrders.length} from other wallets in this browser` : ""}</span>}
             aside={<button className="btn sm ghost" disabled={mine.busy} onClick={() => { void loadMine(); void loadChecks(); }}>{mine.busy ? <Spinner /> : "refresh"}</button>}>
-            <p className="small muted">Recovery reads the hash, the order state and the merchant's <code>OrderPaid</code> event; it never re-signs or re-sends. An attempt left <code>VALIDATED</code> or <code>BROADCAST_ATTEMPTED</code> after a refresh is listed here and can be continued, abandoned or recovered — except one whose wallet prompt was already opened: it is reconciled from the order state and never handed to the wallet again; "I rejected it — abandon" is your explicit statement that nothing was signed. Reads only; the recovery worker does the same every 30 s.</p>
+            <p className="small muted">Recovery reads the hash, the order state and the merchant's <code>OrderPaid</code> event; it never re-signs or re-sends.</p>
+            <details className="why"><summary className="tiny">open attempts after a refresh</summary><p className="small muted">An attempt left <code>VALIDATED</code> or <code>BROADCAST_ATTEMPTED</code> is listed here: continue, abandon or recover it. One whose wallet prompt was already opened is reconciled from the order state and never handed to the wallet again; "I rejected it — abandon" is your explicit statement that nothing was signed. The recovery worker does the same every 30 s.</p></details>
             <ErrorBanner err={mine.err} />
             {!session && <p className="dim small">no session yet — the first paid action creates one for this browser</p>}
             {(myAttempts.length > 0 || remembered.length > 0) && (
@@ -539,7 +543,7 @@ export default function Developer() {
             {session && mine.loaded && myOrders.length === 0 && myAttempts.length === 0 && !mine.err && <p className="dim small">no orders or attempts yet for this wallet in this browser's session</p>}
             {(otherAttempts.length > 0 || otherOrders.length > 0 || otherSaved.length > 0) && (
               <details className="others" data-testid="other-wallets" open={!order}>
-                <summary className="small">Other wallets in this browser — {otherAttempts.length} attempt{otherAttempts.length === 1 ? "" : "s"} · {otherOrders.length} order{otherOrders.length === 1 ? "" : "s"} <span className="tiny dim">(this session owns them; read-only here — recover and abandon stay possible; connect that wallet to continue its workflow)</span></summary>
+                <summary className="small">Other wallets in this browser — {otherAttempts.length} attempt{otherAttempts.length === 1 ? "" : "s"} · {otherOrders.length} order{otherOrders.length === 1 ? "" : "s"} <span className="tiny dim">(read-only here — recover and abandon stay possible; connect that wallet to continue)</span></summary>
                 <div className="stack" style={{ gap: 8, marginTop: 8 }}>
                   {otherSaved.map((s) => <p key={s.payer} className="tiny dim">saved workflow for <Hex value={s.payer} n={4} /> — order <Hex value={s.orderId} n={4} />{s.attemptId ? <> · attempt <code>{s.attemptId.slice(0, 8)}</code></> : null} · connect that wallet to continue it</p>)}
                   {otherAttempts.length > 0 && (
@@ -581,7 +585,7 @@ export default function Developer() {
             <details id="my-checks">
               <summary className="small">My checks — fee history ({checks.rows.length})</summary>
               <div className="stack" style={{ gap: 8, marginTop: 8 }}>
-                <p className="tiny dim">every check this browser's session bought, as the server records it: "refresh" re-reads the payment state; "Run recovery" re-examines an accepted fee authorization that is still unsettled (one authorization nonce can never pay twice); "Passport" exports the private passport of a delivered report</p>
+                <p className="tiny dim">every check this session bought · refresh re-reads the payment state · Run recovery re-examines an unsettled fee authorization (one nonce never pays twice) · Passport exports a delivered check's private passport</p>
                 {session && checks.loaded && checks.rows.length === 0 && !checks.err && <p className="dim small">no checks yet in this browser's session</p>}
                 <ErrorBanner err={checks.err} />
                 {checks.rows.length > 0 && (
@@ -612,10 +616,10 @@ export default function Developer() {
           {/* 6 · passport */}
           <StepSection n={6} id="step-6" title="Export the Payment Passport" status={stages[5].status} open={isStepOpen(6)} onToggle={() => toggle(6)}
             summary={passport && <><code>{passport.name}</code> · <Chip tone="ok">{passport.kind === "attempt" ? "wallet-run · private" : "paid-check · private"}</Chip></>}>
-            <p className="small muted">{passportSource === "attempt" ? <>The private passport of this attempt (<code>wallet-run</code>, execution mode <code>wallet</code>): approval, intent, pinned report, decision, final validation and plan, execution record, cost statement, recovery summary, raw evidence — no signature, no key.</> : passportSource === "check" ? <>No attempt was executed; the private passport of the delivered check (<code>paid-check</code>) still packages the approval, the intent, the pinned report and the fee settlement.</> : <>Available once a check is delivered or an attempt has finished or stopped.</>}</p>
+            <p className="small muted">{passportSource === "attempt" ? <>Private passport of this attempt (<code>wallet-run</code>): approval, intent, report, decision, validation and plan, execution, costs, recovery, evidence — no signature, no key.</> : passportSource === "check" ? <>No attempt was executed; the delivered check's private passport (<code>paid-check</code>) packages the approval, intent, pinned report and fee settlement.</> : <>Available once a check is delivered or an attempt has finished or stopped.</>}</p>
             <div className="row" style={{ gap: 10, alignItems: "center" }}>
               <button className="btn primary" disabled={!passportSource || !!busy || (attempt ? attempt.state === "VALIDATED" && insideWindow(attempt, now) : false)} onClick={download}>{busy === "passport" ? <><Spinner /> exporting…</> : passport ? "Download again" : "Download Payment Passport"}</button>
-              {attempt && attempt.state === "VALIDATED" && insideWindow(attempt, now) && <span className="tiny dim">the attempt is waiting for your wallet; a passport is exported from a finished or stopped workflow</span>}
+              {attempt && attempt.state === "VALIDATED" && insideWindow(attempt, now) && <span className="tiny dim">available once the attempt has finished or stopped</span>}
               {passport && <span className="tiny dim">saved as <code>{passport.name}</code> · {Object.keys((passport.bundle as any).files ?? {}).length} files</span>}
             </div>
           </StepSection>
@@ -623,7 +627,7 @@ export default function Developer() {
           {/* 7 · verify */}
           <StepSection n={7} id="step-7" title="Verify independently" status={stages[6].status} open={isStepOpen(7)} onToggle={() => toggle(7)}
             summary={verification && <Chip tone={verification === "passed" ? "ok" : verification === "failed" ? "bad" : "warn"}>{verification === "passed" ? "passed in this browser (no FAIL, no UNVERIFIED)" : verification === "failed" ? "FAILED in this browser" : "partially verified — unverified findings"}</Chip>}>
-            <p className="small muted">The verifier (<code>packages/verifier</code>) runs here on the downloaded bundle against <code>{net?.rpc ?? "the Arc RPC"}</code>. The anchors below are this site's own digests — a consistency check, labelled as such; for independence run the CLI with anchors you kept yourself. A run is "passed" only when no finding is FAIL and none is UNVERIFIED.</p>
+            <p className="small muted">The verifier runs here on the downloaded bundle against <code>{net?.rpc ?? "the Arc RPC"}</code>, with this site's digests as anchors — a consistency check, not independence; the CLI with your own anchors is. "Passed" means no finding is FAIL or UNVERIFIED.</p>
             <VerifyInBrowser bundle={passport?.bundle ?? null} name={passport?.name ?? null} net={net} anchors={anchors} anchorsSource="site" onVerified={(_r, s) => setVerification(s.kind)} />
           </StepSection>
         </div>

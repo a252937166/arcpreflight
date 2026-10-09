@@ -12,17 +12,17 @@ import { parseDigests } from "../lib/verifyInBrowser";
 import { describeError } from "../lib/errors";
 
 export const FINDINGS = [
-  { id: "FILE_INTEGRITY", needs: "passport", plain: "every file the manifest lists is present and unchanged (sha256), nothing unlisted was slipped in, and every path obeys the format's rules" },
-  { id: "DIGEST_INTEGRITY", needs: "passport", plain: "each core record re-hashes under its named digest profile to the digest the other records point at — intent → report → decision → final validation → execution all link up" },
-  { id: "DISCLOSURE", needs: "passport", plain: "no private key, no fee-authorization signature and no signed transaction bytes are inside the export" },
-  { id: "APPROVAL_SOURCE", needs: "anchors", plain: "the baseline and policy in the passport are the ones you trust — compared with digests you kept through a separate channel; without anchors this stays UNVERIFIED (a rewritten passport with fresh hashes is not proof of the original approval)" },
-  { id: "APPROVAL_COVERAGE", needs: "passport", plain: "which approval applied at execution: intent, decision, final validation and execution reference the same baseline, and its revocation state at final validation is recorded or explicitly marked as not retained" },
-  { id: "NETWORK_IDENTITY", needs: "RPC", plain: "the RPC you supply serves the chain the passport names; otherwise every online check is skipped as UNVERIFIED" },
-  { id: "FEE_ATTRIBUTION", needs: "RPC", plain: "the check-fee transaction exists, succeeded, targets the USDC contract and carries AuthorizationUsed + Transfer for exactly the recorded authorization; a direct USDC call must equal the recorded authorization in every field" },
-  { id: "TRANSACTION_PLAN_AGREEMENT", needs: "RPC", plain: "the business transaction fetched by hash equals the validated plan: every field in runner mode; in wallet mode chain, type, from, to, calldata and value must match while wallet-set gas, fees and nonce are reported as deviations" },
-  { id: "ORDER_OUTCOME", needs: "RPC", plain: "the receipt succeeded, the merchant emitted OrderPaid for this order, and the order read at that block is paid by that payer for that amount; history the RPC cannot serve is UNVERIFIED, never FAIL" },
-  { id: "COST_STATEMENT", needs: "RPC", plain: "the whole statement is recomputed from the passport's records and the receipts and compared field by field" },
-  { id: "CURRENT_ELIGIBILITY", needs: "—", plain: "always NOT_EVALUATED: whether a new payment may execute now is a present-time question, never inferred from historical success" },
+  { id: "FILE_INTEGRITY", needs: "passport", plain: "every listed file is present and unchanged (sha256); nothing unlisted; every path obeys the format" },
+  { id: "DIGEST_INTEGRITY", needs: "passport", plain: "each core record re-hashes to the digest the next one points at: intent → report → decision → final validation → execution" },
+  { id: "DISCLOSURE", needs: "passport", plain: "no private key, fee-authorization signature or signed transaction bytes inside the export" },
+  { id: "APPROVAL_SOURCE", needs: "anchors", plain: "the baseline and policy match digests you kept separately; without anchors it stays UNVERIFIED — fresh hashes prove no original approval" },
+  { id: "APPROVAL_COVERAGE", needs: "passport", plain: "intent, decision, final validation and execution reference the same approval; its revocation state at validation is recorded or marked not retained" },
+  { id: "NETWORK_IDENTITY", needs: "RPC", plain: "your RPC serves the chain the passport names; otherwise every online check is UNVERIFIED" },
+  { id: "FEE_ATTRIBUTION", needs: "RPC", plain: "the fee transaction exists, succeeded, targets USDC and carries AuthorizationUsed + Transfer for exactly the recorded authorization" },
+  { id: "TRANSACTION_PLAN_AGREEMENT", needs: "RPC", plain: "the business transaction equals the validated plan — every field in runner mode; in wallet mode chain, type, from, to, calldata and value, with wallet-set gas, fees and nonce reported as deviations" },
+  { id: "ORDER_OUTCOME", needs: "RPC", plain: "the receipt succeeded, OrderPaid was emitted for this order, and the order read at that block is paid by that payer for that amount; unavailable history is UNVERIFIED, never FAIL" },
+  { id: "COST_STATEMENT", needs: "RPC", plain: "the whole statement is recomputed from the records and receipts, field by field" },
+  { id: "CURRENT_ELIGIBILITY", needs: "—", plain: "always NOT_EVALUATED: whether a payment may execute now is a present-time question" },
 ] as const;
 
 const tone = (s: string) => (s === "PASS" ? "ok" : s === "FAIL" ? "bad" : "warn");
@@ -54,7 +54,7 @@ export default function Verify() {
         <div className="stack" style={{ gap: 10 }}>
           <div className="kicker">Verify independently · {net?.network === "mainnet" ? "Arc mainnet" : "Arc testnet"}</div>
           <h2>Take the proof with you. <em>Check it somewhere else.</em></h2>
-          <p className="muted" style={{ maxWidth: 760 }}>A Payment Passport packages what was approved, what was sent, what settled, and the evidence — files another process can inspect with an Arc RPC and the approval digests you kept yourself. Not a token, not a guarantee, not proof that an offchain service was delivered; importing one never grants signing authority.</p>
+          <p className="muted" style={{ maxWidth: 760 }}>A Payment Passport packages what was approved, sent and settled, with the evidence. Not a token, not a guarantee, not proof of service delivery; importing one grants no signing authority.</p>
           {runId && <p className="small"><Chip tone="info">run #{runId.slice(0, 8)}</Chip> download its passport from the run page, then verify it below or with the CLI.</p>}
         </div>
 
@@ -63,7 +63,7 @@ export default function Verify() {
           <label className={`dropzone ${over ? "over" : ""}`} onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}>
             <input className="visually-hidden" type="file" accept="application/json,.json" onChange={onFile} aria-label="passport bundle" />
             <span className="btn sm" aria-hidden="true">Choose passport file…</span>
-            <span className="small muted">{name ?? "or drop an arcpreflight-…passport….json here (demo-run, wallet-run or paid-check)"}</span>
+            <span className="small muted">{name ?? "or drop an arcpreflight-…passport….json here"}</span>
           </label>
           {err && <div className="banner bad">{err}</div>}
         </div>
@@ -71,7 +71,7 @@ export default function Verify() {
         <div className="two" style={{ gap: 44, alignItems: "start" }}>
           <div className="stack" style={{ gap: 12 }}>
             <h3>2 · Offline integrity preview</h3>
-            <p className="small muted"><b style={{ color: "var(--ink)" }}>This preview runs the same code as the site; for independence run the CLI in a clean process.</b> It checks paths, the sha256 of every file and the core object digests — nothing online.</p>
+            <p className="small muted"><b style={{ color: "var(--ink)" }}>This preview runs the same code as the site; for independence run the CLI in a clean process.</b> Paths, sha256 of every file, core digests — nothing online.</p>
             {preview && (
               <div className="stack fade" style={{ gap: 10 }}>
                 <div className="row" style={{ gap: 8, alignItems: "baseline" }}>
@@ -94,14 +94,14 @@ export default function Verify() {
                     <tbody>{preview.findings.map((f, i) => <tr key={i}><td className="small"><code style={{ overflowWrap: "anywhere" }}>{f.path}</code></td><td className="tiny dim hide-narrow">{f.check}</td><td><Chip tone={tone(f.status)}>{f.status}</Chip></td><td className="small muted" style={{ overflowWrap: "anywhere" }}>{f.detail}</td></tr>)}</tbody>
                   </table></div>
                 </details>
-                <p className="tiny dim">Counts, not a verdict. The online findings and the anchor check run in step 3 or with the CLI.</p>
+                <p className="tiny dim">Counts, not a verdict. Online findings and anchors: step 3 or the CLI.</p>
               </div>
             )}
             {!preview && <p className="dim small">load a passport to preview it</p>}
           </div>
           <div className="stack" style={{ gap: 12 }}>
             <h3>3 · Run the verifier here (online)</h3>
-            <p className="small muted">The real verifier, in this tab, against <code>{rpc}</code>. Anchors are the digests <em>you</em> kept when you approved the baseline and wrote the policy — paste them below. Filling them from this site is a consistency check, not independence, and is labelled as such.</p>
+            <p className="small muted">The real verifier, in this tab, against <code>{rpc}</code>. Anchors are the digests <em>you</em> kept when you approved the baseline and wrote the policy; filling them from this site is a consistency check, not independence.</p>
             <div className="field"><label htmlFor="anc-b">baseline digests <span className="tiny dim">one per line or comma-separated</span></label><textarea id="anc-b" className="input mono" rows={2} value={anchorText.baseline} onChange={(e) => { setAnchorText((a) => ({ ...a, baseline: e.target.value })); setSiteFilled(false); }} placeholder="0x…" /></div>
             <div className="field"><label htmlFor="anc-p">policy digests</label><textarea id="anc-p" className="input mono" rows={2} value={anchorText.policy} onChange={(e) => { setAnchorText((a) => ({ ...a, policy: e.target.value })); setSiteFilled(false); }} placeholder="0x…" /></div>
             <div className="row"><button className="btn sm ghost" onClick={fillFromSite} disabled={!net?.fixtures?.some((f) => f.baselineDigest)}>fill baseline digests from this site (not independent)</button></div>
@@ -113,22 +113,22 @@ export default function Verify() {
         <div className="two" style={{ gap: 44, alignItems: "start" }}>
           <div className="stack" style={{ gap: 12 }}>
             <h3>4 · Or in a clean process (independent)</h3>
-            <p className="small muted">No application credentials, no database, no signing key. Supply the passport, an explicitly configured Arc RPC, and the approval anchors you retained through a trusted channel (never taken from the passport itself).</p>
+            <p className="small muted">No credentials, no database, no signing key: the passport, an Arc RPC you configure, and anchors you kept through a trusted channel.</p>
             <pre className="json selectable">{`git clone --recurse-submodules https://github.com/a252937166/arcpreflight && cd arcpreflight && pnpm install
 pnpm exec tsx packages/verifier/src/cli.ts <passport.json> --rpc ${rpc} --anchors anchors.json
 # offline (digests only):   pnpm exec tsx packages/verifier/src/cli.ts <passport.json>
 # machine-readable output:  … --json      exit 0 = no FAIL finding, 2 = a finding FAILED`}</pre>
             <pre className="json selectable">{`{ "baselineDigests": ["0x…"], "policyDigests": ["0x…"] }   # anchors.json — the digests you trust`}</pre>
-            <p className="small muted">Mainnet RPC <code>https://rpc.mainnet.arc.io</code> (chain 5042) · testnet <code>https://rpc.testnet.arc.io</code> (chain 5042002). The verifier refuses to use evidence from a chain other than the one the passport names.</p>
+            <p className="small muted">Mainnet RPC <code>https://rpc.mainnet.arc.io</code> (5042) · testnet <code>https://rpc.testnet.arc.io</code> (5042002). Evidence from another chain is refused.</p>
           </div>
           <div className="stack" style={{ gap: 10 }}>
             <h3>What the verifier reports</h3>
-            <p className="small muted">Each finding is PASS, FAIL, UNVERIFIED or NOT_EVALUATED. There is no single overall word: missing trust or history yields UNVERIFIED, never an invented success.</p>
+            <p className="small muted">Each finding is PASS, FAIL, UNVERIFIED or NOT_EVALUATED — no single overall word. Missing trust or history yields UNVERIFIED, never an invented success.</p>
             <div className="tablewrap fit"><table className="t">
               <thead><tr><th>finding</th><th>needs</th><th>what it establishes</th></tr></thead>
               <tbody>{FINDINGS.map((f) => <tr key={f.id}><td><code style={{ overflowWrap: "anywhere" }}>{f.id}</code></td><td className="tiny dim">{f.needs}</td><td className="small muted">{f.plain}</td></tr>)}</tbody>
             </table></div>
-            <p className="small muted">A complete rewritten passport with newly computed hashes is not proof of original approval. A transaction hash is not proof of service delivery. A current contract balance is not proof that this particular order was paid. Format and rules: <code>docs/PASSPORT.md</code> · <Link to={link("/demo")}>start a run</Link> or <Link to={link("/developer")}>run the lifecycle with your wallet</Link> to get a passport.</p>
+            <p className="small muted">A rewritten passport with new hashes is not proof of the original approval. A transaction hash is not proof of delivery. A contract balance is not proof this order was paid. Format and rules: <code>docs/PASSPORT.md</code> · <Link to={link("/demo")}>start a run</Link> or <Link to={link("/developer")}>run the lifecycle with your wallet</Link> to get a passport.</p>
           </div>
         </div>
       </div>

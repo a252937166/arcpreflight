@@ -486,7 +486,7 @@ describe("WalletChip", () => {
     expect(content(tree)).toContain("0x0000…0a11");
     await button(tree, "0x0000…0a11").props.onClick(); tree = render(() => WalletChip({ net: h.net }));
     const text = content(tree);
-    expect(text).toContain("Copy address"); expect(text).toContain("View on explorer"); expect(text).toContain("Disconnect"); expect(text).toContain(ACCOUNT);
+    expect(text).toContain("copy"); expect(text).toContain("View on explorer"); expect(text).toContain("Disconnect"); expect(text).toContain(ACCOUNT); // the full address stays in the panel (visually hidden until "show full")
     expect(nodes(tree).some((n) => n.type === "a" && String(n.props.href).endsWith(`/address/${ACCOUNT}`))).toBe(true);
     expect(text).not.toContain("Switch to Arc"); // already on the API's chain
     await button(tree, "Disconnect").props.onClick();
@@ -978,7 +978,7 @@ describe("round 3 · an attempt whose wallet prompt was opened is uncertain, acr
     expect(content(tree)).toContain(UNCERTAIN_OPEN_TEXT);
     expect(button(tree, "I rejected it — abandon")).toBeDefined(); expect(button(tree, "Recover")).toBeDefined();
     expect(buttonTexts(tree).some((t) => t.includes("Continue in wallet"))).toBe(false); expect(buttonTexts(tree).some((t) => t.includes("Abandon (nothing sent)"))).toBe(false);
-    expect(content(tree)).toContain("this plan was already handed to a wallet"); expect(content(tree)).toContain("decide: abandon only if you know the prompt was rejected; otherwise recover again"); // the panel's own next action, not the server's idle one
+    expect(content(tree)).toContain("this plan was already handed to a wallet"); expect(content(tree)).toContain("abandon only if you know the prompt was rejected; otherwise recover again"); // the panel's own next action, not the server's idle one
     button(tree, "I rejected it — abandon").props.onClick(); expect(actions.onAbandon).toHaveBeenCalledWith(ATTEMPT_ID);
     button(tree, "Recover").props.onClick(); expect(actions.onRecover).toHaveBeenCalledWith(ATTEMPT_ID);
     // the marker known to this browser only (a view without the key): the same

@@ -2,7 +2,7 @@
 // the order and the gas from project funds; a connected wallet changes nothing about who pays) and TRY WITH MY WALLET (the Developer
 // workflow, where the visitor pays fee + order + gas from their own wallet on Arc testnet, with the faucet). The "check with your wallet"
 // quick comparison lives under the second entry: the check fee is the visitor's, nothing is executed here.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useNet } from "../App";
 import { api, type Fixture, type FixtureInfo, type Run, type RunSummary } from "../lib/api";
@@ -18,7 +18,11 @@ import { RunPanel } from "../components/RunPanel";
 import { WalletRunPanel } from "../components/WalletRunPanel";
 import { FaucetCard } from "../components/FaucetCard";
 import { RunsTable } from "../components/RunsTable";
-import { Lifecycle } from "../components/Lifecycle";
+import { FlowCanvas } from "../components/FlowCanvas";
+import { WhoPays } from "../components/WhoPays";
+import { GuidePanel, type Origin } from "../components/GuidePanel";
+import { guideFor, type CheckpointId } from "../lib/guide";
+import { usdcNative } from "../lib/format";
 import { STAGES } from "../components/Pipeline";
 import { HandRule } from "../components/Illustrations";
 
@@ -44,6 +48,11 @@ export default function Demo() {
   const [notice, setNotice] = useState<{ tone: "info" | "warn" | "bad"; text: string; raw?: Described | null } | null>(null);
   const [history, setHistory] = useState<{ runs: RunSummary[]; total?: number; more: boolean }>({ runs: [], total: undefined, more: false });
   const [scrollKey, setScrollKey] = useState(0);
+  // the guided walkthrough (review of 2026-10-09): where this run came from, what the visitor already inspected, what this browser did with the passport
+  const [origin, setOrigin] = useState<Origin | null>(null);
+  const [reason, setReason] = useState<string | null>(null);
+  const [visited, setVisited] = useState<CheckpointId[]>([]);
+  const [local, setLocal] = useState<{ exported?: boolean; verified?: "passed" | "failed" | "partial" | null }>({});
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -89,29 +98,42 @@ export default function Demo() {
     };
     void tick();
   }, [loadRuns, refresh]);
+  const fresh = () => { setOrigin(null); setReason(null); setVisited([]); setLocal({}); };
   const start = async (opts: DemoOptions = {}) => {
-    setBusy(true); setNotice(null); setSample(false); setRun(null); walletRun.reset();
+    setBusy(true); setNotice(null); setSample(false); setRun(null); walletRun.reset(); fresh();
     try {
       const r = await startDemo(effective, undefined, opts);
       if (r.mode === "live") {
+        setOrigin("live");
         setNotice(r.admission === "existing"
-          ? { tone: "warn", text: "This admission key was already accepted: showing the original run — no second order was created." }
-          : { tone: "info", text: opts.interruptAfterBroadcast ? `Started with a labelled interruption: the runner will stop waiting right after the broadcast; the recovery worker (every 30 s) resolves the outcome from the recorded hash and the order state.` : `Started. The project's own runner is doing this on ${net?.network === "mainnet" ? "Arc mainnet" : "Arc testnet"} right now, from project funds.` });
+          ? { tone: "warn", text: "Same admission key: showing the original run — no second order was created." }
+          : { tone: "info", text: opts.interruptAfterBroadcast ? "Started with a simulated interruption: a real transaction is broadcast, then the runner stops waiting; recovery resolves the outcome." : `Started on ${netLabel}: the project runner pays from project funds.` });
         poll(r.runId); return;
       }
       setBusy(false);
       const why = describeBody(r.body);
-      setNotice({ tone: "warn", text: `${why.text} Showing the latest recorded run — labelled RECORDED_SAMPLE.`, raw: why }); setSample(true); setRun(r.run);
+      setOrigin("sample"); setReason(why.text);
+      setNotice({ tone: "warn", text: `${why.text} Showing the latest recorded run instead (RECORDED_SAMPLE) — no new transaction was initiated.`, raw: why }); setSample(true); setRun(r.run);
     } catch (e: any) { setBusy(false); const d = describeError(e); setNotice({ tone: "bad", text: d.text, raw: d }); }
   };
   const startWallet = async () => {
     if (!f) return;
-    setNotice({ tone: "info", text: `Checking with your wallet on ${net?.network === "mainnet" ? "Arc mainnet" : "Arc testnet"}: it signs the ${feeText} USDC check fee only — that fee is yours. A NO_POLICY_VIOLATION check continues in the Developer workflow, where your wallet executes the validated plan.` });
-    setSample(false); setRun(null);
+    setNotice({ tone: "info", text: `Checking with your wallet on ${netLabel}: it signs the ${feeText} USDC check fee only — that fee is yours. Execution continues in the Developer workflow.` });
+    setSample(false); setRun(null); fresh();
     await walletRun.start(f);
     refreshBal(); loadRuns();
   };
-  const open = async (id: string) => { setSample(false); setNotice(null); walletRun.reset(); try { const r = await api.run(id); setRun(r); if (r.state === "RUNNING" || r.state === "RECONCILE_REQUIRED") { setBusy(r.state === "RUNNING"); poll(id); } } catch { /* ignore */ } };
+  const open = async (id: string) => { setSample(false); setNotice(null); walletRun.reset(); fresh(); setOrigin("history"); try { const r = await api.run(id); setRun(r); if (r.state === "RUNNING" || r.state === "RECONCILE_REQUIRED") { setBusy(r.state === "RUNNING"); poll(id); } } catch { /* ignore */ } };
+  const guide = useMemo(() => guideFor(run, net, { ...local, visited }), [run, net, local, visited]);
+  const onGo = useCallback((id: CheckpointId | null) => { if (id) setVisited((v) => (v.includes(id) ? v : [...v, id])); }, []);
+  // the element the guide points at gets the highlight (review of 2026-10-09, item 2)
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const el = document.getElementById(guide.next.target); if (!el) return;
+    el.classList.add("guide-hot"); return () => el.classList.remove("guide-hot");
+  }, [guide.next.target]);
+  // ≈ check fee + order amount + a typical business gas spend (≈0.0012 USDC): the number the entry card and the run bar quote per project-funded run
+  const perRun = (() => { try { return net?.priceTokenAtomic && net.budget?.amountNativeAtomic ? usdcNative((BigInt(net.priceTokenAtomic) * 10n ** 12n + BigInt(net.budget.amountNativeAtomic) + 1_200_000_000_000_000n).toString(), 3) : null; } catch { return null; } })();
 
   const headline = (f?.headline ?? "…").replace(/_/g, " ").toLowerCase();
   const walletShowing = walletRun.run.phase !== "idle";
@@ -142,25 +164,27 @@ export default function Demo() {
         <div className="entry-points" role="group" aria-label="two ways to use the demo" data-testid="entry-points">
           <section className="entry on" aria-labelledby="entry-watch">
             <div className="kicker" id="entry-watch">{WATCH_LABEL}</div>
-            <p className="small muted">The project's own runner {runner ? <Hex value={runner} n={4} /> : <code>…</code>} pays everything from <b>project funds</b>: the {feeText} USDC check fee, the {orderText} USDC order and the gas. Your wallet is not involved — connected or not, it never pays here. Pick a situation below and press Run; one admission key per click, so a retry returns the same run, never a second order.</p>
-            <div className="row"><a href="#situations" className="btn primary sm">{WATCH_LABEL} ↓</a><span className="tiny dim">no wallet needed</span></div>
+            <p className="small muted">The project's runner {runner ? <Hex value={runner} n={4} /> : <code>…</code>} pays everything from <b>project funds</b> (testnet USDC): the {feeText} USDC check fee, the {orderText} USDC order and the gas. Your wallet is not involved.</p>
+            <WhoPays mode="project" fee={feeText} order={orderText} />
+            <div className="row"><a href="#situations" className="btn primary sm">{WATCH_LABEL} ↓</a><span className="tiny dim">no wallet needed{net && perRun ? ` · today ${net.budget.usedToday}/${net.budget.maxRunsPerDay} runs · ≈ ${perRun} each` : ""}</span></div>
           </section>
           <section className="entry" aria-labelledby="entry-try" data-testid="entry-try">
             <div className="kicker" id="entry-try">{TRY_LABEL}</div>
-            <p className="small muted">The <Link to={link("/developer")}>Developer workflow</Link> runs the same seven steps with <b>your</b> wallet on {netLabel}: you pay the check fee ({feeText} USDC), the order amount and the gas of your own payment from your own wallet{mainnet ? "" : " — the testnet faucet gives you testnet USDC"}; the service validates the exact plan and records the attempt before your wallet is asked; the passport is yours.</p>
+            <p className="small muted">The <Link to={link("/developer")}>Developer workflow</Link> runs the same seven steps with <b>your</b> wallet on {netLabel}: you pay the check fee, the order and your gas{mainnet ? "" : " (faucet available)"}.</p>
+            <WhoPays mode="wallet" fee={feeText} order={orderText} />
             <div className="row" style={{ gap: 10 }}><Link to={link("/developer")} className="btn sm">{TRY_LABEL} →</Link></div>
             {w.account ? (onArc
               ? <div className="stack" style={{ gap: 6 }}>
-                  <div className="row" style={{ gap: 10 }}><button className="btn sm" disabled={walletBusy || busy || !net || !f?.merchant || unfunded} title={unfunded ? `this wallet cannot pay the ${feeText} USDC check fee yet — claim testnet USDC below` : `your wallet signs the ${feeText} USDC check fee (yours); a NO_POLICY_VIOLATION check continues in the Developer workflow, where your wallet executes`} onClick={startWallet}>{walletBusy ? <><Spinner /> checking…</> : `▶ Check "${headline}" with your wallet`}</button></div>
-                  <span className="tiny dim">a quicker look from here: your wallet signs the {feeText} USDC check fee — that fee is yours — on the situation picked below; nothing is executed on this page, execution continues in the Developer workflow with your wallet</span>
+                  <div className="row" style={{ gap: 10 }}><button className="btn sm" disabled={walletBusy || busy || !net || !f?.merchant || unfunded} title={unfunded ? `this wallet cannot pay the ${feeText} USDC check fee yet — claim testnet USDC below` : `your wallet signs the ${feeText} USDC check fee (yours); execution continues in the Developer workflow`} onClick={startWallet}>{walletBusy ? <><Spinner /> checking…</> : `▶ Check "${headline}" with your wallet`}</button></div>
+                  <span className="tiny dim">a quicker look: your wallet signs the {feeText} USDC check fee — that fee is yours; nothing is executed here, execution continues in the Developer workflow</span>
                   <FaucetCard net={net} wallet={w} balance={bal} required={feeRequired} step="the check fee" onClaimed={refreshBal} />
                 </div>
               : <div className="row" style={{ gap: 10 }}><button className="btn sm" onClick={() => net && w.switchChain(net)} title={`your wallet is on chain ${w.chainId ?? "?"}; the demo runs on ${netLabel}`}>{`Switch to ${netLabel} first`}</button><span className="tiny dim">your connected wallet is on another chain</span></div>)
-              : <span className="tiny dim">or connect a wallet in the header to run only the check from here with your own fee signature</span>}
+              : <span className="tiny dim">or connect a wallet in the header to run only the check from here</span>}
           </section>
         </div>
 
-        {!showing && <Lifecycle stages={idleLifecycle()} caption="every run walks this lifecycle: the order, the approval it references, the paid check, the decision, execution, recovery if interrupted, the passport, and verification you can run anywhere" />}
+        {!showing && <FlowCanvas stages={idleLifecycle()} idle caption="every run walks this lifecycle; the stage in progress lights up, and each node opens its result" />}
         {net && !net.fixtures.some((x) => x.merchant) && (
           <div className="banner" role="status">No fixtures are deployed on {netLabel} yet — live runs cannot start on this instance.
             {instances.some((i) => i.network === "testnet") && net.network !== "testnet" && <> <button className="btn sm" onClick={() => select("testnet")}>switch to Arc testnet</button> to run zero-cost demos.</>}
@@ -191,18 +215,27 @@ export default function Demo() {
           )}
         </div>
 
+        {!showing && (
+          <div className="facts" role="list" aria-label="before you start" data-testid="facts">
+            <div className="fact" role="listitem"><span className="ico" aria-hidden="true">1</span><span><b>Real transactions on {netLabel}</b>, paid by the project runner from project funds ({mainnet ? "USDC" : "testnet USDC"}).</span></div>
+            <div className="fact" role="listitem"><span className="ico" aria-hidden="true">2</span><span><b>Your connected wallet is never charged</b> by these two buttons.</span></div>
+            <div className="fact" role="listitem"><span className="ico" aria-hidden="true">3</span><span><b>The order belongs to the project's DemoMerchant</b> — a demo merchant; nothing is delivered.</span></div>
+          </div>
+        )}
         <div className="stack" style={{ gap: 10 }}>
           <div className="row between runbar" style={{ alignItems: "center" }}>
-            {!showing && <p className="muted small" style={{ maxWidth: 640 }}>The runner <code>{runner ? `${runner.slice(0, 10)}…` : "…"}</code> buys the report ({feeText} USDC, one EIP-3009 authorization settled by the project's relayer), decides locally, and signs the business call only when nothing fired — all from project funds.</p>}
+            {!showing && <p className="muted small" style={{ maxWidth: 560 }}>Each run: order → paid check → decision → execution → passport. About {perRun ?? "0.06 USDC"} per run.</p>}
             <div className="row runbar-actions" style={{ gap: 10 }}>
-              <button className="btn primary" disabled={!canRun} title={gated ? "gated on this instance — execution opens after the mainnet acceptance; use the testnet instance" : "the project runner pays from project funds"} onClick={() => start()}>{busy ? <><Spinner /> running…</> : f?.id === "APPROVED_PAYMENT" ? "▶ Run live · project runner" : `▶ Run "${headline}" live · project runner`}</button>
-              {f?.id === "APPROVED_PAYMENT" && <button className="btn" disabled={!canRun} title={gated ? "gated on this instance — execution opens after the mainnet acceptance; use the testnet instance" : "the runner persists, marks and sends as always, then stops waiting right after the send; the recovery worker resolves the outcome from the recorded hash and the order state"} onClick={() => start({ interruptAfterBroadcast: true })}>▶ Run with a simulated interruption</button>}
+              <button className="btn primary" id="run-start" disabled={!canRun} title={gated ? "gated on this instance — execution opens after the mainnet acceptance; use the testnet instance" : "the project runner pays from project funds"} onClick={() => start()}>{busy ? <><Spinner /> running…</> : f?.id === "APPROVED_PAYMENT" ? "▶ Run live · project runner" : `▶ Run "${headline}" live · project runner`}</button>
+              {f?.id === "APPROVED_PAYMENT" && <button className="btn" disabled={!canRun} title={gated ? "gated on this instance — execution opens after the mainnet acceptance; use the testnet instance" : "a real transaction is broadcast; the runner then stops waiting for the receipt, as a crashed process would; recovery resolves it from the original hash and the order state"} onClick={() => start({ interruptAfterBroadcast: true })}>▶ Run with a simulated interruption</button>}
             </div>
           </div>
+          {!showing && f?.id === "APPROVED_PAYMENT" && <p className="hint-line" data-testid="interruption-hint">Simulated interruption: a real transaction is broadcast, then the runner stops waiting for the confirmation. Recovery resolves it from the original hash and the order state — no second order, no second signature.</p>}
         </div>
+        {!walletShowing && <GuidePanel guide={guide} origin={run ? origin : null} reason={reason} network={netLabel} onGo={onGo} link={link} underStrip={running} />}
         {notice && <div className={`banner ${notice.tone === "info" ? "info" : notice.tone === "bad" ? "bad" : ""}`}>{notice.text}{notice.raw?.code && <details className="error-raw"><summary>raw response ({notice.raw.code})</summary><pre className="json">{JSON.stringify(notice.raw.raw, null, 2)}</pre></details>}</div>}
         <div ref={panelRef} className="scroll-target stack" style={{ gap: 28 }}>
-          {run && <><HandRule /><RunPanel run={run} net={net} sample={sample} onUpdate={setRun} /></>}
+          {run && <><HandRule /><RunPanel run={run} net={net} sample={sample} onUpdate={setRun} origin={origin} reason={reason} onLocal={setLocal} /></>}
           {!run && walletShowing && <><HandRule /><WalletRunPanel run={walletRun.run} net={net} account={w.account} fixture={f ?? null} /></>}
         </div>
 

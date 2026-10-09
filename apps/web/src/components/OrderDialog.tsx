@@ -14,8 +14,8 @@ import { describeError } from "../lib/errors";
 
 /** what the two merchant choices mean to a visitor; the proxy code name is a technical detail */
 export const PROXY_LABELS: Record<Proxy, { title: string; blurb: string }> = {
-  MAIN: { title: "Merchant as approved", blurb: "the merchant proxy still runs the implementation the approval references — the check is expected to find nothing" },
-  CHANGED: { title: "Merchant changed since approval", blurb: "the same proxy was upgraded to a compatible but unapproved implementation — the check is expected to stop at REVIEW REQUIRED" },
+  MAIN: { title: "Merchant as approved", blurb: "still runs the approved implementation — the check should find nothing" },
+  CHANGED: { title: "Merchant changed since approval", blurb: "upgraded to a compatible but unapproved implementation — the check should stop at REVIEW REQUIRED" },
 };
 
 export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: { payer: string | null; net: NetworkInfo | null; limits: OrderLimits; create: (body: OrderBody) => Promise<OrderCreated>; onCreated: (o: OrderCreated) => void; onClose: () => void }) {
@@ -75,16 +75,15 @@ export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: 
         {!reviewing || !body ? (
           <>
             {notice && <div className="banner" role="status" data-testid="order-notice">{notice}</div>}
-            <div className="banner info" role="note" data-testid="order-explainer">
-              <b>This is a demonstration order on the project's DemoMerchant contract — no goods or services are delivered.</b> Paying it exercises the lifecycle with your own wallet. What you get: a pinned preflight report, the payment outcome read from the chain, and a verifiable Payment Passport.
-            </div>
-            <p className="small muted">The order is payable only by your wallet; the merchant's <code>{net?.accounts?.orderSignerRole ?? "order-creator"}</code> key creates it (the operator pays that gas). Its identity is recorded before the creation transaction is sent. You pay the check fee ({feeUsdcText(net)} USDC), the order amount and the gas of your own payment later, from your wallet.</p>
+            <div className="banner info" role="note" data-testid="order-explainer"><b>This is a demonstration order on the project's DemoMerchant contract — no goods or services are delivered.</b></div>
+            <p className="small muted">You pay the check fee ({feeUsdcText(net)} USDC), the order amount and your gas from your wallet.</p>
+            <details className="why"><summary className="tiny">what you get, who creates it</summary><p className="small muted">Paying it exercises the lifecycle with your own wallet: a pinned preflight report, the payment outcome read from the chain, and a verifiable Payment Passport. The order is payable only by your wallet; the merchant's <code>{net?.accounts?.orderSignerRole ?? "order-creator"}</code> key creates it and the operator pays that gas. Its identity is recorded before the creation transaction is sent.</p></details>
             <div className="field"><label htmlFor="of-payer">payer <span className="tiny dim">connected wallet · read-only</span></label><input id="of-payer" className="input mono" readOnly value={payer ?? ""} placeholder="connect a wallet" aria-invalid={!!show("payer")} />{show("payer") && <span className="ferr">{errors.payer}</span>}</div>
-            <div className="field"><span className="flabel">merchant <span className="tiny dim">which DemoMerchant receives the payment</span></span><div className="proxy-cards" role="radiogroup" aria-label="merchant">{(["MAIN", "CHANGED"] as Proxy[]).map(proxyCard)}</div>{show("proxy") && <span className="ferr">{errors.proxy}</span>}</div>
+            <div className="field"><span className="flabel">merchant <span className="tiny dim">receives the payment</span></span><div className="proxy-cards" role="radiogroup" aria-label="merchant">{(["MAIN", "CHANGED"] as Proxy[]).map(proxyCard)}</div>{show("proxy") && <span className="ferr">{errors.proxy}</span>}</div>
             <div className="field"><label htmlFor="of-amount">amount <span className="tiny dim">USDC · up to 6 decimals · {nativeAtomicToUsdcText(limits.minNativeAtomic)}–{nativeAtomicToUsdcText(limits.maxNativeAtomic)}</span></label>
               <input id="of-amount" className="input" inputMode="decimal" placeholder="0.05" value={form.amountUsdc} onChange={(e) => set({ amountUsdc: e.target.value })} aria-invalid={!!show("amount")} />
               {show("amount") && <span className="ferr">{errors.amount}</span>}</div>
-            <div className="field"><label htmlFor="of-ref">reference <span className="tiny dim">optional · ≤ {limits.maxReferenceLength} characters · stored off-chain · {form.reference.trim().length}/{limits.maxReferenceLength}</span></label>
+            <div className="field"><label htmlFor="of-ref" title="stored off-chain">reference <span className="tiny dim">optional · ≤ {limits.maxReferenceLength} characters · {form.reference.trim().length}/{limits.maxReferenceLength}</span></label>
               <input id="of-ref" className="input" placeholder="invoice 2026-10-08 #42" value={form.reference} onChange={(e) => set({ reference: e.target.value })} aria-invalid={!!show("reference")} />
               {show("reference") && <span className="ferr">{errors.reference}</span>}</div>
             <details className="tech" data-testid="technical-details">
@@ -102,13 +101,13 @@ export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: 
           </>
         ) : (
           <>
-            <p className="small muted">Nothing has left yet. This demonstration order is created under this browser's anonymous session; your wallet pays nothing for its creation.</p>
+            <p className="small muted">Nothing has left yet. Creating the order costs your wallet nothing.</p>
             <div className="kv w120" data-testid="order-review">
               <span className="k">payer</span><span><Hex value={body.payer} n={8} /> <span className="tiny dim">your wallet</span></span>
               <span className="k">merchant</span><span>{PROXY_LABELS[body.proxy].title.toLowerCase()} {reviewFixture ? <Chip tone={changedFor(body.proxy) ? "warn" : "ok"}>{changedFor(body.proxy) ? "changed since approval" : "as approved"}</Chip> : <Chip tone="warn">not deployed here</Chip>}</span>
-              <span className="k">amount</span><span><b>{nativeAtomicToUsdcText(body.amountNativeAtomic)} USDC</b> <span className="tiny dim">payable only by your wallet, later, as the business payment</span></span>
+              <span className="k">amount</span><span><b>{nativeAtomicToUsdcText(body.amountNativeAtomic)} USDC</b> <span className="tiny dim">payable only by your wallet, later</span></span>
               <span className="k">reference</span><span>{body.reference ?? <span className="dim">none</span>}</span>
-              <span className="k">you get</span><span className="small">a pinned preflight report (check fee {feeUsdcText(net)} USDC), the payment outcome read from the chain, a verifiable Payment Passport — no goods or services</span>
+              <span className="k">you get</span><span className="small">pinned report (check fee {feeUsdcText(net)} USDC) · payment outcome from the chain · verifiable Payment Passport — no goods or services</span>
             </div>
             <details className="tech" data-testid="technical-details">
               <summary className="tiny">technical details — the exact body of <code>POST /v1/demo/orders</code></summary>
