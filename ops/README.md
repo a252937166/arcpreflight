@@ -77,6 +77,28 @@ proof at the root and run zero-cost demos on testnet. `ops/deploy.sh` restarts a
 maintenance script against a network while that network's instance is executing a run. Memory: each instance is capped at 200 MB
 (`MemoryLimit`); check `free -m` on the 728 MB server before enabling the second unit.
 
+## Mainnet cutover (Gate D) — `ops/mainnet-cutover.sh`
+
+The plan, budget and stop conditions are in `docs/MAINNET-PLAN.md`. `preflight` and `gatecheck` are read-only; every other step needs
+`export CUTOVER_GO=<step>` after the operator's typed go, and the scripts it calls refuse mainnet execution without `MAINNET_GO=1`.
+
+- **Order:** `preflight` → `deploy` → `fund` → `probe` → commit `fixtures/deployments-mainnet.json` → `server` → `baselines` →
+  `gatecheck` → `acceptance` → `lifecycle` → record the evidence → `open` (separate approval).
+- **Spend limits:** `scripts/demo/deploy.ts`, `scripts/demo/fund.ts`, `scripts/selftest/relay-probe.ts` and the lifecycle's visitor key
+  sign through the spend guard (`packages/client/src/spend.ts`): an explicit gas limit and max fee per transaction, a per-transaction
+  cap and a step total that both count value, token amounts and the gas worst case, a 40 gwei max-fee ceiling, and a ledger per network
+  and step in `evidence/spend/` so a re-run continues the same total. API-driven spends (acceptance, lifecycle) stop on the measured
+  outflow of the project keys; the server enforces its own per-transaction gas ceilings (createOrder 0.006, relay 0.005, pay via the
+  policy 0.002 USDC) and daily reservations. Overrides: `DEPLOY_* / FUND_* / PROBE_*_PER_TX_CAP_USDC`, `…_TOTAL_CAP_USDC`,
+  `MAX_FEE_GWEI`, `SPEND_CAP_USDC`, `WALLET_*_CAP_USDC`, `LIFECYCLE_PROJECT_CAP_USDC` — each refused above a hard maximum.
+- **The gate:** the mainnet env is written with `PUBLIC_EXECUTION=0`; `server` verifies it after the restart (and the release, the order
+  signer, the deployer key's absence, and that visitor probes of `/v1/demo/run`, `/v1/demo/orders`, `/v1/wallet/attempts` answer
+  503) and stops the mainnet service if anything is off. Acceptance and lifecycle pass the closed gate with `ADMIN_TOKEN`.
+- **Release label:** `ops/deploy.sh` labels the bundle with the last commit that changed `apps`, `packages` or the workspace files and
+  refuses uncommitted changes there or in `fixtures/`.
+- **Real-wallet evidence:** `ops/wallet-evidence.sh <address> [since]` copies a read-only query to the server and saves what the API
+  recorded for that wallet to `evidence/selftest/wallet-acceptance-<ts>.json`.
+
 ## Keys on the server (release target)
 
 The current testnet preview keeps all three project keys in `/opt/arcpreflight/keys/`. The release target is for the

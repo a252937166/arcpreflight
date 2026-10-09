@@ -23,3 +23,18 @@ listed next actions; no row may end in a second signing prompt the visitor did n
 | 14 | Network switched after the claim (review of `0c0d406`) | Click Execute, then switch the wallet's network before confirming | either the page refuses before the prompt ("on chain …; the plan was validated for chain …") and the attempt stays a plain validated attempt, or the wallet itself refuses the request's `chainId`; never a transaction on the other network |
 
 Observed results belong in `docs/ACCEPTANCE.md` §11 (AP33-30) with the date and the wallet used.
+
+## Session for release `78c8dc2` (Gate D precondition)
+
+Where: `https://arcpreflight.axiqo.xyz/developer` — the root is the public **Arc testnet** preview until the mainnet cutover, so row 1
+reads "connect while the wallet is on another network; the site asks once to switch to (or add) Arc testnet". Everything else as above.
+
+Before you start: Chrome with MetaMask or OKX Wallet, one account with Arc testnet USDC (or claim 0.2 from the wallet menu), a second
+account in the same extension for row 3. Note the extension's version (extension menu → About / Settings).
+
+Order that keeps prompts to a minimum: 1, 2, 10 (before funding, if the account is empty), 5, 9, 4, 14, 6, 7, 8, 13, 11, 3, 12.
+
+What to send back: the wallet name and version, the address used, the time window, and per row "pass" or "fail" with what the page
+said (a screenshot for any fail). The operator then runs `ops/wallet-evidence.sh <address> <start time>`, which reads — read-only —
+what the server recorded for that address (orders, paid checks, attempts with their prompt markers, states and hashes), and records the
+result under AP33-30 with the release, the wallet version and every row.
