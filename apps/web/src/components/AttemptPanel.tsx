@@ -2,40 +2,49 @@
 // validated plan (mismatch = red, wallet-set gas/fees/nonce = amber, recorded), the outcome from the receipt and the order state, the
 // cost disclosure, and the actions that are allowed from the current state — recover (reads only), abandon (VALIDATED), continue in
 // the wallet (VALIDATED inside its window). After an ambiguous wallet error (no hash, not a rejection) nothing offers a second prompt:
-// the panel reconciles and then asks the visitor explicitly ("I rejected it — abandon"). Nothing here signs or sends by itself.
+// the panel reconciles and then asks the visitor explicitly ("I rejected it — abandon"). The same holds for an attempt that carries a
+// prompt marker (docs/LIFECYCLE.md §10 item 1) — restored after a refresh, listed, or found open: "Continue in wallet" and "Abandon
+// (nothing sent)" never render for it; it reads as uncertain until the chain or the visitor says otherwise. Nothing here signs or sends by itself.
 import { Chip, Hex, Spinner } from "./Badges";
 import { CostTable } from "./CostTable";
 import { explorerAddr, explorerTx, type AttemptView, type NetworkInfo } from "../lib/api";
-import { attemptMessage, deviationRows, insideWindow, isOpen, stateTone, type ExecutePhase, type Refusal } from "../lib/attempts";
+import { attemptMessage, deviationRows, insideWindow, isOpen, isUncertain, stateTone, type ExecutePhase, type Refusal } from "../lib/attempts";
 import { nativeAtomicToUsdcText } from "../lib/orders";
 import { utc } from "../lib/format";
 import type { Described } from "../lib/errors";
 
 export type AttemptActions = { onRecover?: (id: string) => void; onAbandon?: (id: string) => void; onResume?: (a: AttemptView) => void; onRefresh?: (id: string) => void };
+const LIVE: readonly ExecutePhase[] = ["validating", "prompting", "reporting", "polling"];
 export function AttemptPanel({ attempt, phase = "idle", txHash, refusal, err, net, busy, now = Date.now(), actions = {}, compact }: { attempt: AttemptView | null; phase?: ExecutePhase; txHash?: string | null; refusal?: Refusal | null; err?: Described | null; net: NetworkInfo | null; busy?: boolean; now?: number; actions?: AttemptActions; compact?: boolean }) {
   const a = attempt;
-  const ambiguous = phase === "unknown-submission";
+  // §10 item 1: a prompt marker (server view, or this browser's memory of having opened the prompt) makes a VALIDATED attempt uncertain — unless this very page is
+  // mid-execution with it (the marker is written right before its own prompt)
+  const uncertain = !!a && !LIVE.includes(phase) && (phase === "uncertain" || isUncertain(a));
+  // never a second prompt, never "nothing was sent": after an ambiguous wallet answer in this page, and for any uncertain attempt
+  const ambiguous = phase === "unknown-submission" || uncertain;
   const reconciling = ambiguous && !!busy;
-  const message = attemptMessage(a, phase, { reconciling });
+  const message = attemptMessage(a, phase, { reconciling, uncertain });
   const rows = deviationRows(a?.deviations);
   const hash = a?.businessTxHash ?? a?.txHash ?? txHash ?? null;
   const open = a ? isOpen(a.state) : false;
   const inWindow = a ? insideWindow(a, now) : false;
   const secondsLeft = a?.validUntil ? Math.max(0, Math.round((new Date(a.validUntil).getTime() - now) / 1000)) : null;
   const unresolved = phase === "unresolved" || (a?.state === "BROADCAST_ATTEMPTED" && phase !== "polling");
-  // the wallet may be prompted (again) only when nothing suggests a transaction already left: never after an ambiguous error
+  // the wallet may be prompted (again) only when nothing suggests a transaction already left: never after an ambiguous error, never with a prompt marker
   const mayResume = !!a && !!actions.onResume && a.state === "VALIDATED" && inWindow && !!a.plan && !ambiguous;
+  // the wallet's own answer is quoted only when this page received it; an API error while reconciling an uncertain attempt is a plain error
+  const walletAnswer = phase === "unknown-submission" && !!err;
   return (
-    <div className="stack" style={{ gap: 12 }} data-testid="attempt-panel" data-phase={phase}>
+    <div className="stack" style={{ gap: 12 }} data-testid="attempt-panel" data-phase={phase} data-uncertain={uncertain || undefined}>
       <div className={`banner ${message.tone === "ok" || message.tone === "info" ? "info" : message.tone === "bad" ? "bad" : ""}`} role="status">{reconciling && <><Spinner /> </>}{message.text}</div>
-      {ambiguous && err && <p className="tiny dim">the wallet's answer was: <code>{err.text}</code>{err.code ? ` (${err.code})` : ""}</p>}
+      {walletAnswer && err && <p className="tiny dim">the wallet's answer was: <code>{err.text}</code>{err.code ? ` (${err.code})` : ""}</p>}
       {refusal && (
         <div className="stack" style={{ gap: 4 }}>
           <div className="row" style={{ gap: 8 }}><Chip tone="bad">REFUSED · {refusal.stage === "finalValidation" ? "final validation" : refusal.stage}</Chip>{refusal.attemptId && <span className="tiny dim">attempt <code>{refusal.attemptId.slice(0, 8)}</code> recorded REFUSED — nothing was sent</span>}</div>
           {refusal.reasons.length > 0 && <ul className="list small">{refusal.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>}
         </div>
       )}
-      {err && !ambiguous && <div className="banner bad" role="alert">{err.text}</div>}
+      {err && !walletAnswer && <div className="banner bad" role="alert">{err.text}</div>}
       {a && (
         <div className="kv w150">
           <span className="k">attempt</span><span><code>{a.attemptId.slice(0, 8)}</code> <Chip tone={stateTone(a.state)}>{a.state.replace(/_/g, " ").toLowerCase()}</Chip>{a.businessStatus && <Chip tone={a.businessStatus === "SUCCESS" ? "ok" : a.businessStatus === "FAILED" ? "bad" : "warn"}>order {a.businessStatus === "SUCCESS" ? "paid" : a.businessStatus.toLowerCase().replace(/_/g, " ")}</Chip>}{(phase === "validating" || phase === "prompting" || phase === "reporting" || phase === "polling") && <Spinner />}</span>
@@ -58,7 +67,7 @@ export function AttemptPanel({ attempt, phase = "idle", txHash, refusal, err, ne
           {a && actions.onRecover && (open || unresolved) && <button className="btn" disabled={busy} onClick={() => actions.onRecover!(a.attemptId)} title="bounded reconciliation of this attempt now: the hash, the order state, the OrderPaid event">{busy ? <><Spinner /> reconciling…</> : "Recover"}</button>}
           {a && actions.onRefresh && <button className="btn sm ghost" disabled={busy} onClick={() => actions.onRefresh!(a.attemptId)}>refresh (observe)</button>}
           {unresolved && <span className="tiny dim">still unresolved after the wait: recovery reads the hash, the order state and the OrderPaid event; it never re-signs or re-sends</span>}
-          {ambiguous && !reconciling && a?.state === "VALIDATED" && <span className="tiny dim">no second prompt is offered while the first answer is unexplained — a transaction may already be on its way</span>}
+          {ambiguous && !reconciling && a?.state === "VALIDATED" && <span className="tiny dim">{phase === "unknown-submission" ? "no second prompt is offered while the first answer is unexplained — a transaction may already be on its way" : "no second prompt is offered: this plan was already handed to a wallet — a transaction may already be on its way"}</span>}
         </div>
       )}
       {a?.recovery && !compact && (

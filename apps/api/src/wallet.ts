@@ -27,8 +27,10 @@ export type AttemptRow = {
   policy_json: string; decision_json: string; final_validation_json: string | null; fv_evidence_json: string | null; approval_status_json: string | null; plan_json: string | null; labels_json: string;
   state: WalletAttemptState; valid_until: string | null; tx_hash: string | null; nonce: number | null; from_addr: string | null; broadcast_block: string | null; scanned_to_block: string | null; deviations_json: string | null;
   business_status: string | null; business_tx_hash: string | null; block: string | null; receipt_json: string | null; postcondition_json: string | null; note: string | null; reconciliation_json: string; refusal_json: string | null;
-  fee_receipt_json: string | null; created_at: string; updated_at: string;
+  fee_receipt_json: string | null; prompt_json: string | null; created_at: string; updated_at: string;
 };
+export type PromptMarker = { state: "PROMPTED" | "UNKNOWN_SUBMISSION"; at: string; detail: string | null };
+const promptOf = (a: AttemptRow): PromptMarker | null => (a.prompt_json ? JSON.parse(a.prompt_json) : null);
 /** The slice of chain access reconciliation uses (a viem PublicClient satisfies it through `walletRpcFromClient`; tests inject a fake). */
 export type WalletRpc = {
   getTransaction(a: { hash: Hex }): Promise<any>;
@@ -134,6 +136,19 @@ export async function markSent(db: Db, principal: string, attemptId: string, txH
   await reconcileWalletAttempts(db, rpc, { attemptId, source: "sent" }).catch(() => {});
   return { ok: true, status: 200, attempt: shapeAttempt(db, getAttemptRow(db, attemptId)!) };
 }
+/** POST …/prompt: the browser is about to ask the wallet (PROMPTED), or the wallet answered with something that is not a rejection
+ *  (UNKNOWN_SUBMISSION). Either marker makes a VALIDATED attempt uncertain: it is reconciled from the chain before anything else
+ *  may be signed, and a page refresh restores the uncertainty (review round 3, item 1). */
+export function markPrompted(db: Db, principal: string, attemptId: string, body: any): AttemptResult {
+  const a = owned(db, principal, attemptId); if (!a) return notFound;
+  const event = String(body?.event ?? "");
+  if (event !== "prompted" && event !== "unknown-submission") return bad("event must be prompted or unknown-submission");
+  if (a.state !== "VALIDATED") return conflict("ATTEMPT_NOT_OPEN", `the attempt is ${a.state}; a prompt is recorded for a validated attempt only`);
+  const prior = promptOf(a);
+  const next: PromptMarker = { state: event === "prompted" ? (prior?.state === "UNKNOWN_SUBMISSION" ? "UNKNOWN_SUBMISSION" : "PROMPTED") : "UNKNOWN_SUBMISSION", at: now(), detail: typeof body?.detail === "string" ? body.detail.slice(0, 200) : prior?.detail ?? null };
+  run(db, "UPDATE wallet_attempts SET prompt_json = ?, note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED'", JSON.stringify(next), next.state === "PROMPTED" ? "the wallet was asked to sign this plan; until a hash is reported or the visitor states a rejection, the transaction may have been submitted" : "the wallet returned an error that is not a rejection; the transaction may have been submitted — reconciled from the order state before anything else", now(), attemptId);
+  return { ok: true, status: 200, attempt: shapeAttempt(db, getAttemptRow(db, attemptId)!) };
+}
 /** POST …/abandon: the wallet prompt was rejected; nothing was sent. */
 export function abandonAttempt(db: Db, principal: string, attemptId: string): AttemptResult {
   const a = owned(db, principal, attemptId); if (!a) return notFound;
@@ -146,7 +161,16 @@ export async function observeAttempt(db: Db, principal: string, attemptId: strin
   const a = owned(db, principal, attemptId); if (!a) return notFound;
   const recentlyObserved = Date.now() - new Date(a.updated_at).getTime() < OBSERVE_MIN_INTERVAL_MS;
   if ((a.state === "VALIDATED" || a.state === "BROADCAST_ATTEMPTED") && !recentlyObserved) await reconcileWalletAttempts(db, rpc, { attemptId, source: "observe" }).catch(() => {});
+  else if (a.state !== "VALIDATED" && a.state !== "BROADCAST_ATTEMPTED" && !a.fee_receipt_json) await ensureFeeReceipt(db, rpc, a).catch(() => {}); // a closed attempt still receives a late fee receipt (review round 3, item 7)
   return { ok: true, status: 200, attempt: shapeAttempt(db, getAttemptRow(db, attemptId)!) };
+}
+/** Worker: closed attempts of the last day whose fee relay receipt was not yet captured (bounded), so page and passport agree. */
+export async function backfillFeeReceipts(db: Db, rpc: WalletRpc, limit = 10): Promise<number> {
+  const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString(); let n = 0;
+  for (const a of rows<AttemptRow>(db, "SELECT * FROM wallet_attempts WHERE fee_receipt_json IS NULL AND state NOT IN ('VALIDATED','BROADCAST_ATTEMPTED') AND created_at > ? ORDER BY created_at DESC LIMIT ?", cutoff, limit)) {
+    await ensureFeeReceipt(db, rpc, a).catch(() => {}); if (getAttemptRow(db, a.attempt_id)?.fee_receipt_json) n++;
+  }
+  return n;
 }
 /** POST …/recover: the owner asks for a bounded reconciliation of THAT attempt now (same reads as the worker; nothing is sent). */
 export async function recoverAttempt(db: Db, principal: string, attemptId: string, rpc: WalletRpc = liveRpc(), log: (m: string) => void = () => {}): Promise<AttemptResult> {
@@ -241,7 +265,8 @@ export async function reconcileWalletAttempts(db: Db, rpc: WalletRpc, opts: { at
       if (a.state === "VALIDATED") {
         // inside the window the wallet prompt may still be open: only an explicit recovery command looks at the chain now ("reconcile first"
         // after an ambiguous wallet error); the worker and observe reads wait for the window to close
-        if (validUntil > at.getTime() && opts.source !== "recover") { pending++; continue; }
+        const uncertain = !!promptOf(a);
+        if (validUntil > at.getTime() && opts.source !== "recover" && !(uncertain && opts.source === "observe")) { pending++; continue; }
         const ord = await readOrder();
         if (ord.paid) {
           const head = await rpc.getBlockNumber();
@@ -255,7 +280,7 @@ export async function reconcileWalletAttempts(db: Db, rpc: WalletRpc, opts: { at
           }
           pendingNote(db, a, "the order reads as paid but the paying transaction has not been identified yet (bounded log search continues)", { scannedTo: s.scannedTo }); pending++; continue;
         }
-        if (validUntil > at.getTime()) { pendingNote(db, a, "recovery found no payment for this order yet; the validation window is still open — confirm in your wallet, or abandon if you rejected the prompt"); pending++; continue; }
+        if (validUntil > at.getTime()) { pendingNote(db, a, uncertain ? "the wallet was asked to sign this plan and reconciliation found no payment for this order yet; the transaction may still appear — recover again, or abandon only if you know you rejected the prompt" : "recovery found no payment for this order yet; the validation window is still open — confirm in your wallet, or abandon if you rejected the prompt"); pending++; continue; }
         if (at.getTime() > validUntil + WALLET_CLOSE_AFTER_MS) {
           close(db, a, "NOT_SENT", { chainStatus: "NOT_SIGNED", businessStatus: "NOT_EXECUTED", businessTxHash: null, note: "no transaction was reported within 24 h of the validation window and the order reads as unpaid; closed without a transaction" }, { record });
           resolved++; log(`${a.attempt_id}: NOT_SENT`); continue;
@@ -272,6 +297,9 @@ export async function reconcileWalletAttempts(db: Db, rpc: WalletRpc, opts: { at
       const mismatch = !!comparison?.mismatch.length;
       const mismatchNote = mismatch ? `the transaction the wallet sent deviates from the validated plan in ${comparison!.mismatch.join(", ")}; the order state decides whether the order was paid` : "";
       const rc = await rpc.getTransactionReceipt({ hash }).catch(() => null);
+      if (rc && (!tx || !plan)) { // the receipt alone cannot close the attempt: the plan comparison needs the transaction body (review round 3, item 2)
+        pendingNote(db, a, "the receipt is visible but the transaction body is not served by this node yet; the comparison with the validated plan is outstanding, so nothing is concluded", { deviations: comparison, nonce, from }); pending++; continue;
+      }
       if (rc) {
         const o = await outcomeFromReceipt(rpc as any, subject, hash, rc);
         const state: WalletAttemptState = mismatch ? "MISMATCH" : o.chainStatus === "CONFIRMED" ? "CONFIRMED" : "REVERTED";
@@ -399,7 +427,7 @@ export function attemptResult(db: Db, a: AttemptRow, feeAuthorization: unknown =
 const nextActionOf = (a: AttemptRow): string => {
   const open = a.valid_until && new Date(a.valid_until).getTime() > Date.now();
   switch (a.state) {
-    case "VALIDATED": return open ? "confirm the transaction in your wallet, then the page reports its hash; or abandon it" : "the validation window closed; recover to establish the outcome from the chain, or validate again";
+    case "VALIDATED": return promptOf(a) ? "the wallet was asked to sign this plan: the transaction may have been submitted — recover first; abandon only if you know you rejected the prompt" : open ? "confirm the transaction in your wallet, then the page reports its hash; or abandon it" : "the validation window closed; recover to establish the outcome from the chain, or validate again";
     case "REFUSED": return "review the reasons; nothing was handed to the wallet; fix the cause (approval, funds, order) and validate again";
     case "BROADCAST_ATTEMPTED": return "waiting for the receipt; recover to reconcile now from the hash, the order state and the OrderPaid event";
     case "CONFIRMED": return a.business_status === "SUCCESS" ? "the order is paid: export the Payment Passport and verify it independently" : "the transaction confirmed but the order does not read as paid for this payer and amount: export the passport for the record";
@@ -412,7 +440,7 @@ const nextActionOf = (a: AttemptRow): string => {
 export function shapeAttempt(db: Db, a: AttemptRow, opts: { brief?: boolean } = {}) {
   const decision = JSON.parse(a.decision_json); const refusal = a.refusal_json ? JSON.parse(a.refusal_json) : null; const dev = a.deviations_json ? JSON.parse(a.deviations_json) : null;
   const base = { attemptId: a.attempt_id, executionMode: "wallet" as const, state: a.state, requestId: a.request_id, orderId: a.order_id, merchant: a.merchant, payer: a.payer, amountNativeAtomic: a.amount_atomic, labels: JSON.parse(a.labels_json),
-    decision: decision.decision, decisionReasons: decision.reasons, refusal, validUntil: a.valid_until, txHash: a.tx_hash, nonce: a.nonce, from: a.from_addr, broadcastBlock: a.broadcast_block,
+    decision: decision.decision, decisionReasons: decision.reasons, refusal, validUntil: a.valid_until, prompt: promptOf(a), txHash: a.tx_hash, nonce: a.nonce, from: a.from_addr, broadcastBlock: a.broadcast_block,
     businessStatus: a.business_status, businessTxHash: a.business_tx_hash, block: a.block, note: a.note, deviations: dev, nextAction: nextActionOf(a), passportAvailable: a.state !== "VALIDATED",
     businessExecution: { state: a.state, txHash: a.tx_hash, nonce: a.nonce, broadcastBlock: a.broadcast_block, consumedBy: null, note: a.note, validUntil: a.valid_until },
     createdAt: a.created_at, updatedAt: a.updated_at };

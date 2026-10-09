@@ -1,0 +1,14 @@
+{
+  "chainId": 5042002,
+  "from": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+  "type": 2,
+  "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+  "data": "0x8609cad180772ad6f5e7b9c47eef521a3ce456718e20401c50fd3dd1189a90a033370168",
+  "valueNativeAtomic": "50000000000000000",
+  "nonce": "28",
+  "gasLimit": "40735",
+  "maxFeePerGasNativeAtomic": "29000000000",
+  "maxPriorityFeePerGasNativeAtomic": "5000000000",
+  "accessList": [],
+  "authorizationList": []
+}

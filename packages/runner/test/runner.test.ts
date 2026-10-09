@@ -228,12 +228,12 @@ describe("business-transaction persistence and recovery (spec D07)", () => {
 describe("review round 2 — evidence before the broadcast, the real snapshot age", () => {
   it("persists every artefact up to the signed execution record, and a persistence failure before the broadcast stops the run with nothing sent", async () => {
     const { h, result } = await run({ fixture: "APPROVED_PAYMENT" });
-    expect(h.artifacts.slice(0, 7)).toEqual(["order", "intent", "quote", "feeAuthorization", "report", "decision", "execution"]);
+    expect(h.artifacts.slice(0, 8)).toEqual(["order", "intent", "quote", "feeAuthorization", "report", "approval", "decision", "execution"]);
     expect(h.artifacts).toContain("finalValidation"); expect(h.artifacts.filter((a) => a === "execution").length).toBeGreaterThanOrEqual(3);
     expect(result.execution.chainStatus).toBe("CONFIRMED");
     const h2 = harness({ fixture: "APPROVED_PAYMENT", artifactFails: "finalValidation" });
-    const running = runFixture(h2.options); await vi.runAllTimersAsync();
-    await expect(running).rejects.toThrow(/artefact finalValidation could not be persisted before the broadcast.*nothing was sent/);
+    const expectation = expect(runFixture(h2.options)).rejects.toThrow(/artefact finalValidation could not be persisted before the broadcast.*nothing was sent/); // attached before the timers run: no unhandled rejection
+    await vi.runAllTimersAsync(); await expectation;
     expect(h2.sendRawTransaction).not.toHaveBeenCalled(); expect(h2.store.markBroadcastAttempted).not.toHaveBeenCalled(); expect(h2.signTransaction).not.toHaveBeenCalled();
   });
   it("a persistence failure after the broadcast is logged, never fatal: the outcome is still established", async () => {

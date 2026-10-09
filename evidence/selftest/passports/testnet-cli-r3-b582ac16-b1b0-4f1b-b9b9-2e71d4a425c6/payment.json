@@ -1,0 +1,40 @@
+{
+  "paymentVersion": "1.0",
+  "scheme": "x402/exact",
+  "assetTransferMethod": "eip3009",
+  "requestId": "378be2b9-15a9-4311-8e4b-0cb49b410ca4",
+  "quote": {
+    "schemaVersion": "1.0",
+    "requestId": "378be2b9-15a9-4311-8e4b-0cb49b410ca4",
+    "buyerPrincipal": "demo-runner",
+    "payer": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+    "intentDigest": "0x3f90a0e927902ed1c63273fd6e8b8893ada8373341e6956cf69423db2c96d132",
+    "reportDigest": "0xe5890ebb74251c6d6a4a1aa7236c07fbe081b10e3573255ceaddc9c0bc4a5349",
+    "coverageDigest": "0xe5890ebb74251c6d6a4a1aa7236c07fbe081b10e3573255ceaddc9c0bc4a5349",
+    "network": "eip155:5042002",
+    "asset": "0x3600000000000000000000000000000000000000",
+    "amountTokenAtomic": "10000",
+    "payTo": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+    "preparedAt": "2026-10-09T02:06:55.778Z",
+    "expiresAt": "2026-10-09T02:07:25.778Z",
+    "retentionUntil": "2026-11-08T02:06:55.778Z"
+  },
+  "quoteDigest": "0xd7fdaed0d1427279b98ad77392569c8482e6450229e29fe57d991998ad6486d4",
+  "authorization": {
+    "from": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+    "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+    "value": "10000",
+    "validAfter": "0",
+    "validBefore": "1791515215",
+    "nonce": "0xaf5feb55a8a111281e347f69401dbb861ab45bc274b1623ef2b10c63970daf6b"
+  },
+  "settlement": {
+    "backend": "relay",
+    "state": "COMPLETED",
+    "relayer": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+    "transactionHash": "0xfba1b91d3a9ce0b79bb2cbb73b07c457bccf72b98820a12d14b9ee692d00b855",
+    "blockNumber": null,
+    "authorizationUsedLogIndex": null,
+    "transferLogIndex": null
+  }
+}

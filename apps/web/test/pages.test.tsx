@@ -26,7 +26,7 @@ import Inspect from "../src/pages/Inspect";
 import Demo from "../src/pages/Demo";
 import Verify from "../src/pages/Verify";
 import Home from "../src/pages/Home";
-import { AMBIGUOUS_TEXT } from "../src/lib/attempts";
+import { AMBIGUOUS_TEXT, UNCERTAIN_OPEN_TEXT, UNCERTAIN_TEXT, resetExecutionGuard } from "../src/lib/attempts";
 import { RunPanel, RecoveryDesk, messageOf, headlineOf, orderResultOf } from "../src/components/RunPanel";
 import { WalletChip } from "../src/components/WalletChip";
 import { Hex } from "../src/components/Badges";
@@ -58,7 +58,7 @@ beforeEach(() => {
   vi.stubGlobal("location", { origin: "http://offline.invalid" });
   vi.stubGlobal("window", { setInterval, clearInterval });
 });
-afterEach(() => { for (const e of h.effects) e?.cleanup?.(); vi.useRealTimers(); vi.unstubAllGlobals(); setApiBase(""); });
+afterEach(() => { for (const e of h.effects) e?.cleanup?.(); vi.useRealTimers(); vi.unstubAllGlobals(); setApiBase(""); resetExecutionGuard(); });
 
 const SESSION = (n = 1) => ({ principal: `visitor:${n}`, token: `sess-${n}` });
 // v3.3 shapes (docs/LIFECYCLE.md §8): the creation response, the listed order, a validated attempt with its plan
@@ -68,10 +68,12 @@ const ATTEMPT_ID = "11111111-2222-4333-8444-555555555555";
 const PLAN = { chainId: 5042002, from: ACCOUNT, type: 2, to: MERCHANT, data: "0x8609cad1" + "ab".repeat(32), valueNativeAtomic: order.amountNativeAtomic, nonce: "7", gasLimit: "40735", maxFeePerGasNativeAtomic: "29000000000", maxPriorityFeePerGasNativeAtomic: "5000000000", accessList: [], authorizationList: [] };
 const VALIDATED: any = { attemptId: ATTEMPT_ID, executionMode: "wallet", state: "VALIDATED", requestId: REQUEST, orderId: order.orderId, merchant: MERCHANT, payer: ACCOUNT, amountNativeAtomic: order.amountNativeAtomic, labels: ["LIVE_REQUEST"], decision: "NO_POLICY_VIOLATION", decisionReasons: [], refusal: null, validUntil: new Date(NOW.getTime() + 60_000).toISOString(), txHash: null, nonce: null, from: null, broadcastBlock: null, businessStatus: null, businessTxHash: null, block: null, note: null, deviations: null, nextAction: "confirm in your wallet", passportAvailable: false, businessExecution: { state: "VALIDATED", txHash: null, nonce: null, broadcastBlock: null, consumedBy: null, note: null, validUntil: null }, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(), plan: PLAN, costStatement: null, recovery: null };
 function developerApi(firstPin = "100") {
-  const sent: any[] = []; const attempts: any[] = []; let revoked = false; let sessions = 0;
+  const sent: any[] = []; const attempts: any[] = []; const prompts: any[] = []; let revoked = false; let sessions = 0;
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     if (path === "/v1/session") return response(SESSION(++sessions), 201);
+    // §10 item 1: the prompt marker route answers the view with `prompt` set
+    if (path === `/v1/wallet/attempts/${ATTEMPT_ID}/prompt`) { const b = JSON.parse(init!.body as string); prompts.push(b); return response({ ...VALIDATED, prompt: { state: b.event === "prompted" ? "PROMPTED" : "UNKNOWN_SUBMISSION", at: NOW.toISOString(), detail: b.detail ?? null } }); }
     if (path === "/v1/demo/orders" && method === "POST") return response(CREATED, 201);
     if (path === "/v1/demo/orders") return response({ orders: [ORDER_VIEW] });
     if (path.startsWith("/v1/demo/orders/")) return response(ORDER_VIEW);
@@ -90,7 +92,7 @@ function developerApi(firstPin = "100") {
     throw new Error(`Unexpected URL: ${path}`);
   });
   vi.stubGlobal("fetch", fetch);
-  return { sent, attempts, fetch, revoke: () => { revoked = true; }, sessions: () => sessions };
+  return { sent, attempts, prompts, fetch, revoke: () => { revoked = true; }, sessions: () => sessions };
 }
 const dialogNode = (tree: any) => nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "OrderDialog");
 /** step 1 through the dialog (the dialog's own form is exercised in isolation below), then step 2 "Approve & continue" */
@@ -168,13 +170,14 @@ it("Developer step 4 executes through the attempt API: validated plan → eth_se
   expect(policyDigest(api.attempts[0].policy)).toBe(api.sent[1].intent.policyDigest); // the buyer's policy is the one the intent references
   expect(api.attempts[0].policy.maxFinalValidationAgeSeconds).toBe(60); // the human-paced window
   expect(txRequest).toMatchObject({ from: ACCOUNT, to: MERCHANT, data: PLAN.data, type: "0x2", gas: "0x9f1f" }); expect(txRequest.nonce).toBeUndefined();
-  expect(JSON.parse(rememberedAtPrompt!)[ATTEMPT_ID]).toMatchObject({ attemptId: ATTEMPT_ID, orderId: order.orderId, state: "VALIDATED" }); // remembered BEFORE the wallet was asked
+  expect(JSON.parse(rememberedAtPrompt!)[ATTEMPT_ID]).toMatchObject({ attemptId: ATTEMPT_ID, orderId: order.orderId, state: "VALIDATED", promptState: "PROMPTED" }); // remembered, with the §10 marker, BEFORE the wallet was asked
+  expect(api.prompts).toEqual([{ event: "prompted" }]); // §10 item 1: the marker is durable on the server before the prompt; a hash afterwards is never an unknown submission
   const methods = h.wallet.provider.request.mock.calls.map((c: any[]) => c[0].method);
   expect(methods.filter((m: string) => m === "eth_sendTransaction")).toHaveLength(1);
   expect(methods.lastIndexOf("eth_accounts")).toBeLessThan(methods.indexOf("eth_sendTransaction")); expect(methods.lastIndexOf("eth_chainId")).toBeLessThan(methods.indexOf("eth_sendTransaction")); // re-read right before the prompt
   for (const forbidden of ["eth_sendRawTransaction", "eth_signTransaction", "wallet_sendCalls"]) expect(methods).not.toContain(forbidden);
   const paths = api.fetch.mock.calls.map((c) => c[0]);
-  expect(paths.indexOf("/v1/wallet/attempts")).toBeLessThan(paths.indexOf(`/v1/wallet/attempts/${ATTEMPT_ID}/sent`));
+  expect(paths.indexOf("/v1/wallet/attempts")).toBeLessThan(paths.indexOf(`/v1/wallet/attempts/${ATTEMPT_ID}/prompt`)); expect(paths.indexOf(`/v1/wallet/attempts/${ATTEMPT_ID}/prompt`)).toBeLessThan(paths.indexOf(`/v1/wallet/attempts/${ATTEMPT_ID}/sent`));
   expect(JSON.parse((api.fetch.mock.calls.find((c) => c[0] === `/v1/wallet/attempts/${ATTEMPT_ID}/sent`)![1] as RequestInit).body as string)).toEqual({ txHash: D });
   const panel = nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "AttemptPanel");
   expect(panel.props.attempt.state).toBe("CONFIRMED"); expect(panel.props.phase).toBe("done");
@@ -947,5 +950,129 @@ describe("round 2 · verification state in the browser", () => {
     verify.props.onVerified(verifierResult(ALL_PASS), { kind: "passed", tone: "ok", failing: [], unverified: [], counts: { pass: 10, fail: 0, unverified: 0, notEvaluated: 1 }, text: "x" }); tree = render(Developer);
     rail = fnNode(tree, "Lifecycle").props.stages.find((s: any) => s.id === "verify");
     expect(rail).toMatchObject({ status: "done", note: "verified in this browser: passed" });
+  });
+});
+
+// ---- review round 3 (docs/LIFECYCLE.md §10): durable submission uncertainty (item 1), the order dialog when the wallet leaves mid-review (item 5) ----
+const PROMPTED = { state: "PROMPTED", at: NOW.toISOString(), detail: null };
+/** the view the API serves once POST …/prompt recorded the marker: still VALIDATED, `prompt` set, `nextAction` saying recover first */
+const UNCERTAIN: any = { ...VALIDATED, prompt: PROMPTED, nextAction: "the wallet was asked to sign this plan: the transaction may have been submitted — recover first; abandon only if you know you rejected the prompt", note: "the wallet was asked to sign this plan; until a hash is reported or the visitor states a rejection, the transaction may have been submitted" };
+const buttonTexts = (tree: any) => nodes(tree).filter((n) => n.type === "button").map((b) => content(b));
+const OTHER_LOWER = "0x0000000000000000000000000000000000000b11";
+
+describe("round 3 · an attempt whose wallet prompt was opened is uncertain, across a refresh", () => {
+  it("AttemptPanel: with a prompt marker a VALIDATED attempt never offers 'Continue in wallet' or 'Abandon (nothing sent)'; it reads the uncertainty sentence while reconciling, then offers Recover and 'I rejected it — abandon'", async () => {
+    const { AttemptPanel } = await import("../src/components/AttemptPanel");
+    const actions = { onAbandon: vi.fn(), onResume: vi.fn(), onRecover: vi.fn(), onRefresh: vi.fn() };
+    // restored, reconciliation about to run (the page is busy with it)
+    let tree = render(() => AttemptPanel({ attempt: UNCERTAIN, phase: "idle", net: h.net, busy: true, now: NOW.getTime(), actions }));
+    expect(content(tree)).toContain(UNCERTAIN_TEXT); expect(tree.props["data-uncertain"]).toBe(true);
+    expect(buttonTexts(tree).some((t) => t.includes("Continue in wallet"))).toBe(false); expect(buttonTexts(tree).some((t) => t.includes("Abandon (nothing sent)"))).toBe(false);
+    expect(content(tree).toLowerCase()).not.toContain("nothing was sent"); expect(content(tree)).not.toContain("waits for your wallet");
+    // the loop runs
+    freshHooks(); tree = render(() => AttemptPanel({ attempt: UNCERTAIN, phase: "uncertain", net: h.net, busy: true, now: NOW.getTime(), actions }));
+    expect(content(tree)).toContain(UNCERTAIN_TEXT); expect(content(tree)).toContain("reconciling — wait for the result");
+    expect(buttonTexts(tree).some((t) => t.includes("Continue in wallet"))).toBe(false);
+    // …and found nothing yet: the visitor decides — recover again, or the explicit statement
+    freshHooks(); tree = render(() => AttemptPanel({ attempt: UNCERTAIN, phase: "uncertain", net: h.net, busy: false, now: NOW.getTime(), actions }));
+    expect(content(tree)).toContain(UNCERTAIN_OPEN_TEXT);
+    expect(button(tree, "I rejected it — abandon")).toBeDefined(); expect(button(tree, "Recover")).toBeDefined();
+    expect(buttonTexts(tree).some((t) => t.includes("Continue in wallet"))).toBe(false); expect(buttonTexts(tree).some((t) => t.includes("Abandon (nothing sent)"))).toBe(false);
+    expect(content(tree)).toContain("this plan was already handed to a wallet"); expect(content(tree)).toContain("decide: abandon only if you know the prompt was rejected; otherwise recover again"); // the panel's own next action, not the server's idle one
+    button(tree, "I rejected it — abandon").props.onClick(); expect(actions.onAbandon).toHaveBeenCalledWith(ATTEMPT_ID);
+    button(tree, "Recover").props.onClick(); expect(actions.onRecover).toHaveBeenCalledWith(ATTEMPT_ID);
+    // the marker known to this browser only (a view without the key): the same
+    memStorage({ "arcpreflight.attempts:root": JSON.stringify({ [ATTEMPT_ID]: { attemptId: ATTEMPT_ID, orderId: order.orderId, requestId: REQUEST, createdAt: NOW.toISOString(), state: "VALIDATED", promptState: "PROMPTED" } }) });
+    freshHooks(); tree = render(() => AttemptPanel({ attempt: VALIDATED, phase: "idle", net: h.net, busy: false, now: NOW.getTime(), actions }));
+    expect(content(tree)).toContain(UNCERTAIN_OPEN_TEXT); expect(buttonTexts(tree).some((t) => t.includes("Continue in wallet"))).toBe(false); expect(button(tree, "I rejected it — abandon")).toBeDefined();
+    // a closed result after recovery renders as usual
+    freshHooks(); tree = render(() => AttemptPanel({ attempt: { ...UNCERTAIN, state: "NOT_SENT", businessStatus: "NOT_EXECUTED" }, phase: "done", net: h.net, now: NOW.getTime(), actions }));
+    expect(content(tree)).toContain("Nothing was sent: the wallet prompt was rejected or abandoned."); expect(tree.props["data-uncertain"]).toBeUndefined();
+    freshHooks(); tree = render(() => AttemptPanel({ attempt: { ...UNCERTAIN, state: "CONFIRMED", businessStatus: "SUCCESS", txHash: D, businessTxHash: D }, phase: "done", net: h.net, now: NOW.getTime(), actions }));
+    expect(content(tree)).toContain("Order payment confirmed");
+    // while THIS page is prompting with it (the marker is written right before its own prompt) the panel is not "uncertain"
+    freshHooks(); tree = render(() => AttemptPanel({ attempt: UNCERTAIN, phase: "prompting", net: h.net, busy: true, now: NOW.getTime(), actions }));
+    expect(content(tree)).toContain("Confirm the transaction in your wallet"); expect(tree.props["data-uncertain"]).toBeUndefined();
+  });
+  it("Developer: a refresh with a VALIDATED attempt that carries the marker restores the uncertainty, not an idle attempt — recover once, then observe; no 'Continue in wallet' anywhere; 'I rejected it — abandon' closes it as NOT_SENT and renders as usual", async () => {
+    memStorage({
+      "arcpreflight.session:root": JSON.stringify({ principal: "visitor:1", token: "sess-1" }),
+      "arcpreflight.workflow:root": JSON.stringify({ [ACCOUNT.toLowerCase()]: { payer: ACCOUNT, orderId: order.orderId, proxy: "MAIN", baselineDigest: baselineHash, approved: true, requestId: REQUEST, intent: null, attemptId: ATTEMPT_ID, updatedAt: NOW.toISOString() } }),
+    });
+    const calls: { path: string; method: string }[] = []; let closed: any = null;
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET"; calls.push({ path, method });
+      if (path === "/v1/demo/orders") return response({ orders: [ORDER_VIEW] });
+      if (path.startsWith("/v1/demo/orders/")) return response(ORDER_VIEW);
+      if (path === "/v1/wallet/attempts") return response({ attempts: [closed ?? { ...UNCERTAIN, plan: undefined }] });
+      if (path === `/v1/wallet/attempts/${ATTEMPT_ID}/recover`) return response(closed ?? { ...UNCERTAIN, note: "the wallet was asked to sign this plan and reconciliation found no payment for this order yet; the transaction may still appear — recover again, or abandon only if you know you rejected the prompt" });
+      if (path === `/v1/wallet/attempts/${ATTEMPT_ID}/abandon`) { closed = { ...UNCERTAIN, state: "NOT_SENT", businessStatus: "NOT_EXECUTED", nextAction: "nothing was sent; the order stays unpaid", passportAvailable: true }; return response(closed); }
+      if (path === `/v1/wallet/attempts/${ATTEMPT_ID}`) return response(closed ?? UNCERTAIN);
+      if (path === "/v1/requests") return response({ requests: [] });
+      if (path.startsWith("/v1/baselines/")) return response({ baselineDigest: baselineHash, baseline, revoked: false });
+      throw new Error(`Unexpected URL: ${path}`);
+    }));
+    render(Developer); await flush(); let tree = render(Developer); await flush(); tree = render(Developer);
+    // restored as uncertain: the sentence, one recover, observing — and not a single wallet call
+    let panel = fnNode(tree, "AttemptPanel"); expect(panel.props.attempt.attemptId).toBe(ATTEMPT_ID); expect(panel.props.phase).toBe("uncertain"); expect(panel.props.busy).toBe(true);
+    let rendered = panel.type(panel.props);
+    expect(content(rendered)).toContain(UNCERTAIN_TEXT);
+    expect(buttonTexts(rendered).some((t) => t.includes("Continue in wallet"))).toBe(false); expect(buttonTexts(rendered).some((t) => t.includes("Abandon (nothing sent)"))).toBe(false);
+    expect(content(rendered).toLowerCase()).not.toContain("nothing was sent");
+    expect(calls.filter((c) => c.path === `/v1/wallet/attempts/${ATTEMPT_ID}/recover`)).toHaveLength(1);
+    expect(h.wallet.provider.request.mock.calls.some((c: any[]) => c[0].method === "eth_sendTransaction")).toBe(false);
+    expect(content(tree)).toContain("submission uncertain"); expect(content(tree)).toContain("wallet was asked to sign — submission uncertain"); // step 4's summary chip and the rail's note
+    const execBtn = nodes(tree).find((n) => n.type === "button" && n.props.className === "btn primary" && content(n).includes("reconciling")); // step 4's primary button reads "reconciling…" and is disabled: no execution starts
+    expect(execBtn?.props.disabled).toBe(true); expect(buttonTexts(tree).some((t) => t.includes("Execute with your wallet"))).toBe(false);
+    const rows = byTestId(tree, "my-attempts"); expect(rows).toBeDefined();
+    expect(buttonTexts(rows).some((t) => t.includes("Continue in wallet"))).toBe(false); expect(button(rows, "I rejected it — abandon")).toBeDefined(); expect(buttonTexts(rows).some((t) => t === '"Abandon"')).toBe(false);
+    // the loop observes every 2 s (the server reads the chain for such attempts); recover is not repeated by itself
+    const getsBefore = calls.filter((c) => c.path === `/v1/wallet/attempts/${ATTEMPT_ID}` && c.method === "GET").length;
+    await vi.advanceTimersByTimeAsync(4100); tree = render(Developer);
+    expect(calls.filter((c) => c.path === `/v1/wallet/attempts/${ATTEMPT_ID}` && c.method === "GET").length).toBe(getsBefore + 2);
+    expect(calls.filter((c) => c.path.endsWith("/recover"))).toHaveLength(1);
+    expect(fnNode(tree, "AttemptPanel").props.phase).toBe("uncertain");
+    // the visitor states the rejection: the attempt closes NOT_SENT, the loop ends, the panel renders the closed state as usual
+    panel = fnNode(tree, "AttemptPanel");
+    await panel.props.actions.onAbandon(ATTEMPT_ID); await vi.advanceTimersByTimeAsync(2100); tree = render(Developer);
+    expect(calls.filter((c) => c.path.endsWith("/abandon"))).toHaveLength(1);
+    panel = fnNode(tree, "AttemptPanel"); expect(panel.props.attempt.state).toBe("NOT_SENT"); expect(panel.props.phase).toBe("done"); expect(panel.props.busy).toBe(false);
+    rendered = panel.type(panel.props); expect(content(rendered)).toContain("Nothing was sent: the wallet prompt was rejected or abandoned."); expect(rendered.props["data-uncertain"]).toBeUndefined();
+    expect(h.wallet.provider.request.mock.calls.some((c: any[]) => c[0].method === "eth_sendTransaction")).toBe(false);
+  });
+});
+
+describe("round 3 · the order dialog when the wallet leaves mid-review (item 5)", () => {
+  it("disconnecting or switching the account during the review returns to the form with a notice and never reads the null body", async () => {
+    const { OrderDialog } = await import("../src/components/OrderDialog");
+    const create = vi.fn(async () => CREATED); const onCreated = vi.fn(); const onClose = vi.fn();
+    const limits = { minNativeAtomic: 10n ** 15n, maxNativeAtomic: 10n ** 18n, stepNativeAtomic: 10n ** 12n, defaultNativeAtomic: 5n * 10n ** 16n, maxReferenceLength: 64 };
+    const net: any = { ...h.net, fixtures: [{ id: "APPROVED_PAYMENT", proxy: "MAIN", merchant: MERCHANT, implementation: IMPL, approvedImplementation: IMPL, baselineDigest: baselineHash, expected: "NO_POLICY_VIOLATION" }] };
+    const dlg = (payer: string | null) => render(() => OrderDialog({ payer, net, limits, create, onCreated, onClose }));
+    const form = (tree: any) => nodes(tree).find((n) => n.type === "form");
+    const payerInput = (tree: any) => nodes(tree).find((n) => n.type === "input" && n.props.id === "of-payer");
+    freshHooks(); let tree = dlg(ACCOUNT);
+    button(tree, "Autofill sample order").props.onClick(); tree = dlg(ACCOUNT);
+    form(tree).props.onSubmit({ preventDefault() {} }); tree = dlg(ACCOUNT);
+    expect(content(tree)).toContain("Review the order"); expect(content(byTestId(tree, "order-review"))).toContain(ACCOUNT);
+    // the wallet disconnects: the validated body is null — no throw, back on the form, the notice says why
+    expect(() => { tree = dlg(null); }).not.toThrow();
+    expect(content(tree)).toContain("Create a demonstration order"); expect(byTestId(tree, "order-review")).toBeUndefined();
+    tree = dlg(null); // the effect's state lands
+    expect(content(byTestId(tree, "order-notice"))).toContain("Your wallet disconnected while you were reviewing"); expect(button(tree, "Review order →").props.disabled).toBe(true);
+    expect(payerInput(tree).props.value).toBe(""); expect(create).not.toHaveBeenCalled();
+    // reconnected: review again (the notice goes away); then the account changes mid-review
+    tree = dlg(ACCOUNT); form(tree).props.onSubmit({ preventDefault() {} }); tree = dlg(ACCOUNT);
+    expect(content(tree)).toContain("Review the order"); expect(byTestId(tree, "order-notice")).toBeUndefined();
+    expect(() => { tree = dlg(OTHER_LOWER); }).not.toThrow(); tree = dlg(OTHER_LOWER);
+    expect(content(tree)).toContain("Create a demonstration order"); expect(byTestId(tree, "order-review")).toBeUndefined();
+    expect(content(byTestId(tree, "order-notice"))).toContain("Your wallet switched accounts while you were reviewing");
+    expect(payerInput(tree).props.value).toBe(OTHER_LOWER); // the form shows the account that is connected now
+    // submitting again reviews the NEW payer's body — never a create with the stale one
+    form(tree).props.onSubmit({ preventDefault() {} }); tree = dlg(OTHER_LOWER);
+    expect(content(tree)).toContain("Review the order"); expect(content(byTestId(tree, "order-review"))).toContain(OTHER_LOWER); expect(content(byTestId(tree, "order-review"))).not.toContain(ACCOUNT);
+    expect(create).not.toHaveBeenCalled();
+    await form(tree).props.onSubmit({ preventDefault() {} });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ payer: OTHER_LOWER })); expect(onCreated).toHaveBeenCalledWith(CREATED);
   });
 });

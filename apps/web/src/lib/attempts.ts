@@ -5,8 +5,13 @@
 // returns it, polls the observe route until the state leaves BROADCAST_ATTEMPTED, abandons on a rejected prompt, and treats any OTHER
 // wallet error as a possible submission: reconcile first (POST …/recover), then poll — never a second prompt, never "nothing was sent"
 // until the attempt is closed or the visitor explicitly abandons it. One execution at a time: a second call joins the one in flight.
+// Review round 3 (docs/LIFECYCLE.md §10): the uncertainty is DURABLE — a `prompted` marker is written on the server (POST …/prompt) right
+// before the wallet is asked and `unknown-submission` when it answered with anything but a rejection; a marker that cannot be written means
+// nothing is prompted. A VALIDATED attempt that carries a marker (server view or this browser's memory) is *uncertain*: after a refresh it
+// is reconciled (recover once, then observe), and only "Recover" and "I rejected it — abandon" are offered. The window is re-read from the
+// clock after every await that precedes eth_sendTransaction, not once at the start (item 4).
 import { toHex } from "viem";
-import { api, ApiError, type AttemptState, type AttemptView, type Deviations } from "./api";
+import { api, ApiError, type AttemptState, type AttemptView, type Deviations, type PromptMarker } from "./api";
 import type { Eip1193 } from "./wallet";
 import { scopedKey } from "./storage";
 import { describeError, type Described } from "./errors";
@@ -34,7 +39,9 @@ export function isUserRejection(e: unknown): boolean {
 }
 
 // ---- remembered attempts (per API instance): found again after a refresh, before the server list has answered
-export type RememberedAttempt = { attemptId: string; orderId: string; requestId: string; createdAt: string; state?: AttemptState | string };
+/** `promptState` (§10 item 1): the prompt marker as this browser last knew it — written before eth_sendTransaction, so a refresh while the
+ *  wallet is open restores the uncertainty even before the server view has answered */
+export type RememberedAttempt = { attemptId: string; orderId: string; requestId: string; createdAt: string; state?: AttemptState | string; promptState?: PromptMarker["state"] | null };
 const STORE = () => scopedKey("arcpreflight.attempts");
 function read(): Record<string, RememberedAttempt> {
   try { const raw = localStorage.getItem(STORE()); const v = raw ? JSON.parse(raw) : {}; return v && typeof v === "object" && !Array.isArray(v) ? v : {}; } catch { return {}; }
@@ -46,18 +53,28 @@ export function rememberAttempt(a: RememberedAttempt) {
 }
 export const rememberedAttempts = (): RememberedAttempt[] => Object.values(read()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 export const rememberedAttempt = (id: string): RememberedAttempt | null => read()[id] ?? null;
-const rememberView = (a: AttemptView) => rememberAttempt({ attemptId: a.attemptId, orderId: a.orderId, requestId: a.requestId, createdAt: a.createdAt, state: a.state });
+// the server's marker is copied when the view carries one; a view from an API without the route (no `prompt` key) leaves the local memory alone
+const rememberView = (a: AttemptView) => rememberAttempt({ attemptId: a.attemptId, orderId: a.orderId, requestId: a.requestId, createdAt: a.createdAt, state: a.state, ...(a.prompt ? { promptState: a.prompt.state } : {}) });
+/** §10 item 1: a VALIDATED attempt whose wallet prompt was opened (server marker, or this browser's memory of having opened it) — the transaction
+ *  may have been submitted. Never "Continue in wallet", never "Abandon (nothing sent)": recover first, abandon only as an explicit "I rejected it". */
+export function isUncertain(a: Pick<AttemptView, "attemptId" | "state" | "prompt"> | null | undefined, remembered: RememberedAttempt | null | undefined = a ? rememberedAttempt(a.attemptId) : null): boolean {
+  return !!a && a.state === "VALIDATED" && (!!a.prompt || !!remembered?.promptState);
+}
 
 // ---- the state machine
 /** `unknown-submission`: the wallet threw something that is not a rejection — the transaction may have left; reconciling. `open-attempt`: the
- *  server answered ATTEMPT_OPEN and the open attempt was loaded instead (continue, abandon or recover it). */
-export type ExecutePhase = "idle" | "validating" | "prompting" | "reporting" | "polling" | "done" | "unresolved" | "refused" | "abandoned" | "error" | "unknown-submission" | "open-attempt";
+ *  server answered ATTEMPT_OPEN and the open attempt was loaded instead (continue, abandon or recover it). `uncertain`: a VALIDATED attempt
+ *  restored with a prompt marker (after a refresh, from the list, or found open) — this page never saw the wallet's answer; reconciling. */
+export type ExecutePhase = "idle" | "validating" | "prompting" | "reporting" | "polling" | "done" | "unresolved" | "refused" | "abandoned" | "error" | "unknown-submission" | "open-attempt" | "uncertain";
 export type Refusal = { stage: "decision" | "finalValidation" | "server"; reasons: string[]; attemptId: string | null; text: string };
 export type ExecuteEvent = { phase: ExecutePhase; attempt: AttemptView | null; txHash?: string | null; refusal?: Refusal | null; error?: Described | null };
 export type Poller = { intervalMs?: number; maxMs?: number; /** how long an ambiguous submission is reconciled before the visitor is asked (default 60 s) */ ambiguousMaxMs?: number; wait?: (ms: number) => Promise<void>; now?: () => number };
 const sleep = (ms: number) => new Promise<void>((s) => setTimeout(s, ms));
 export const AMBIGUOUS_TEXT = "The wallet did not return a hash; the transaction may have been submitted. Reconciling from the order state…";
 export const AMBIGUOUS_OPEN_TEXT = "The wallet returned an error instead of a hash and reconciliation found no payment for this order yet. The attempt stays VALIDATED: if you know you rejected the prompt, abandon it; otherwise recover again in a moment — nothing is prompted again by itself.";
+/** §10 item 1: a restored attempt whose prompt was opened before (this page never saw the wallet's answer) */
+export const UNCERTAIN_TEXT = "The wallet was asked to sign this plan; the transaction may have been submitted. Reconciling from the order state…";
+export const UNCERTAIN_OPEN_TEXT = "The wallet was asked to sign this plan and no payment for this order has been found yet. The attempt stays VALIDATED: if you know you rejected the prompt, abandon it; otherwise recover again in a moment — nothing is prompted again by itself.";
 
 /** GET …/{id} every ~2 s (the server throttles chain reads to one per 1.5 s per attempt) until the state leaves the open set or `maxMs` passes. */
 export async function pollAttempt(attemptId: string, withToken: WithToken, opts: Poller = {}, onTick?: (a: AttemptView) => void): Promise<{ attempt: AttemptView | null; settled: boolean }> {
@@ -78,10 +95,19 @@ export async function findOpenAttempt(orderId: string, withToken: WithToken): Pr
   return brief ? withToken((t) => api.attempt(brief.attemptId, t)) : null;
 }
 
-export type PreSendCheck = { ok: true } | { ok: false; code: "ACCOUNT_CHANGED" | "CHAIN_CHANGED" | "WINDOW_CLOSED" | "WALLET_UNAVAILABLE"; text: string };
+export type PreSendCheck = { ok: true } | { ok: false; code: "ACCOUNT_CHANGED" | "CHAIN_CHANGED" | "WINDOW_CLOSED" | "WALLET_UNAVAILABLE" | "PROMPT_MARKER_FAILED" | "ATTEMPT_UNCERTAIN"; text: string };
+/** §10 item 4: more than 5 s of the validation window must be left AT THIS MOMENT — `now` is read after every await that precedes the prompt
+ *  (the wallet's own reads, the prompt marker), never once at the start of the call. */
+export function windowCheck(attempt: Pick<AttemptView, "validUntil">, now: number): PreSendCheck {
+  const left = attempt.validUntil ? new Date(attempt.validUntil).getTime() - now : 0;
+  if (left <= MIN_WINDOW_LEFT_MS)
+    return { ok: false, code: "WINDOW_CLOSED", text: left > 0 ? `The validation window closes in ${Math.ceil(left / 1000)} s — too little for a wallet prompt; nothing was prompted. Recover reads the order state; abandon records that nothing was sent; a new execution validates a fresh plan.` : `The validation window closed${attempt.validUntil ? ` at ${utc(attempt.validUntil)}` : ""}; nothing was prompted. Recover reads the order state; abandon records that nothing was sent.` };
+  return { ok: true };
+}
 /** Immediately before eth_sendTransaction: the wallet's first account must be the plan's `from` and the attempt's payer, its chain the
- *  plan's chainId, and more than 5 s of the validation window must be left. A mismatch aborts without a prompt and says why. */
-export async function preSendCheck(provider: Eip1193, attempt: AttemptView, now = Date.now()): Promise<PreSendCheck> {
+ *  plan's chainId, and more than 5 s of the validation window must be left. A mismatch aborts without a prompt and says why.
+ *  `clock` is consulted AFTER the wallet answered `eth_accounts` / `eth_chainId` (item 4): a wallet that answers slowly cannot carry a plan past its window. */
+export async function preSendCheck(provider: Eip1193, attempt: AttemptView, clock: () => number = Date.now): Promise<PreSendCheck> {
   const plan = attempt.plan as { from: string; chainId: number };
   let accounts: unknown, chainHex: unknown;
   try { [accounts, chainHex] = await Promise.all([provider.request({ method: "eth_accounts" }), provider.request({ method: "eth_chainId" })]); }
@@ -92,10 +118,7 @@ export async function preSendCheck(provider: Eip1193, attempt: AttemptView, now 
   const chainId = Number(chainHex);
   if (!Number.isFinite(chainId) || chainId !== plan.chainId)
     return { ok: false, code: "CHAIN_CHANGED", text: `Your wallet is on chain ${Number.isFinite(chainId) ? chainId : String(chainHex)}; the plan was validated for chain ${plan.chainId}. Nothing was prompted — switch the wallet back to chain ${plan.chainId} to continue inside the window, or abandon the attempt.` };
-  const left = attempt.validUntil ? new Date(attempt.validUntil).getTime() - now : 0;
-  if (left <= MIN_WINDOW_LEFT_MS)
-    return { ok: false, code: "WINDOW_CLOSED", text: left > 0 ? `The validation window closes in ${Math.ceil(left / 1000)} s — too little for a wallet prompt; nothing was prompted. Recover reads the order state; abandon records that nothing was sent; a new execution validates a fresh plan.` : `The validation window closed${attempt.validUntil ? ` at ${utc(attempt.validUntil)}` : ""}; nothing was prompted. Recover reads the order state; abandon records that nothing was sent.` };
-  return { ok: true };
+  return windowCheck(attempt, clock()); // read now, after the awaits above
 }
 
 // one execution at a time: the button, a double click and a resumed attempt all join the call in flight
@@ -137,6 +160,8 @@ async function executeInner(i: ExecuteInput): Promise<ExecuteEvent> {
           const last = polled.attempt ?? open;
           return emit({ phase: polled.settled ? "done" : "unresolved", attempt: last, txHash: last.businessTxHash ?? last.txHash });
         }
+        // §10 item 1: the open attempt was already handed to a wallet (by this page before a refresh, or by another tab): reconcile, never offer it to the wallet again
+        if (isUncertain(open)) { emit({ phase: "uncertain", attempt: open }); return reconcileLoop(open, i.withToken, i.poll, emit, { phase: "uncertain", recoverEvery: 0 }); }
         return emit({ phase: "open-attempt", attempt: open });
       }
     }
@@ -152,10 +177,19 @@ async function sendInner(i: SendInput): Promise<ExecuteEvent> {
   const emit = (ev: ExecuteEvent) => { i.onEvent?.(ev); return ev; };
   const { attempt } = i;
   if (attempt.state !== "VALIDATED" || !attempt.plan) return emit({ phase: "error", attempt, error: { text: `This attempt is ${attempt.state}; only a validated attempt with its plan can be handed to the wallet.`, code: "ATTEMPT_NOT_OPEN", raw: attempt } });
+  // §10 item 1: a plan that was already handed to a wallet is never handed to it again — the transaction may have been submitted; reconcile instead
+  if (isUncertain(attempt)) return emit({ phase: "uncertain", attempt, error: { text: UNCERTAIN_REFUSAL, code: "ATTEMPT_UNCERTAIN", raw: null } });
   // remembered BEFORE the prompt: a refresh while the wallet is open still finds the attempt in "My workflow"
   rememberView(attempt);
-  const pre = await preSendCheck(i.provider, attempt, (i.poll?.now ?? Date.now)());
+  const clock = i.poll?.now ?? Date.now;
+  const pre = await preSendCheck(i.provider, attempt, clock); // item 4: the window is read after the wallet answered, inside
   if (!pre.ok) return emit({ phase: "error", attempt, error: { text: pre.text, code: pre.code, raw: null } }); // the attempt stays VALIDATED for abandon / recover
+  // §10 item 1: the marker is durable on the server BEFORE the wallet is asked; a marker that cannot be written means the uncertainty could not be persisted — nothing is prompted
+  try { const marked = await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "prompted", t)); rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: attempt.state, promptState: marked.prompt?.state ?? "PROMPTED" }); }
+  catch (e) { return emit({ phase: "error", attempt, error: { text: `The service could not record that your wallet is about to be asked (${describeError(e).text}) — nothing was prompted, because a prompt whose uncertainty cannot be kept across a refresh is not opened. The attempt stays validated: try again inside the window, or abandon it.`, code: "PROMPT_MARKER_FAILED", raw: e instanceof ApiError ? e.body : null } }); }
+  // item 4: the marker call was another await — the window is read once more, immediately before the prompt
+  const win = windowCheck(attempt, clock());
+  if (!win.ok) return emit({ phase: "error", attempt, error: { text: win.text, code: win.code, raw: null } });
   emit({ phase: "prompting", attempt });
   let txHash: string;
   try {
@@ -180,40 +214,68 @@ async function sendInner(i: SendInput): Promise<ExecuteEvent> {
   return emit({ phase: polled.settled ? "done" : "unresolved", attempt: last, txHash });
 }
 
-/** The wallet threw something that is not a rejection: the transaction MAY have been submitted. Reconcile first (POST …/recover performs the
- *  order / OrderPaid search at once, docs/LIFECYCLE.md §9), then observe every ~2 s with a recover every third tick, for up to 60 s. Ends
- *  `done` when the attempt closes (CONFIRMED through OrderPaid, or MISMATCH/REVERTED), otherwise stays `unknown-submission` with the attempt
- *  still VALIDATED: the visitor decides (explicit abandon) — never a second prompt, never "nothing was sent". */
+/** The wallet threw something that is not a rejection: the transaction MAY have been submitted. The `unknown-submission` marker is written first
+ *  (§10 item 1 — best effort here: the `prompted` marker already made the attempt uncertain on the server; this browser remembers it either way),
+ *  then reconcile first (POST …/recover performs the order / OrderPaid search at once, docs/LIFECYCLE.md §9), then observe every ~2 s with a
+ *  recover every third tick, for up to 60 s. Ends `done` when the attempt closes (CONFIRMED through OrderPaid, or MISMATCH/REVERTED), otherwise
+ *  stays `unknown-submission` with the attempt still VALIDATED: the visitor decides (explicit abandon) — never a second prompt, never "nothing was sent". */
 async function reconcileAmbiguous(i: SendInput, attempt: AttemptView, error: Described, emit: (ev: ExecuteEvent) => ExecuteEvent): Promise<ExecuteEvent> {
   emit({ phase: "unknown-submission", attempt, error });
-  const intervalMs = i.poll?.intervalMs ?? 2000, maxMs = i.poll?.ambiguousMaxMs ?? 60_000, wait = i.poll?.wait ?? sleep, now = i.poll?.now ?? Date.now;
+  rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: attempt.state, promptState: "UNKNOWN_SUBMISSION" });
+  try { rememberView(await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "unknown-submission", t, error.text))); } catch { /* the PROMPTED marker is already durable; reconciliation decides */ }
+  return reconcileLoop(attempt, i.withToken, i.poll, emit, { phase: "unknown-submission", recoverEvery: 3, error });
+}
+/** recover at tick 0 (and every `recoverEvery`-th tick when > 0), observe in between, every ~2 s for up to `ambiguousMaxMs` (60 s); `done` once the
+ *  attempt closes, otherwise the given phase with the attempt still open. 4xx other than 429 ends the loop with that error; transport and 5xx keep going. */
+async function reconcileLoop(attempt: AttemptView, withToken: WithToken, poll: Poller | undefined, emit: (ev: ExecuteEvent) => ExecuteEvent, o: { phase: "unknown-submission" | "uncertain"; recoverEvery: number; error?: Described | null }): Promise<ExecuteEvent> {
+  const intervalMs = poll?.intervalMs ?? 2000, maxMs = poll?.ambiguousMaxMs ?? 60_000, wait = poll?.wait ?? sleep, now = poll?.now ?? Date.now;
+  const error = o.error ?? null;
   const t0 = now(); let last = attempt;
   for (let n = 0; ; n++) {
     try {
-      last = await i.withToken((t) => (n % 3 === 0 ? api.attemptRecover(attempt.attemptId, t) : api.attempt(attempt.attemptId, t)));
+      const recover = n === 0 || (o.recoverEvery > 0 && n % o.recoverEvery === 0);
+      last = await withToken((t) => (recover ? api.attemptRecover(attempt.attemptId, t) : api.attempt(attempt.attemptId, t)));
       rememberView(last);
       if (!isOpen(last.state)) return emit({ phase: "done", attempt: last, txHash: last.businessTxHash ?? last.txHash, error: null });
-      emit({ phase: "unknown-submission", attempt: last, txHash: last.txHash, error });
-    } catch (e) { if (e instanceof ApiError && e.status !== 429 && e.status < 500) return emit({ phase: "unknown-submission", attempt: last, error: describeError(e) }); /* transport or 5xx: keep going */ }
-    if (now() - t0 >= maxMs) return emit({ phase: "unknown-submission", attempt: last, txHash: last.txHash, error });
+      emit({ phase: o.phase, attempt: last, txHash: last.txHash, error });
+    } catch (e) { if (e instanceof ApiError && e.status !== 429 && e.status < 500) return emit({ phase: o.phase, attempt: last, error: describeError(e) }); /* transport or 5xx: keep going */ }
+    if (now() - t0 >= maxMs) return emit({ phase: o.phase, attempt: last, txHash: last.txHash, error });
     await wait(intervalMs);
   }
+}
+export type ReconcileInput = { attempt: AttemptView; withToken: WithToken; onEvent?: (ev: ExecuteEvent) => void; poll?: Poller };
+/** §10 item 1: a VALIDATED attempt restored WITH a prompt marker (after a refresh, from "My workflow", from a remembered id): this page never saw the
+ *  wallet's answer, so it recovers once (the server reads the order and the OrderPaid log even inside the window), then observes (chain-reading for
+ *  such attempts) for up to 60 s. Ends `done` when the attempt closes; otherwise `uncertain` with the attempt still VALIDATED and the visitor's
+ *  explicit "I rejected it — abandon" the only way to call it not sent. Joins the execution guard: nothing is prompted while it runs. */
+export function reconcileUncertainAttempt(i: ReconcileInput): Promise<ExecuteEvent> {
+  return guarded(async () => {
+    const emit = (ev: ExecuteEvent) => { i.onEvent?.(ev); return ev; };
+    if (!isUncertain(i.attempt)) return emit({ phase: isTerminal(i.attempt.state) ? "done" : "idle", attempt: i.attempt, txHash: i.attempt.businessTxHash ?? i.attempt.txHash });
+    emit({ phase: "uncertain", attempt: i.attempt });
+    return reconcileLoop(i.attempt, i.withToken, i.poll, emit, { phase: "uncertain", recoverEvery: 0 });
+  });
 }
 
 // ---- rendering helpers (pure)
 export type Headline = { text: string; tone: Tone };
-/** one sentence keyed on the recorded state — never preset success copy. `reconciling`: the ambiguous-submission loop is still running. */
-export function attemptMessage(a: AttemptView | null, phase: ExecutePhase = "idle", opts: { reconciling?: boolean } = {}): Headline {
+/** the refusal a second hand-over of an uncertain attempt gets (sendValidatedAttempt), should any caller still try */
+export const UNCERTAIN_REFUSAL = "This plan was already handed to a wallet; the transaction may have been submitted. Nothing is prompted again — recover to read the order state, or abandon only if you know you rejected the prompt.";
+const uncertainHeadline = (reconciling?: boolean): Headline => ({ text: reconciling ? UNCERTAIN_TEXT : UNCERTAIN_OPEN_TEXT, tone: "warn" });
+/** one sentence keyed on the recorded state — never preset success copy. `reconciling`: the ambiguous-submission / uncertainty loop is still running;
+ *  `uncertain` (§10 item 1): the attempt carries a prompt marker — a VALIDATED attempt then never reads as idle ("waits for your wallet"). */
+export function attemptMessage(a: AttemptView | null, phase: ExecutePhase = "idle", opts: { reconciling?: boolean; uncertain?: boolean } = {}): Headline {
   if (phase === "validating") return { text: "Validating the exact plan at a fresh pinned block (server-side, for your wallet)…", tone: "info" };
   if (phase === "prompting") return { text: "Attempt recorded. Confirm the transaction in your wallet — it signs exactly the validated plan.", tone: "info" };
   if (phase === "reporting") return { text: "Your wallet returned a hash; reporting it to the service.", tone: "info" };
   if (phase === "polling") return { text: "Broadcast attempted. Waiting for the receipt; the outcome is not established yet.", tone: "warn" };
   if (phase === "refused") return { text: "Validation did not pass; nothing was handed to the wallet.", tone: "bad" };
   if (phase === "unknown-submission") return opts.reconciling || !a || !isOpen(a.state) ? { text: AMBIGUOUS_TEXT, tone: "warn" } : { text: AMBIGUOUS_OPEN_TEXT, tone: "warn" };
-  if (phase === "open-attempt") return { text: "An attempt for this order is already open (validated earlier; nothing new was validated): it is shown below — continue it in your wallet inside its window, abandon it, or recover it.", tone: "warn" };
+  if (phase === "uncertain") return uncertainHeadline(opts.reconciling || !a || !isOpen(a.state));
+  if (phase === "open-attempt") return opts.uncertain ? uncertainHeadline(opts.reconciling) : { text: "An attempt for this order is already open (validated earlier; nothing new was validated): it is shown below — continue it in your wallet inside its window, abandon it, or recover it.", tone: "warn" };
   if (!a) return { text: "No attempt yet.", tone: "neutral" };
   switch (a.state) {
-    case "VALIDATED": return insideWindow(a) ? { text: "Validated. The plan waits for your wallet; the window closes at the recorded time.", tone: "info" } : { text: "Validated, but the window closed without a reported hash. Recover reads the order state; abandon records that nothing was sent.", tone: "warn" };
+    case "VALIDATED": return opts.uncertain ? uncertainHeadline(opts.reconciling) : insideWindow(a) ? { text: "Validated. The plan waits for your wallet; the window closes at the recorded time.", tone: "info" } : { text: "Validated, but the window closed without a reported hash. Recover reads the order state; abandon records that nothing was sent.", tone: "warn" };
     case "BROADCAST_ATTEMPTED": return { text: "A broadcast was attempted; the outcome is not yet established.", tone: "warn" };
     case "CONFIRMED": return a.businessStatus === "SUCCESS" ? { text: "Order payment confirmed: the order reads as paid by your wallet for the exact amount.", tone: "ok" } : { text: "Transaction confirmed; the expected order outcome was not verified.", tone: "bad" };
     case "MISMATCH": return { text: "The transaction your wallet sent deviates from the validated plan; the order state decides whether the order was paid.", tone: "bad" };

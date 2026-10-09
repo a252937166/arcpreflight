@@ -5,7 +5,7 @@
 import { getAddress, type Hex } from "viem";
 import { BaselineCore, IntentCore, QuoteCore, ReportCore, ExecutionReceipt, executionDigest } from "@arcpreflight/schema";
 import { PAY_SELECTOR } from "@arcpreflight/policy";
-import { buildPassport, toBundle, costStatement, recoverySummary, type PassportSource, type Capture, type CostStatement, type RecoverySummary, type ReconciliationEntry, type EvidenceEntry, type Manifest, type Step } from "@arcpreflight/passport";
+import { buildPassport, toBundle, costStatement, recoverySummary, assembleRunResultFromArtifacts, type PassportSource, type Capture, type CostStatement, type RecoverySummary, type ReconciliationEntry, type EvidenceEntry, type Manifest, type Step } from "@arcpreflight/passport";
 import { cfg } from "./config.js";
 import { client } from "./report.js";
 import { openJson } from "./payments.js";
@@ -73,20 +73,9 @@ export function runCostStatement(result: any, buyerRole: "project-runner" | "vis
   } catch { return null; }
 }
 
-/** A complete run record rebuilt from the artefacts persisted while the run was in progress (design v3.3 §4): what `runFixture`
- *  would have returned had the process not stopped. Null until intent, report, decision and an execution receipt exist. */
+/** The shared assembler (`packages/passport`) with this instance's network facts. */
 export function assembleFromArtifacts(a: Record<string, any>, steps: Step[], x: { fixture: string; orderId?: string | null; merchant?: string | null }): any | null {
-  if (!a?.intent?.intent || !a?.report?.report || !a?.decision?.decision || !a?.execution) return null;
-  let execution: any; try { execution = ExecutionReceipt.parse(a.execution); } catch { return null; }
-  const last = steps.length ? Math.max(...steps.map((s) => (typeof s.atMs === "number" && s.atMs >= 0 ? s.atMs : 0))) : 0;
-  return { executionMode: "runner", fixture: x.fixture, network: cfg.net, chainId: cfg.chainId, attemptId: execution.executionAttemptId, orderId: a.order?.orderId ?? x.orderId ?? a.intent.intent.businessExpectation?.orderId ?? null, merchant: x.merchant ?? a.order?.merchant ?? a.intent.intent.to,
-    intent: a.intent.intent, intentDigest: a.intent.intentDigest, policy: a.intent.policy, policyDigest: a.intent.policyDigest, requestId: a.quote?.requestId ?? null, serviceFeeTx: a.report.serviceFeeTx ?? null,
-    report: a.report.report, reportDigest: a.report.reportDigest, simulation: a.report.simulation ?? null, decision: a.decision.decision, decisionDigest: a.decision.decisionDigest,
-    finalValidation: a.finalValidation?.finalValidation ?? null, plan: a.finalValidation?.plan ?? null, execution, executionDigest: executionDigest(execution), postcondition: a.postcondition?.postcondition ?? null, steps, durationMs: last,
-    quote: a.quote?.quote ?? null, quoteDigest: a.quote?.quoteDigest ?? null, feeAuthorization: a.feeAuthorization ?? null,
-    orderCreation: a.order ? { tx: a.order.tx, block: a.order.block, from: a.order.from ?? null, gasUsed: a.order.gasUsed ?? null, effectiveGasPriceNativeAtomic: a.order.effectiveGasPriceNativeAtomic ?? null, signer: a.order.signer ?? "order creator", reference: a.order.reference ?? null } : null,
-    feeReceipt: a.finalValidation?.feeReceipt ?? null, businessReceipt: a.postcondition?.businessReceipt ?? null, finalValidationEvidence: a.finalValidation?.finalValidationEvidence ?? [], approvalStatusAtValidation: a.finalValidation?.approvalStatusAtValidation ?? null,
-    reconstructedFromArtifacts: true };
+  return assembleRunResultFromArtifacts(a, steps, { ...x, network: cfg.net, chainId: cfg.chainId });
 }
 /** Public passport of a finished demo run. */
 export async function buildRunPassport(db: Db, runId: string): Promise<PassportResult> {

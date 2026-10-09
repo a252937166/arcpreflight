@@ -274,3 +274,46 @@ describe("review round 2 — recovery needs the receipt and the plan, reconcile-
     expect(dup).not.toThrow(); // once the first is closed, a new open attempt may exist
   });
 });
+
+describe("review round 3 — durable prompt uncertainty, no closing without the transaction body, late fee receipts", () => {
+  it("a prompt marker makes a VALIDATED attempt uncertain: observe reads the chain inside the window, the next action says recover first, and a refresh keeps it", async () => {
+    const id = await validated();
+    const { markPrompted } = await import("../src/wallet.js");
+    expect(markPrompted(db, OWNER, id, { event: "nonsense" })).toMatchObject({ ok: false, status: 400 });
+    expect(markPrompted(db, "visitor:b", id, { event: "prompted" })).toMatchObject({ ok: false, status: 404 });
+    const prompted = markPrompted(db, OWNER, id, { event: "prompted" });
+    expect(prompted.ok && (prompted.attempt as any)).toMatchObject({ state: "VALIDATED", prompt: { state: "PROMPTED" }, nextAction: expect.stringContaining("may have been submitted — recover first") });
+    const unknown = markPrompted(db, OWNER, id, { event: "unknown-submission", detail: "timeout after 30s" });
+    expect(unknown.ok && (unknown.attempt as any).prompt).toMatchObject({ state: "UNKNOWN_SUBMISSION", detail: "timeout after 30s" });
+    expect(markPrompted(db, OWNER, id, { event: "prompted" }).ok && (getAttemptRow(db, id)!.prompt_json as string)).toContain("UNKNOWN_SUBMISSION"); // a later "prompted" never downgrades the uncertainty
+    // inside the window the worker still waits, but an observe read (the page after a refresh) reconciles from the chain at once
+    const paid = fakeRpc({ paid: true, receipt: minedReceipt(OTHER), txs: { [OTHER.toLowerCase()]: planTx({ hash: OTHER }) }, logs: [{ transactionHash: OTHER, blockNumber: "0x3ef1a0a" }] });
+    expect(await reconcileWalletAttempts(db, fakeRpc({ paid: false }), { attemptId: id, source: "worker" })).toEqual({ resolved: 0, pending: 1 });
+    db.prepare("UPDATE wallet_attempts SET updated_at = ? WHERE attempt_id = ?").run(new Date(Date.now() - 5000).toISOString(), id);
+    const seen = await observeAttempt(db, OWNER, id, paid);
+    expect(seen.ok && (seen.attempt as any)).toMatchObject({ state: "CONFIRMED", businessStatus: "SUCCESS", businessTxHash: OTHER, prompt: { state: "UNKNOWN_SUBMISSION" } });
+    expect(markPrompted(db, OWNER, id, { event: "prompted" })).toMatchObject({ ok: false, status: 409 }); // closed attempts take no prompt
+  });
+  it("a receipt without the transaction body leaves the attempt open until the plan comparison can be made", async () => {
+    const id = await validated();
+    await markSent(db, OWNER, id, HASH, fakeRpc({ tx: null }));
+    const receiptOnly = fakeRpc({ tx: null, receipt: minedReceipt(), paid: true });
+    expect(await reconcileWalletAttempts(db, receiptOnly, { attemptId: id, source: "worker" })).toEqual({ resolved: 0, pending: 1 });
+    expect(getAttemptRow(db, id)).toMatchObject({ state: "BROADCAST_ATTEMPTED", note: expect.stringContaining("comparison with the validated plan is outstanding") });
+    const withBody = fakeRpc({ tx: planTx({ input: "0xdeadbeef" }), receipt: minedReceipt(), paid: false });
+    expect(await reconcileWalletAttempts(db, withBody, { attemptId: id, source: "worker" })).toEqual({ resolved: 1, pending: 0 });
+    expect(getAttemptRow(db, id)).toMatchObject({ state: "MISMATCH" }); // the comparison was made before closing — it caught the deviation
+  });
+  it("a closed attempt still receives its fee relay receipt later (observe and the worker backfill)", async () => {
+    const id = await validated();
+    await markSent(db, OWNER, id, HASH, fakeRpc({ tx: planTx(), receipt: minedReceipt(), paid: true })); // closes without a fee receipt (the fake serves none)
+    expect(getAttemptRow(db, id)).toMatchObject({ state: "CONFIRMED", fee_receipt_json: null });
+    const feeRpc = fakeRpc({ receipts: { [F.hashes.FEE_TX.toLowerCase()]: { transactionHash: F.hashes.FEE_TX, status: "success", blockNumber: 65_993_438n, from: "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0", gasUsed: 87_141n, effectiveGasPrice: 25_000_000_000n } } });
+    const seen = await observeAttempt(db, OWNER, id, feeRpc);
+    expect(seen.ok && (seen.attempt as any).costStatement.operator).toMatchObject({ complete: true, feeRelay: { gasUsed: "87141" } });
+    db.prepare("UPDATE wallet_attempts SET fee_receipt_json = NULL WHERE attempt_id = ?").run(id);
+    const { backfillFeeReceipts } = await import("../src/wallet.js");
+    expect(await backfillFeeReceipts(db, feeRpc)).toBe(1);
+    expect(getAttemptRow(db, id)!.fee_receipt_json).toContain("87141");
+  });
+});

@@ -1,0 +1,75 @@
+{
+  "costStatementVersion": "1.1",
+  "unit": "USDC",
+  "nativeDecimals": 18,
+  "tokenDecimals": 6,
+  "capturedAt": "2026-10-09T02:08:13.239Z",
+  "buyer": {
+    "address": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+    "role": "project-runner",
+    "businessPrincipal": {
+      "nativeAtomic": "50000000000000000",
+      "usdc": "0.05"
+    },
+    "checkFee": {
+      "tokenAtomic": "10000",
+      "nativeAtomicEquivalent": "10000000000000000",
+      "usdc": "0.01"
+    },
+    "businessGas": {
+      "nativeAtomic": "1009100000000000",
+      "usdc": "0.0010091",
+      "gasUsed": "40364",
+      "effectiveGasPriceNativeAtomic": "25000000000",
+      "tx": "0xa4795cd245efb8c52a840d8e1298a0bdba57faf667c1c48312f8e21e4ab355a0"
+    },
+    "totalNativeAtomic": "61009100000000000",
+    "totalUsdc": "0.0610091",
+    "complete": true
+  },
+  "operator": {
+    "feeRelay": {
+      "nativeAtomic": "2179125000000000",
+      "usdc": "0.002179125",
+      "gasUsed": "87165",
+      "effectiveGasPriceNativeAtomic": "25000000000",
+      "tx": "0xfba1b91d3a9ce0b79bb2cbb73b07c457bccf72b98820a12d14b9ee692d00b855",
+      "address": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0"
+    },
+    "orderCreation": {
+      "nativeAtomic": "2507300000000000",
+      "usdc": "0.0025073",
+      "gasUsed": "100292",
+      "effectiveGasPriceNativeAtomic": "25000000000",
+      "tx": "0x1d3bde8eb1c2e435802293c0a8bbf091663d986b974ce89a77de663c8a584da7",
+      "address": "0xb6eef219f86ae75ffc3af9ef3cade49f89a7582b"
+    },
+    "totalNativeAtomic": "4686425000000000",
+    "totalUsdc": "0.004686425",
+    "complete": true
+  },
+  "authorizedMaximum": {
+    "businessPrincipalNativeAtomic": "50000000000000000",
+    "checkFeeTokenAtomic": "10000",
+    "businessGasNativeAtomic": "1181315000000000"
+  },
+  "actual": {
+    "businessPrincipalNativeAtomic": "50000000000000000",
+    "checkFeeTokenAtomic": "10000",
+    "businessGasNativeAtomic": "1009100000000000"
+  },
+  "unresolvedReservation": {
+    "nativeAtomic": "0",
+    "note": "reservations released only after reconciliation"
+  },
+  "sources": {
+    "feeTx": "0xfba1b91d3a9ce0b79bb2cbb73b07c457bccf72b98820a12d14b9ee692d00b855",
+    "createOrderTx": "0x1d3bde8eb1c2e435802293c0a8bbf091663d986b974ce89a77de663c8a584da7",
+    "businessTx": "0xa4795cd245efb8c52a840d8e1298a0bdba57faf667c1c48312f8e21e4ab355a0"
+  },
+  "notes": [
+    "gas deductions are not payment Transfer events",
+    "the fee's native-system and ERC-20 event representations are one payment",
+    "sub-micro-USDC gas precision is preserved; usdc strings are exact decimal renderings of the atomic values"
+  ]
+}

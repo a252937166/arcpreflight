@@ -207,6 +207,9 @@ importers:
       '@arcpreflight/observer':
         specifier: workspace:*
         version: link:../../packages/observer
+      '@arcpreflight/passport':
+        specifier: workspace:*
+        version: link:../../packages/passport
       '@arcpreflight/policy':
         specifier: workspace:*
         version: link:../../packages/policy

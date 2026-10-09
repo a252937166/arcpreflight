@@ -1,0 +1,19 @@
+{
+  "kind": "rpc",
+  "method": "eth_getCode",
+  "params": [
+    "\"0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE\"",
+    "{\"blockHash\":\"0xc6e903c566855d39ed89af4b37bdeabac29b417bdbcf6f3bfdae8c68dec3dc9b\"}"
+  ],
+  "result": null,
+  "error": null,
+  "snapshot": {
+    "chainId": 5042002,
+    "blockNumber": "66232717",
+    "blockHash": "0xc6e903c566855d39ed89af4b37bdeabac29b417bdbcf6f3bfdae8c68dec3dc9b",
+    "observedAt": "2026-10-09T02:07:10.919Z",
+    "providerId": "rpc.testnet",
+    "pinningMode": "BLOCK_HASH"
+  },
+  "capturedAt": "2026-10-09T02:07:13.871Z"
+}

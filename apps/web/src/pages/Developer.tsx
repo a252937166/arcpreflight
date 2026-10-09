@@ -18,7 +18,7 @@ import { storedSession, withSession, type Session } from "../lib/session";
 import { rememberedChecks } from "../lib/checks";
 import { saveJson } from "../lib/download";
 import { baselineDigestFor, fixtureForProxy, nativeAtomicToUsdcText, orderLimits, orderViewFromCreated, toDeveloperOrder, type OrderBody, type Proxy } from "../lib/orders";
-import { executeAttempt, executionInFlight, insideWindow, isOpen, isTerminal, rememberedAttempts, sendValidatedAttempt, stateTone, type ExecutePhase, type Refusal } from "../lib/attempts";
+import { executeAttempt, executionInFlight, insideWindow, isOpen, isTerminal, isUncertain, reconcileUncertainAttempt, rememberedAttempts, sendValidatedAttempt, stateTone, type ExecutePhase, type Refusal } from "../lib/attempts";
 import { clearWorkflow, loadWorkflow, loadWorkflows, saveWorkflow } from "../lib/workflow";
 import { LIFECYCLE_LABELS, type LifecycleId, type LifecycleStage, type StageStatus } from "../lib/outcome";
 import { budgetCheck, budgetComponents, useBalances } from "../lib/faucet";
@@ -111,9 +111,12 @@ export default function Developer() {
   const decision = useMemo(() => (intent && policy && pDigest && delivered
     ? decide({ intent, policy, policyDigest: pDigest, baseline: baseline?.baseline ?? null, baselineDigest: (baseline?.baselineDigest as HexT | undefined) ?? null, baselineRevoked: baseline?.revoked ?? false, report: delivered.report as any, reportDigest: delivered.digest as HexT, now: new Date(now), simulation: delivered.simulation })
     : null), [intent, policy, pDigest, delivered, baseline, now]);
-  const reconciling = exec.phase === "unknown-submission" && busy === "execute";
-  /** the wallet answered with an error that is not a rejection and the attempt is still open: the visitor decides (explicit abandon), the panel stays at step 4 */
-  const ambiguous = exec.phase === "unknown-submission" && !!attempt && attempt.state === "VALIDATED";
+  const reconciling = (exec.phase === "unknown-submission" || exec.phase === "uncertain") && busy === "execute";
+  /** §10 item 1: the attempt carries a prompt marker (server view, or this browser's memory of having opened the prompt) and this page is not mid-execution
+   *  with it — the transaction may have been submitted: never "Continue in wallet", never "Abandon (nothing sent)" */
+  const uncertain = !!attempt && attempt.state === "VALIDATED" && !EXECUTING.includes(exec.phase) && (exec.phase === "uncertain" || isUncertain(attempt));
+  /** the wallet answered with an error that is not a rejection, or the attempt is uncertain, and it is still open: no second prompt; the visitor decides (explicit abandon), the panel stays at step 4 */
+  const ambiguous = (exec.phase === "unknown-submission" || uncertain) && !!attempt && attempt.state === "VALIDATED";
   const executing = EXECUTING.includes(exec.phase) || reconciling;
   const attemptOpen = !!attempt && isOpen(attempt.state);
   const attemptDone = !!attempt && isTerminal(attempt.state);
@@ -141,7 +144,7 @@ export default function Developer() {
     { id: "approve", label: LIFECYCLE_LABELS.approve, status: sstat(2, approved), note: approved ? "policy approved" : null },
     // once an attempt exists its RECORDED decision is the fact; the live re-evaluation ages with the report (maxReportAgeSeconds) and would mislead
     { id: "check", label: LIFECYCLE_LABELS.check, status: expired ? sstat(3, false) : attempt ? (attempt.decision === "BLOCKED" ? "stop" : attempt.decision === "REVIEW_REQUIRED" || attempt.state === "REFUSED" ? "review" : "done") : delivered ? (decision?.decision === "BLOCKED" ? "stop" : decision?.decision === "REVIEW_REQUIRED" ? "review" : "done") : sstat(3, false), note: expired ? "report expired — re-run the check" : attempt ? attempt.decision.toLowerCase().replace(/_/g, " ") : decision ? decision.decision.toLowerCase().replace(/_/g, " ") : null },
-    { id: "execute", label: LIFECYCLE_LABELS.execute, status: execStatus, note: checkStopped ? "nothing executed" : ambiguous ? "wallet answer unexplained — reconciling" : attempt ? attempt.state.toLowerCase().replace(/_/g, " ") : exec.phase === "refused" ? "refused" : null },
+    { id: "execute", label: LIFECYCLE_LABELS.execute, status: execStatus, note: checkStopped ? "nothing executed" : ambiguous ? (exec.phase === "unknown-submission" ? "wallet answer unexplained — reconciling" : "wallet was asked to sign — submission uncertain") : attempt ? attempt.state.toLowerCase().replace(/_/g, " ") : exec.phase === "refused" ? "refused" : null },
     { id: "recover", label: LIFECYCLE_LABELS.recover, status: recoverStatus, note: recoverStatus === "done" ? "reconciled" : recoverStatus === "active" ? "attempt still open" : "not needed" },
     { id: "passport", label: LIFECYCLE_LABELS.passport, status: sstat(6, !!passport), note: passport ? passport.name : null },
     { id: "verify", label: LIFECYCLE_LABELS.verify, status: verifyStatus, note: verifyNote },
@@ -199,7 +202,15 @@ export default function Developer() {
           const d: Delivered | null = r?.delivery === "DELIVERED" && r.report ? { report: r.report, digest: r.reportDigest, simulation: r.simulation, serviceFeeTx: r.payment?.transaction ?? null, requestId: saved.requestId } : null;
           setCheck({ intent: saved.intent, requestId: saved.requestId, quote: null, delivered: d });
         }
-        if (saved.attemptId) { const a = await withSession((t) => api.attempt(saved.attemptId!, t)).catch(() => null); if (alive && a && same(a.payer, account)) { setAttempt(a); setExec({ ...IDLE, phase: isTerminal(a.state) ? "done" : "idle", txHash: a.txHash }); } }
+        if (saved.attemptId) {
+          const a = await withSession((t) => api.attempt(saved.attemptId!, t)).catch(() => null);
+          if (alive && a && same(a.payer, account)) {
+            const restoredUncertain = isUncertain(a);
+            setAttempt(a); setExec({ ...IDLE, phase: isTerminal(a.state) ? "done" : restoredUncertain ? "uncertain" : "idle", txHash: a.txHash });
+            // §10 item 1: a refresh restores the uncertainty, not an idle attempt — recover once, then observe; nothing is offered to the wallet
+            if (restoredUncertain) void reconcileUncertain(a);
+          }
+        }
       } catch (e) { if (alive) setErr(describeError(e)); }
       finally { if (hydrating.current === key) hydrating.current = null; if (alive) { owner.current = account.toLowerCase(); void loadMine(); void loadChecks(); } }
     })();
@@ -285,11 +296,21 @@ export default function Developer() {
       void refreshOrder(); void loadMine();
     });
   };
+  /** §10 item 1: a restored VALIDATED attempt with a prompt marker — recover once, then observe (the server reads the chain for such attempts); never a prompt */
+  const reconcileUncertain = (a: AttemptView) => {
+    if (executionInFlight()) return;
+    return run("execute", async () => {
+      setAttempt(a); setExec({ phase: "uncertain", txHash: a.txHash, refusal: null, err: null });
+      const ev = await reconcileUncertainAttempt({ attempt: a, withToken: withSession, onEvent: onExecEvent });
+      if (ev.attempt) setAttempt(ev.attempt);
+      void refreshOrder(a.orderId); void loadMine();
+    });
+  };
   const adopt = (a: AttemptView) => {
     setAttempt((cur) => (!cur || cur.attemptId === a.attemptId ? a : cur));
     setMine((m) => ({ ...m, attempts: m.attempts.map((x) => (x.attemptId === a.attemptId ? { ...x, ...a } : x)) }));
-    // an attempt still VALIDATED after an unexplained wallet answer keeps that status: no second prompt is offered until it closes or the visitor abandons it
-    setExec((x) => (attempt && attempt.attemptId !== a.attemptId ? x : { ...x, phase: isTerminal(a.state) ? "done" : x.phase === "unresolved" ? "unresolved" : x.phase === "unknown-submission" ? "unknown-submission" : "idle", err: x.phase === "unknown-submission" && !isTerminal(a.state) ? x.err : null }));
+    // an attempt still VALIDATED after an unexplained wallet answer keeps that status, and one with a prompt marker stays uncertain: no second prompt is offered until it closes or the visitor abandons it
+    setExec((x) => (attempt && attempt.attemptId !== a.attemptId ? x : { ...x, phase: isTerminal(a.state) ? "done" : x.phase === "unresolved" ? "unresolved" : x.phase === "unknown-submission" ? "unknown-submission" : x.phase === "uncertain" || isUncertain(a) ? "uncertain" : "idle", err: x.phase === "unknown-submission" && !isTerminal(a.state) ? x.err : null }));
     void refreshOrder(a.orderId);
   };
   const abandon = (id: string) => rowAction(id, async () => adopt(await withSession((t) => api.attemptAbandon(id, t))));
@@ -299,11 +320,13 @@ export default function Developer() {
   const pick = (id: string) => rowAction(id, async () => {
     const full = await withSession((t) => api.attempt(id, t));
     if (!same(full.payer, account)) throw new Error(`This attempt belongs to wallet ${short(full.payer, 4)}; connect that wallet to continue it. It stays listed under "other wallets in this browser".`);
-    setAttempt(full); setExec({ phase: isTerminal(full.state) ? "done" : "idle", txHash: full.txHash, refusal: null, err: null }); setPassport(null); setVerification(null); setOpenSteps({});
+    const pickedUncertain = isUncertain(full);
+    setAttempt(full); setExec({ phase: isTerminal(full.state) ? "done" : pickedUncertain ? "uncertain" : "idle", txHash: full.txHash, refusal: null, err: null }); setPassport(null); setVerification(null); setOpenSteps({});
     if (!order || order.orderId.toLowerCase() !== full.orderId.toLowerCase()) {
       const o = await withSession((t) => api.order(full.orderId, t));
       setOrder(o); setOrderMeta({ baselineDigest: baselineDigestFor(net, o.proxy), proxy: o.proxy }); setApproved(true); setCheck(null);
     }
+    if (pickedUncertain) void reconcileUncertain(full); // §10 item 1: listed or remembered, an attempt whose prompt was opened is reconciled, never handed to the wallet again
   });
   const pickOrder = (o: OrderView) => { if (!same(o.payer, account)) return; setOrder(o); setOrderMeta({ baselineDigest: baselineDigestFor(net, o.proxy), proxy: o.proxy }); setApproved(false); setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null); setOpenSteps({}); };
   const download = () => run("passport", async () => {
@@ -450,11 +473,11 @@ export default function Developer() {
 
           {/* 4 · execute */}
           <StepSection n={4} id="step-4" title="Execute with your wallet" status={stages[3].status} open={isStepOpen(4)} onToggle={() => toggle(4)}
-            summary={attempt && <><Chip tone={stateTone(attempt.state)}>{attempt.state.replace(/_/g, " ").toLowerCase()}</Chip>{(attempt.businessTxHash ?? attempt.txHash) && <> · tx <Hex value={attempt.businessTxHash ?? attempt.txHash!} n={4} link={explorerTx(net, attempt.businessTxHash ?? attempt.txHash!)} /></>}{attempt.businessStatus && <> · order {attempt.businessStatus === "SUCCESS" ? "paid" : attempt.businessStatus.toLowerCase().replace(/_/g, " ")}</>}{ambiguous && <> · <Chip tone="warn">wallet answer unexplained</Chip></>}</>}>
+            summary={attempt && <><Chip tone={stateTone(attempt.state)}>{attempt.state.replace(/_/g, " ").toLowerCase()}</Chip>{(attempt.businessTxHash ?? attempt.txHash) && <> · tx <Hex value={attempt.businessTxHash ?? attempt.txHash!} n={4} link={explorerTx(net, attempt.businessTxHash ?? attempt.txHash!)} /></>}{attempt.businessStatus && <> · order {attempt.businessStatus === "SUCCESS" ? "paid" : attempt.businessStatus.toLowerCase().replace(/_/g, " ")}</>}{ambiguous && <> · <Chip tone="warn">{exec.phase === "unknown-submission" ? "wallet answer unexplained" : "submission uncertain"}</Chip></>}</>}>
             {gated ? <div className="banner info">Gated on this instance — execution opens after the mainnet acceptance. {otherTestnet ? <button className="btn sm" onClick={() => select("testnet")}>use the testnet instance</button> : null} Everything else in this workflow works here.</div> : (<>
               <p className="small muted">The service re-validates your exact plan at a fresh pinned block — implementation vs the referenced approval, pause, exact-call simulation, balance, fees, nonce, your account carries no code — and records the attempt <code>VALIDATED</code> with its plan <em>before</em> your wallet is asked. Right before the prompt this page re-reads your wallet's account and chain and the time left in the window; a mismatch stops without prompting. Your wallet signs exactly that plan (to, data, value, type 2; gas or nonce it sets are recorded as deviations); the hash is reported; the outcome is read from the receipt and the order state. Window {WALLET_VALIDATION_WINDOW_SECONDS} s.</p>
               <div className="row" style={{ gap: 10, alignItems: "center" }}>
-                <button className="btn primary" disabled={!executable || !onArc || !!busy || executing || attemptOpen || !w.provider || budgetExec.enough === false} title={execDisabledWhy} onClick={execute}>{executing ? <><Spinner /> {exec.phase === "unknown-submission" ? "reconciling" : exec.phase}…</> : "Execute with your wallet"}</button>
+                <button className="btn primary" disabled={!executable || !onArc || !!busy || executing || attemptOpen || !w.provider || budgetExec.enough === false} title={execDisabledWhy} onClick={execute}>{executing ? <><Spinner /> {exec.phase === "unknown-submission" || exec.phase === "uncertain" ? "reconciling" : exec.phase}…</> : "Execute with your wallet"}</button>
                 {checkStopped && <span className="small muted">nothing to execute: the check decided <code>{decision?.decision ?? attempt?.decision}</code></span>}
                 {executable && !attemptOpen && !executing && freshLeft !== null && budgetExec.enough !== false && <span className="tiny dim">execute within {Math.floor(freshLeft / 60)}:{String(freshLeft % 60).padStart(2, "0")} — the report ages out after that and a new check is needed</span>}
                 {executable && budgetExec.enough === false && !attemptOpen && <span className="tiny" style={{ color: "var(--amber)" }} role="status" data-testid="budget-exec">{budgetExec.sentence}</span>}
@@ -470,7 +493,7 @@ export default function Developer() {
           <StepSection n={5} id="step-5" title="Recover · My workflow" status={stages[4].status} open={isStepOpen(5)} onToggle={() => toggle(5)}
             summary={mine.loaded && <span className="tiny dim">{myAttempts.length} attempt{myAttempts.length === 1 ? "" : "s"} · {myOrders.length} order{myOrders.length === 1 ? "" : "s"} for this wallet{otherAttempts.length + otherOrders.length > 0 ? ` · ${otherAttempts.length + otherOrders.length} from other wallets in this browser` : ""}</span>}
             aside={<button className="btn sm ghost" disabled={mine.busy} onClick={() => { void loadMine(); void loadChecks(); }}>{mine.busy ? <Spinner /> : "refresh"}</button>}>
-            <p className="small muted">Recovery reads the hash, the order state and the merchant's <code>OrderPaid</code> event; it never re-signs or re-sends. An attempt left <code>VALIDATED</code> or <code>BROADCAST_ATTEMPTED</code> after a refresh is listed here and can be continued, abandoned or recovered. Reads only; the recovery worker does the same every 30 s.</p>
+            <p className="small muted">Recovery reads the hash, the order state and the merchant's <code>OrderPaid</code> event; it never re-signs or re-sends. An attempt left <code>VALIDATED</code> or <code>BROADCAST_ATTEMPTED</code> after a refresh is listed here and can be continued, abandoned or recovered — except one whose wallet prompt was already opened: it is reconciled from the order state and never handed to the wallet again; "I rejected it — abandon" is your explicit statement that nothing was signed. Reads only; the recovery worker does the same every 30 s.</p>
             <ErrorBanner err={mine.err} />
             {!session && <p className="dim small">no session yet — the first paid action creates one for this browser</p>}
             {(myAttempts.length > 0 || remembered.length > 0) && (
@@ -486,9 +509,9 @@ export default function Developer() {
                       <td className="small muted" style={{ maxWidth: 260 }}>{a.nextAction}</td>
                       <td className="actions">
                         {attempt?.attemptId !== a.attemptId && <button className="btn sm ghost" disabled={mine.rowBusy === a.attemptId} onClick={() => pick(a.attemptId)}>use</button>}
-                        {a.state === "VALIDATED" && <button className="btn sm" disabled={mine.rowBusy === a.attemptId} onClick={() => abandon(a.attemptId)}>Abandon</button>}
+                        {a.state === "VALIDATED" && <button className="btn sm" disabled={mine.rowBusy === a.attemptId} onClick={() => abandon(a.attemptId)} title={isUncertain(a) ? "records NOT_SENT: only if you know the wallet never signed or broadcast anything" : "records that the prompt was rejected; nothing was sent"}>{isUncertain(a) ? "I rejected it — abandon" : "Abandon"}</button>}
                         {isOpen(a.state) && <button className="btn sm" disabled={mine.rowBusy === a.attemptId} onClick={() => recover(a.attemptId)}>Recover</button>}
-                        {a.state === "VALIDATED" && insideWindow(a, now) && attempt?.attemptId === a.attemptId && attempt.plan && !ambiguous && <button className="btn sm primary" disabled={!!busy} onClick={() => resume(attempt)}>Continue in wallet</button>}
+                        {a.state === "VALIDATED" && insideWindow(a, now) && attempt?.attemptId === a.attemptId && attempt.plan && !ambiguous && !isUncertain(a) && <button className="btn sm primary" disabled={!!busy} onClick={() => resume(attempt)}>Continue in wallet</button>}
                       </td>
                     </tr>
                   ))}
@@ -530,7 +553,7 @@ export default function Developer() {
                           <td><Chip tone={stateTone(a.state)}>{a.state.replace(/_/g, " ").toLowerCase()}</Chip></td>
                           <td>{(a.businessTxHash ?? a.txHash) ? <Hex value={a.businessTxHash ?? a.txHash!} n={5} link={explorerTx(net, a.businessTxHash ?? a.txHash!)} /> : <span className="dim">none</span>}</td>
                           <td className="actions">
-                            {a.state === "VALIDATED" && <button className="btn sm" disabled={mine.rowBusy === a.attemptId} onClick={() => abandon(a.attemptId)}>Abandon</button>}
+                            {a.state === "VALIDATED" && <button className="btn sm" disabled={mine.rowBusy === a.attemptId} onClick={() => abandon(a.attemptId)}>{isUncertain(a) ? "I rejected it — abandon" : "Abandon"}</button>}
                             {isOpen(a.state) && <button className="btn sm" disabled={mine.rowBusy === a.attemptId} onClick={() => recover(a.attemptId)}>Recover</button>}
                           </td>
                         </tr>

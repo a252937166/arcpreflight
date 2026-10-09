@@ -4,6 +4,8 @@
 // approved / changed since approval), amount in USDC, reference; an "Autofill sample order" button whose values stay editable, inline
 // validation that mirrors the server's rules, a human-readable review step, then "Create order". Proxy code names (MAIN / CHANGED), atomic
 // units and the raw JSON body live under a collapsed "technical details". A 400 from the server lands on the field it names.
+// Review round 3 (item 5): the review stage renders only while the validated body exists and its payer is still the account the review was
+// opened for; a wallet that disconnects or switches accounts mid-review returns the dialog to the form with a notice — nothing reads `body.*` on null.
 import { useEffect, useRef, useState } from "react";
 import { Chip, Hex, Spinner } from "./Badges";
 import { ApiError, explorerAddr, type NetworkInfo, type OrderCreated } from "../lib/api";
@@ -20,17 +22,28 @@ export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: 
   const [form, setForm] = useState<OrderForm>(EMPTY_ORDER_FORM);
   const [touched, setTouched] = useState(false);
   const [stage, setStage] = useState<"edit" | "review">("edit");
+  /** the connected account the review was opened for (item 5): a different or missing account returns the dialog to the form */
+  const [reviewPayer, setReviewPayer] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<OrderFormErrors>({});
   const [state, setState] = useState<{ busy: boolean; err: string | null }>({ busy: false, err: null });
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { const d = ref.current; if (d && typeof d.showModal === "function" && !d.open) { try { d.showModal(); } catch { /* already open */ } } return () => { try { d?.close?.(); } catch { /* closed */ } }; }, []);
   const { errors: own, body } = validateOrderForm(form, payer, limits);
+  const samePayer = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+  // the review is valid only while the body exists and still names the account it was reviewed for; the render below never reads `body.*` otherwise
+  const reviewing = stage === "review" && !!body && samePayer(body.payer, reviewPayer) && samePayer(payer, reviewPayer);
+  useEffect(() => {
+    if (stage !== "review" || reviewing || state.busy) return;
+    setStage("edit"); setReviewPayer(null);
+    setNotice(payer ? "Your wallet switched accounts while you were reviewing — the payer changed; review the order again." : "Your wallet disconnected while you were reviewing — connect it again and review the order again.");
+  }, [stage, reviewing, state.busy, payer]);
   const errors: OrderFormErrors = { ...own, ...serverErrors };
   const show = (f: keyof OrderFormErrors) => (touched || serverErrors[f]) && errors[f];
   const set = (patch: Partial<OrderForm>) => { setForm((f) => ({ ...f, ...patch })); setServerErrors({}); setTouched(true); };
   const atomic = usdcToNativeAtomic(form.amountUsdc);
   const submit = async () => {
-    if (!body) return;
+    if (!body || !reviewing) return;
     setState({ busy: true, err: null });
     try { const o = await create(body); setState({ busy: false, err: null }); onCreated(o); }
     catch (e) {
@@ -51,16 +64,17 @@ export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: 
       </label>
     );
   };
-  const reviewFixture = body ? fixtureForProxy(net, body.proxy) : null;
+  const reviewFixture = reviewing && body ? fixtureForProxy(net, body.proxy) : null;
   return (
     <dialog ref={ref} className="dlg" aria-labelledby="order-dialog-title" onCancel={(e) => { e.preventDefault(); onClose(); }} onClick={(e) => { if (e.target === ref.current) onClose(); }}>
-      <form className="dlg-inner stack" style={{ gap: 14 }} onSubmit={(e) => { e.preventDefault(); if (stage === "edit") { setTouched(true); if (body) setStage("review"); } else void submit(); }}>
+      <form className="dlg-inner stack" style={{ gap: 14 }} onSubmit={(e) => { e.preventDefault(); if (!reviewing) { setTouched(true); if (body && samePayer(body.payer, payer)) { setReviewPayer(payer); setNotice(null); setStage("review"); } } else void submit(); }}>
         <div className="row between" style={{ alignItems: "baseline" }}>
-          <h3 id="order-dialog-title">{stage === "edit" ? "Create a demonstration order" : "Review the order"}</h3>
+          <h3 id="order-dialog-title">{!reviewing ? "Create a demonstration order" : "Review the order"}</h3>
           <button type="button" className="btn sm ghost" onClick={onClose} aria-label="close">✕</button>
         </div>
-        {stage === "edit" ? (
+        {!reviewing || !body ? (
           <>
+            {notice && <div className="banner" role="status" data-testid="order-notice">{notice}</div>}
             <div className="banner info" role="note" data-testid="order-explainer">
               <b>This is a demonstration order on the project's DemoMerchant contract — no goods or services are delivered.</b> Paying it exercises the lifecycle with your own wallet. What you get: a pinned preflight report, the payment outcome read from the chain, and a verifiable Payment Passport.
             </div>
@@ -90,24 +104,24 @@ export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: 
           <>
             <p className="small muted">Nothing has left yet. This demonstration order is created under this browser's anonymous session; your wallet pays nothing for its creation.</p>
             <div className="kv w120" data-testid="order-review">
-              <span className="k">payer</span><span><Hex value={body!.payer} n={8} /> <span className="tiny dim">your wallet</span></span>
-              <span className="k">merchant</span><span>{PROXY_LABELS[body!.proxy].title.toLowerCase()} {reviewFixture ? <Chip tone={changedFor(body!.proxy) ? "warn" : "ok"}>{changedFor(body!.proxy) ? "changed since approval" : "as approved"}</Chip> : <Chip tone="warn">not deployed here</Chip>}</span>
-              <span className="k">amount</span><span><b>{nativeAtomicToUsdcText(body!.amountNativeAtomic)} USDC</b> <span className="tiny dim">payable only by your wallet, later, as the business payment</span></span>
-              <span className="k">reference</span><span>{body!.reference ?? <span className="dim">none</span>}</span>
+              <span className="k">payer</span><span><Hex value={body.payer} n={8} /> <span className="tiny dim">your wallet</span></span>
+              <span className="k">merchant</span><span>{PROXY_LABELS[body.proxy].title.toLowerCase()} {reviewFixture ? <Chip tone={changedFor(body.proxy) ? "warn" : "ok"}>{changedFor(body.proxy) ? "changed since approval" : "as approved"}</Chip> : <Chip tone="warn">not deployed here</Chip>}</span>
+              <span className="k">amount</span><span><b>{nativeAtomicToUsdcText(body.amountNativeAtomic)} USDC</b> <span className="tiny dim">payable only by your wallet, later, as the business payment</span></span>
+              <span className="k">reference</span><span>{body.reference ?? <span className="dim">none</span>}</span>
               <span className="k">you get</span><span className="small">a pinned preflight report (check fee {feeUsdcText(net)} USDC), the payment outcome read from the chain, a verifiable Payment Passport — no goods or services</span>
             </div>
             <details className="tech" data-testid="technical-details">
               <summary className="tiny">technical details — the exact body of <code>POST /v1/demo/orders</code></summary>
               <div className="kv w120 small" style={{ marginTop: 8 }}>
-                <span className="k">proxy</span><span><code>{body!.proxy}</code> · merchant {reviewFixture?.merchant ? <Hex value={reviewFixture.merchant} n={5} link={explorerAddr(net, reviewFixture.merchant)} /> : "—"}</span>
-                <span className="k">amount</span><span><code>{body!.amountNativeAtomic}</code> native units (18 decimals)</span>
+                <span className="k">proxy</span><span><code>{body.proxy}</code> · merchant {reviewFixture?.merchant ? <Hex value={reviewFixture.merchant} n={5} link={explorerAddr(net, reviewFixture.merchant)} /> : "—"}</span>
+                <span className="k">amount</span><span><code>{body.amountNativeAtomic}</code> native units (18 decimals)</span>
                 <span className="k">approval</span><span>{reviewFixture?.baselineDigest ? <Hex value={reviewFixture.baselineDigest} n={6} /> : <Chip tone="warn">no baseline</Chip>} <span className="tiny dim">the approval the check will reference</span></span>
               </div>
               <pre className="json" style={{ marginTop: 8 }}>{JSON.stringify(body, null, 2)}</pre>
             </details>
             {state.err && <div className="banner bad" role="alert">{state.err}</div>}
             <div className="row between" style={{ gap: 10 }}>
-              <button type="button" className="btn ghost" disabled={state.busy} onClick={() => setStage("edit")}>← Edit</button>
+              <button type="button" className="btn ghost" disabled={state.busy} onClick={() => { setStage("edit"); setReviewPayer(null); }}>← Edit</button>
               <button type="submit" className="btn primary" disabled={state.busy}>{state.busy ? <><Spinner /> creating…</> : "Create order"}</button>
             </div>
           </>

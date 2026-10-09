@@ -1,0 +1,19 @@
+{
+  "kind": "rpc",
+  "method": "eth_call",
+  "params": [
+    "{\"to\":\"0x342ab0e9f7951e4112e698ff69ac00ac18c009f9\",\"data\":\"0x52d1902d\",\"from\":null,\"value\":null}",
+    "{\"blockHash\":\"0xef794ae1e24b5cabf41f592adec95263e3e3b492eb83f67346528efcad9a2556\"}"
+  ],
+  "result": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+  "error": null,
+  "snapshot": {
+    "chainId": 5042002,
+    "blockNumber": "66232684",
+    "blockHash": "0xef794ae1e24b5cabf41f592adec95263e3e3b492eb83f67346528efcad9a2556",
+    "observedAt": "2026-10-09T02:06:52.310Z",
+    "providerId": "https://rpc.testnet.arc.io",
+    "pinningMode": "BLOCK_HASH"
+  },
+  "capturedAt": "2026-10-09T02:06:54.827Z"
+}

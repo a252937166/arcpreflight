@@ -1,0 +1,376 @@
+{
+  "passportVersion": "1.0",
+  "generator": {
+    "name": "arcpreflight",
+    "release": "cli",
+    "component": "cli"
+  },
+  "createdAt": "2026-10-09T02:08:13.239Z",
+  "disclosure": "public",
+  "chain": {
+    "chainId": 5042002,
+    "caip2": "eip155:5042002",
+    "usdc": "0x3600000000000000000000000000000000000000",
+    "nativeDecimals": 18,
+    "tokenDecimals": 6
+  },
+  "subject": {
+    "kind": "demo-run",
+    "executionMode": "runner",
+    "runId": "run-19ea15ff-962f-4a82-90ba-342007df7f5f",
+    "attemptId": "b582ac16-b1b0-4f1b-b9b9-2e71d4a425c6",
+    "fixture": "APPROVED_PAYMENT",
+    "orderId": "0x80772ad6f5e7b9c47eef521a3ce456718e20401c50fd3dd1189a90a033370168",
+    "merchant": "0xA8eB51EF994567B84215981E8d1Fe17cb8e42252",
+    "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE"
+  },
+  "template": {
+    "id": "oz-erc1967proxy-uups@5.4.0",
+    "merchant": "DemoMerchantV1",
+    "method": "pay(bytes32)",
+    "selector": "0x8609cad1"
+  },
+  "stageCoverage": {
+    "order": true,
+    "intent": true,
+    "quote": true,
+    "feeSettlement": true,
+    "report": true,
+    "decision": true,
+    "finalValidation": true,
+    "transactionPlan": true,
+    "signed": true,
+    "broadcast": true,
+    "postcondition": true,
+    "reconciliation": true
+  },
+  "digestProfiles": {
+    "arcpreflight-jcs-keccak-1.0": "keccak256(UTF8(JCS({kind, schemaVersion, payload}))) — RFC 8785 canonical JSON; kinds: intent, report, policy, baseline, decision, transactionPlan, finalValidation, execution, quote, evidence",
+    "legacy-json-stringify-keccak-1.0": "keccak256(UTF8(JSON.stringify(record))) over the record exactly as the runner serialised it; the file holds the byte-exact preimage",
+    "sha256-file-1.0": "sha256 over the file's UTF-8 bytes"
+  },
+  "omissions": [],
+  "notes": [
+    "evidence/chain/* were captured from the exporter's RPC at export time and are labelled captures, not pinned evidence; the fee transaction's calldata is replaced by its keccak256"
+  ],
+  "files": [
+    {
+      "path": "baseline.json",
+      "bytes": 1448,
+      "sha256": "0x84932c3596e90b7e4ecc43d082e7f663e760e6aba0ec6dd8f28dda8b21dee41c",
+      "object": {
+        "kind": "baseline",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e"
+      }
+    },
+    {
+      "path": "cost-statement.json",
+      "bytes": 2601,
+      "sha256": "0x856244c458429fd38c338b722b16f8c3ffa89a86b122e6bd64b1019ced34f256",
+      "object": null
+    },
+    {
+      "path": "decision.json",
+      "bytes": 544,
+      "sha256": "0x19db35f88e0a101fa76cc7b2b9ed9d189b2e17190c87ed3a8f4063810215c244",
+      "object": {
+        "kind": "decision",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x8ff192f561fa8a78cd03ef1162723b4cc3b67c0f0f88f30c9291841fe9bb77d1"
+      }
+    },
+    {
+      "path": "evidence/chain/business-tx.json",
+      "bytes": 3773,
+      "sha256": "0x1897a26879135272a5bc5285a15b2a670f7d0f3bc720c2f1bbea4f5f7a52521f",
+      "object": null
+    },
+    {
+      "path": "evidence/chain/create-order-tx.json",
+      "bytes": 3102,
+      "sha256": "0xf90bd979d16fe795b59e27e2ac61d564226151e1f54d59ed03a58f5394dba310",
+      "object": null
+    },
+    {
+      "path": "evidence/chain/fee-tx.json",
+      "bytes": 4573,
+      "sha256": "0x016b3080bf2581b981351e6b1ed65ae34c736da907cd17d6e87ca62815621ea1",
+      "object": null
+    },
+    {
+      "path": "evidence/final-validation/0x2372c1996cc55f99be3f89b67da225780cd215fb39340749f89d2f76e52d9ae7.json",
+      "bytes": 566,
+      "sha256": "0x6e7af36ea53a09cd45f67511d2c4df872fea50bfcdf99ec215a900769ff1f749",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x2372c1996cc55f99be3f89b67da225780cd215fb39340749f89d2f76e52d9ae7"
+      }
+    },
+    {
+      "path": "evidence/final-validation/0x603bada669af44510617f2f96fe8cde30cab80ea966ab17132790a42b51ce900.json",
+      "bytes": 713,
+      "sha256": "0x7c23659985a7a74f150de634f1724476d7284a1dce00b799a3a0813fc0317d09",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x603bada669af44510617f2f96fe8cde30cab80ea966ab17132790a42b51ce900"
+      }
+    },
+    {
+      "path": "evidence/final-validation/0xb4d17d88d18adf993aa337feee8ba3e82dec3496a5d63dd107b03f27354f17f5.json",
+      "bytes": 748,
+      "sha256": "0xa2f2097864c813e3718f8efe0d8b8aa2ca86868de5866e26aac3e90b177d4d3f",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0xb4d17d88d18adf993aa337feee8ba3e82dec3496a5d63dd107b03f27354f17f5"
+      }
+    },
+    {
+      "path": "evidence/final-validation/0xd3e152bdf82b074bc159a424fa7d470805680e46ca1abd13137274bcf8abafe5.json",
+      "bytes": 689,
+      "sha256": "0x0432abc9e54ebfd2d9dd86645262f092950979ba3ac93acf6b7a1e284a537c2c",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0xd3e152bdf82b074bc159a424fa7d470805680e46ca1abd13137274bcf8abafe5"
+      }
+    },
+    {
+      "path": "evidence/postcondition.json",
+      "bytes": 231,
+      "sha256": "0xd5225ddf998da6ff2d349ed6d41a7477b972a1c0021f748a25dd85fd2677dd59",
+      "object": {
+        "kind": "postcondition",
+        "schemaVersion": null,
+        "digestProfile": "legacy-json-stringify-keccak-1.0",
+        "digest": "0x88e08e26ef3cb0fded90b9393317c0c72e9986c820ffab6d78f5116f021d3cdc"
+      }
+    },
+    {
+      "path": "evidence/report/0x1e4a1a9f8ac4e62924b692721f8fd8c9b607ea0660e8cb710959400479e7d912.json",
+      "bytes": 9719,
+      "sha256": "0x4d9fe464ee90d17f2727af19936044fad15c2217c6fae34023182c38363f8bee",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x1e4a1a9f8ac4e62924b692721f8fd8c9b607ea0660e8cb710959400479e7d912"
+      }
+    },
+    {
+      "path": "evidence/report/0x278f792a1391f1b926d13a25fb67b5bce6629b4ff9618df1bee062afd2d069ee.json",
+      "bytes": 907,
+      "sha256": "0x07ece2c34bfc0b40b98650c63eed0225de02236716d8767239b8784c9ee51085",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x278f792a1391f1b926d13a25fb67b5bce6629b4ff9618df1bee062afd2d069ee"
+      }
+    },
+    {
+      "path": "evidence/report/0x3083240cbc98f72b63f4bc7a4f169c59235fa0258e79ee7de1f9077d808ab65f.json",
+      "bytes": 728,
+      "sha256": "0x1c115f4600de23d8f95a81fb95f16d6ebfd14f27434eacd19bd2cee0ab3401ef",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x3083240cbc98f72b63f4bc7a4f169c59235fa0258e79ee7de1f9077d808ab65f"
+      }
+    },
+    {
+      "path": "evidence/report/0x3ab8a9ca8c838eda5cf014d9031b12ff445b2e3c2015a3cf86960afb53235cab.json",
+      "bytes": 704,
+      "sha256": "0x397d3dc8d21a921ab468f6840a27d2fc05eead98bea538a347e7b914b2f5ff7b",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x3ab8a9ca8c838eda5cf014d9031b12ff445b2e3c2015a3cf86960afb53235cab"
+      }
+    },
+    {
+      "path": "evidence/report/0x441a0424c3a0cba36945ac3fa30fe9eec9ac922d29d51087c90b7e150133c840.json",
+      "bytes": 728,
+      "sha256": "0xac160f4949db09c015af27f59b952ad836d0323e6e12247c6e37433fb9e47b47",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x441a0424c3a0cba36945ac3fa30fe9eec9ac922d29d51087c90b7e150133c840"
+      }
+    },
+    {
+      "path": "evidence/report/0x64cce8b3af720b297c4e893c21ecfe3afd4133f003dbd779d2d8b728c8b47399.json",
+      "bytes": 1024,
+      "sha256": "0x86bc7f9306c0a1eb35bb0db322d462566e4e1ba4b490010cbf13a4895fd9c352",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x64cce8b3af720b297c4e893c21ecfe3afd4133f003dbd779d2d8b728c8b47399"
+      }
+    },
+    {
+      "path": "evidence/report/0x725dca016a2ade2f3c48442bb8322b0ad1380d32975c99a25f18fa9b389362c7.json",
+      "bytes": 704,
+      "sha256": "0xd9a3353debec762179e52bd62aca001bc779796ae985e9c99c7ab31034fcea3f",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x725dca016a2ade2f3c48442bb8322b0ad1380d32975c99a25f18fa9b389362c7"
+      }
+    },
+    {
+      "path": "evidence/report/0x877787d55be953f7007efedf8cf8fcd5a278d47af8babefb21ac1b10e7e38a48.json",
+      "bytes": 728,
+      "sha256": "0x17e6552322459645f6648e2815b7bb4a38a21f2280a57fd8c30a7aab06c2dde3",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x877787d55be953f7007efedf8cf8fcd5a278d47af8babefb21ac1b10e7e38a48"
+      }
+    },
+    {
+      "path": "evidence/report/0x9af1e0e85e7a4119fea587cfa54f7758f9686ad79fbcdf1a4181a7222212314a.json",
+      "bytes": 763,
+      "sha256": "0x388d2b181893b7c9e92460b3ecc2f56fc81283176060525c61f7518311877238",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x9af1e0e85e7a4119fea587cfa54f7758f9686ad79fbcdf1a4181a7222212314a"
+      }
+    },
+    {
+      "path": "evidence/report/0xbd9f1ec1a982458de5cc57e529d3cb3d4321d2323e91816e5f0240a7c9b56a9b.json",
+      "bytes": 728,
+      "sha256": "0x954562bf9f5563b1982ec008633008907cb7e811753e06b147fe4d97f908a02f",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0xbd9f1ec1a982458de5cc57e529d3cb3d4321d2323e91816e5f0240a7c9b56a9b"
+      }
+    },
+    {
+      "path": "evidence/report/0xd81ce10c0d7f7868f5a791b2daad0321a7dce6bc5fd4a2ac714dc60038ba5ee3.json",
+      "bytes": 728,
+      "sha256": "0x1c0e129f12a0057cf58184931db4e42eb90b848f44fbb37c4dcd3bf63716085b",
+      "object": {
+        "kind": "evidence",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0xd81ce10c0d7f7868f5a791b2daad0321a7dce6bc5fd4a2ac714dc60038ba5ee3"
+      }
+    },
+    {
+      "path": "execution.json",
+      "bytes": 1198,
+      "sha256": "0x4b299148c1de25eb0b4f592cb10631d90329c68637e8bae77facbf4230c63a3e",
+      "object": {
+        "kind": "execution",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x3229a69654189f01db210b13ad3a2648ab898bcc75258221bb3c0e643e088f03"
+      }
+    },
+    {
+      "path": "final-validation.json",
+      "bytes": 2156,
+      "sha256": "0x20060d13bb71ba912ef9d200e2825b4d35b847c2397915cf71606a7139c6ca0f",
+      "object": {
+        "kind": "finalValidation",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x22756aa2989b547c7f032e97aabcad84f17bb11292e61c41d0279f86c487ede3"
+      }
+    },
+    {
+      "path": "intent.json",
+      "bytes": 1106,
+      "sha256": "0xf5502e2138491dc11a1e9a776b1c8ba195519f36e4d10d9c19bac4912e4bdff1",
+      "object": {
+        "kind": "intent",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x3f90a0e927902ed1c63273fd6e8b8893ada8373341e6956cf69423db2c96d132"
+      }
+    },
+    {
+      "path": "order-summary.json",
+      "bytes": 1347,
+      "sha256": "0x68ba09a9a22a0d8be0da2767244c94eafd6989f4f07e83fe0c1dffaa012b4dca",
+      "object": null
+    },
+    {
+      "path": "payment.json",
+      "bytes": 1650,
+      "sha256": "0x61e1ed0b8e00cc411a87653462e9c70594cdbbe9bd5eeed508191d30c7f0edd7",
+      "object": null
+    },
+    {
+      "path": "policy.json",
+      "bytes": 782,
+      "sha256": "0x1f49f0b6ae8ba27b02547cb48e438b8ff1d31f3ad4d1ca0795e2ff709bdf06eb",
+      "object": {
+        "kind": "policy",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0x3ccf98c2c2b41ec496c51ebc14f384561131c2774fc9fa5aa7af714b5bc1fc39"
+      }
+    },
+    {
+      "path": "recovery.json",
+      "bytes": 838,
+      "sha256": "0xea37856c6bde2178d233133025237234e374f67ff7d286068ae91131e03248de",
+      "object": null
+    },
+    {
+      "path": "report.json",
+      "bytes": 7921,
+      "sha256": "0xb14eae751e041df89cdfac7d465eabf9091dd7da4f4d001d40fbe1c85588e6ac",
+      "object": {
+        "kind": "report",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0xe5890ebb74251c6d6a4a1aa7236c07fbe081b10e3573255ceaddc9c0bc4a5349"
+      }
+    },
+    {
+      "path": "transaction-plan.json",
+      "bytes": 464,
+      "sha256": "0x91255de9a2ff32714e64ad6435a9e25f34262b33467f883653ef1d184208a932",
+      "object": {
+        "kind": "transactionPlan",
+        "schemaVersion": "1.0",
+        "digestProfile": "arcpreflight-jcs-keccak-1.0",
+        "digest": "0xed67b15bccf3eba77b8fc3c1e88e48b1c5f0517a4c4518bfd1fadcc28fd319be"
+      }
+    },
+    {
+      "path": "verification-profile.json",
+      "bytes": 987,
+      "sha256": "0x0a9af967460675c3834010e52144359fcb3318af2d5304c90d1abc6db684ca29",
+      "object": null
+    },
+    {
+      "path": "verify.md",
+      "bytes": 2029,
+      "sha256": "0x00eaed0fb33612774059c3a336b3c632761863478b51e639fd6fdf65d22ca84d",
+      "object": null
+    }
+  ]
+}

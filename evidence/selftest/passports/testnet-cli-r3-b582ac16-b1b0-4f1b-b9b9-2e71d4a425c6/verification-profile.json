@@ -1,0 +1,48 @@
+{
+  "verificationProfileVersion": "1.0",
+  "acceptedDigestProfiles": [
+    "arcpreflight-jcs-keccak-1.0",
+    "legacy-json-stringify-keccak-1.0",
+    "sha256-file-1.0"
+  ],
+  "anchors": {
+    "format": {
+      "baselineDigests": [
+        "0x…"
+      ],
+      "policyDigests": [
+        "0x…"
+      ]
+    },
+    "source": "retained by the verifier's operator through a trusted channel, never taken from the passport"
+  },
+  "offlineChecks": [
+    "FILE_INTEGRITY",
+    "DIGEST_INTEGRITY",
+    "DISCLOSURE",
+    "APPROVAL_COVERAGE"
+  ],
+  "anchorChecks": [
+    "APPROVAL_SOURCE"
+  ],
+  "onlineChecks": [
+    "NETWORK_IDENTITY",
+    "FEE_ATTRIBUTION",
+    "TRANSACTION_PLAN_AGREEMENT",
+    "ORDER_OUTCOME",
+    "COST_STATEMENT"
+  ],
+  "neverEvaluated": [
+    "CURRENT_ELIGIBILITY"
+  ],
+  "rpc": {
+    "chainId": 5042002,
+    "methods": [
+      "eth_chainId",
+      "eth_getTransactionByHash",
+      "eth_getTransactionReceipt",
+      "eth_call",
+      "eth_getBlockByHash"
+    ]
+  }
+}

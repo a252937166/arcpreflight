@@ -1,0 +1,206 @@
+{
+  "schemaVersion": "1.0",
+  "mode": "SUPPORTED_INTENT",
+  "intentDigest": "0x3f90a0e927902ed1c63273fd6e8b8893ada8373341e6956cf69423db2c96d132",
+  "decisionEligible": true,
+  "observation": {
+    "chainId": 5042002,
+    "blockNumber": "66232684",
+    "blockHash": "0xef794ae1e24b5cabf41f592adec95263e3e3b492eb83f67346528efcad9a2556",
+    "observedAt": "2026-10-09T02:06:52.310Z",
+    "providerId": "https://rpc.testnet.arc.io",
+    "pinningMode": "BLOCK_HASH"
+  },
+  "methodologyDigest": "0xa573e891d563351ae90ef8cb960d5db61a86c95738ea02d699465da3727cd642",
+  "adapterManifestDigests": [
+    "0x731bdb9346a7d2b7874fba66dd6952d38ba99b37db1e47b02a2597a2669abdd6"
+  ],
+  "baselineDigest": "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e",
+  "baselineResult": "MATCH",
+  "dependencies": [
+    {
+      "address": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+      "role": "TARGET",
+      "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
+      "adapterDigest": "0x731bdb9346a7d2b7874fba66dd6952d38ba99b37db1e47b02a2597a2669abdd6",
+      "resolution": "VERIFIED_TEMPLATE"
+    },
+    {
+      "address": "0x342ab0e9f7951e4112e698ff69ac00ac18c009f9",
+      "role": "IMPLEMENTATION",
+      "codeHash": "0x32e3f234bcc25a188c44298549f35cd029d00243b40e4dc5894b1c262248b8ca",
+      "adapterDigest": "0x731bdb9346a7d2b7874fba66dd6952d38ba99b37db1e47b02a2597a2669abdd6",
+      "resolution": "VERIFIED_TEMPLATE"
+    }
+  ],
+  "signals": [
+    {
+      "id": "PROXY_TEMPLATE_VERIFIED",
+      "state": "observed",
+      "basis": "chain_read",
+      "scope": "proxy runtime code hash matches oz-erc1967proxy-uups@5.4.0",
+      "evidenceDigests": [
+        "0x278f792a1391f1b926d13a25fb67b5bce6629b4ff9618df1bee062afd2d069ee"
+      ],
+      "limitations": [
+        "template match covers the proxy contract only; implementation semantics are a separate question"
+      ],
+      "sourceIds": [
+        "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.4.0/contracts/proxy/ERC1967/ERC1967Proxy.sol",
+        "packages/contracts/out/ERC1967Proxy.sol/ERC1967Proxy.json (solc 0.8.28, optimizer 200, evm cancun)"
+      ]
+    },
+    {
+      "id": "UUPS_PROXIABLE_UUID",
+      "state": "observed",
+      "basis": "simulation",
+      "scope": "implementation.proxiableUUID() == ERC-1967 implementation slot",
+      "evidenceDigests": [
+        "0x725dca016a2ade2f3c48442bb8322b0ad1380d32975c99a25f18fa9b389362c7"
+      ],
+      "limitations": [
+        "proxiableUUID only shows the implementation declares UUPS; upgrade authority is a separate check"
+      ],
+      "sourceIds": [
+        "eip-1822",
+        "eip-1967"
+      ]
+    },
+    {
+      "id": "SUPPORTED_STATE_PAUSED",
+      "state": "not_observed",
+      "basis": "chain_read",
+      "scope": "DemoMerchant.paused() at pinned block",
+      "evidenceDigests": [
+        "0x3ab8a9ca8c838eda5cf014d9031b12ff445b2e3c2015a3cf86960afb53235cab"
+      ],
+      "limitations": [],
+      "sourceIds": [
+        "demo-merchant-v1-template"
+      ]
+    },
+    {
+      "id": "SUPPORTED_STATE_ORDER_PAYABLE",
+      "state": "observed",
+      "basis": "chain_read",
+      "scope": "DemoMerchant.getOrder(orderId): exists, unpaid, payer==sender, amount==approved",
+      "evidenceDigests": [
+        "0x64cce8b3af720b297c4e893c21ecfe3afd4133f003dbd779d2d8b728c8b47399"
+      ],
+      "limitations": [],
+      "sourceIds": [
+        "demo-merchant-v1-template"
+      ]
+    },
+    {
+      "id": "CALL_SIMULATION",
+      "state": "observed",
+      "basis": "simulation",
+      "scope": "eth_call with the exact sender, target, calldata and value at the pinned block",
+      "evidenceDigests": [
+        "0x9af1e0e85e7a4119fea587cfa54f7758f9686ad79fbcdf1a4181a7222212314a"
+      ],
+      "limitations": [
+        "simulation success is not a guarantee of future inclusion or success"
+      ],
+      "sourceIds": [
+        "https://ethereum.org/developers/docs/apis/json-rpc/"
+      ]
+    },
+    {
+      "id": "ARC_USDC_TWO_INTERFACES",
+      "state": "observed",
+      "basis": "network_advisory",
+      "scope": "network rule: native USDC (18 dec) and ERC-20 USDC (6 dec) share one balance; amounts must be converted at the boundary",
+      "evidenceDigests": [],
+      "limitations": [
+        "network rule only; see AMOUNT_SEMANTICS for the target-specific check"
+      ],
+      "sourceIds": [
+        "https://docs.arc.io/arc/references/evm-differences",
+        "https://www.arc.io/blog/arc-compatibility-guide-for-existing-evm-apps"
+      ]
+    },
+    {
+      "id": "ARC_VALUE_TRANSFER_RULES",
+      "state": "observed",
+      "basis": "network_advisory",
+      "scope": "network rule: native value transfers to the zero address, to/from blocklisted addresses, burns and some SELFDESTRUCT paths revert even with sufficient balance; blocklist reverts still consume gas",
+      "evidenceDigests": [],
+      "limitations": [
+        "does not assert that this call triggers any of these rules"
+      ],
+      "sourceIds": [
+        "https://docs.arc.io/arc/references/evm-differences"
+      ]
+    },
+    {
+      "id": "ARC_PREVRANDAO_ZERO",
+      "state": "observed",
+      "basis": "network_advisory",
+      "scope": "network rule: block.prevrandao is always 0 on Arc; onchain randomness must come from an oracle/VRF",
+      "evidenceDigests": [],
+      "limitations": [
+        "does not assert the target reads prevrandao"
+      ],
+      "sourceIds": [
+        "https://docs.arc.io/arc/references/evm-differences"
+      ]
+    },
+    {
+      "id": "ARC_SELFDESTRUCT_RULES",
+      "state": "observed",
+      "basis": "network_advisory",
+      "scope": "network rule: SELFDESTRUCT follows EIP-6780 plus Arc value rules and moves the contract's native USDC to the beneficiary; sends to a destructed account revert",
+      "evidenceDigests": [],
+      "limitations": [
+        "opcode presence is not checked in P0; this is a rule reminder"
+      ],
+      "sourceIds": [
+        "https://docs.arc.io/arc/references/evm-differences",
+        "https://eips.ethereum.org/EIPS/eip-6780"
+      ]
+    },
+    {
+      "id": "ARC_TIMESTAMP_NON_STRICT",
+      "state": "observed",
+      "basis": "network_advisory",
+      "scope": "network rule: sub-second blocks may share a timestamp; order by block number, not timestamp",
+      "evidenceDigests": [],
+      "limitations": [],
+      "sourceIds": [
+        "https://docs.arc.io/arc/references/evm-differences"
+      ]
+    },
+    {
+      "id": "ARC_MIN_BASE_FEE",
+      "state": "observed",
+      "basis": "network_advisory",
+      "scope": "network rule: transactions with maxFeePerGas below 20 gwei are silently dropped; fee is paid in USDC",
+      "evidenceDigests": [],
+      "limitations": [
+        "the floor is not a sufficiency guarantee; final validation re-estimates fees"
+      ],
+      "sourceIds": [
+        "https://docs.arc.io/arc/references/gas-and-fees"
+      ]
+    }
+  ],
+  "rawEvidenceDigests": [
+    "0x278f792a1391f1b926d13a25fb67b5bce6629b4ff9618df1bee062afd2d069ee",
+    "0xd81ce10c0d7f7868f5a791b2daad0321a7dce6bc5fd4a2ac714dc60038ba5ee3",
+    "0x877787d55be953f7007efedf8cf8fcd5a278d47af8babefb21ac1b10e7e38a48",
+    "0x3083240cbc98f72b63f4bc7a4f169c59235fa0258e79ee7de1f9077d808ab65f",
+    "0xbd9f1ec1a982458de5cc57e529d3cb3d4321d2323e91816e5f0240a7c9b56a9b",
+    "0x441a0424c3a0cba36945ac3fa30fe9eec9ac922d29d51087c90b7e150133c840",
+    "0x1e4a1a9f8ac4e62924b692721f8fd8c9b607ea0660e8cb710959400479e7d912",
+    "0x725dca016a2ade2f3c48442bb8322b0ad1380d32975c99a25f18fa9b389362c7",
+    "0x3ab8a9ca8c838eda5cf014d9031b12ff445b2e3c2015a3cf86960afb53235cab",
+    "0x64cce8b3af720b297c4e893c21ecfe3afd4133f003dbd779d2d8b728c8b47399",
+    "0x9af1e0e85e7a4119fea587cfa54f7758f9686ad79fbcdf1a4181a7222212314a"
+  ],
+  "exclusions": [
+    "external oracles, delegatecall targets beyond two levels, and full storage are not covered"
+  ],
+  "expiresAt": "2026-10-09T02:11:52.310Z"
+}

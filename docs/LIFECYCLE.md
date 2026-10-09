@@ -250,3 +250,42 @@ attempts record the fee relay receipt once (`fee_receipt_json`) so their cost st
 **Order dialog**: says it is a demonstration order with no goods delivered and what the visitor gets (report, payment
 outcome, passport); proxy names, atomic units and raw JSON live under "technical details"; before buying a report the
 client checks `balance ≥ fee + amount + gas reserve` (the faucet card uses the same number, not a fixed 0.05).
+
+## 10. Review round 3 (`51cc0dd`, 2026-10-08) — contract for the fixes
+
+**Submission uncertainty is durable (item 1).** `POST /v1/wallet/attempts/{id}/prompt { event: "prompted" | "unknown-submission", detail? }`
+(owner; state `VALIDATED`) records `prompt: { state: "PROMPTED" | "UNKNOWN_SUBMISSION", at, detail }` on the attempt; `AttemptView.prompt`
+carries it. The client calls `prompted` right before `eth_sendTransaction` (after remembering the attempt) and `unknown-submission`
+when the wallet returned anything that is not a user rejection. With a prompt marker present, a `VALIDATED` attempt is **uncertain**:
+`GET …/{id}` (observe) and `POST …/recover` read the order and the `OrderPaid` log even inside the window; the client never offers
+"Continue in wallet" or "Abandon (nothing sent)" for it — only "Recover" and "I rejected it — abandon" (an explicit statement by the
+visitor); `nextAction` says so. A page refresh therefore restores the uncertainty, not an idle attempt.
+
+**Plan agreement is never skipped (item 2).** A receipt without the transaction body leaves a `BROADCAST_ATTEMPTED` attempt open
+("receipt visible, transaction body not yet served; the plan comparison is outstanding"); it closes only once `to/data/value/chainId/type`
+were compared.
+
+**Approval evidence must be well-formed (item 3).** `statusAtFinalValidation` must be `{ revoked: boolean, validUntil: ISO|null,
+fetchedAt: ISO }` with `fetchedAt` between the report's observation and the execution record (and `validUntil ≥ fetchedAt`); anything
+else fails `APPROVAL_COVERAGE` for an executed run (`{}`, `revoked: null`, invalid timestamps included).
+
+**Expiry is re-checked at the last moment (item 4).** Runner: after the head-block read, immediately before the broadcast marker and
+the send. Browser: `Date.now()` is taken after the wallet queries (`eth_accounts`, `eth_chainId`), immediately before `eth_sendTransaction`.
+
+**Unresolved reservation (item 6).** The verifier cannot derive service-side reservations: `COST_STATEMENT` compares every other
+field and reports `UNVERIFIED` whenever `unresolvedReservation.nativeAtomic` is not `"0"` (the statement's own value is never fed
+back into the recomputation).
+
+**Late receipts (item 7).** `GET …/{id}` backfills a missing fee relay receipt on terminal attempts too, and the worker backfills
+recently closed attempts (bounded), so the page and the exported passport carry the same cost evidence.
+
+**CLI evidence (item 8).** The reference CLI persists every artefact as it is produced (`artifacts` table in its store, keyed by
+the run) and exports a passport from them with `merchant-agent passport <attemptId> --out <dir>`; the runner emits an `approval`
+artefact (the referenced baseline as read at decision time) so the export carries `baseline.json`.
+
+**As built (2026-10-09).** The runner's `report` artefact now carries the settlement facts delivered with the report (`settlement:
+{ backend, state, transactionHash, evidence }`) and an `approval` artefact records the referenced baseline as read at decision time,
+so a passport built from artefacts alone (API after a crash, CLI always) has `payment.settlement` and `baseline.json`; the CLI
+derives the relayer from the fee transaction's sender at export. Prompt markers: a later `prompted` never downgrades an
+`UNKNOWN_SUBMISSION`; closed attempts take no prompt (409). The observe read backfills the fee relay receipt of closed attempts;
+the worker backfills attempts closed in the last 24 h (10 per pass). Browser (as built): the `prompted` marker is written before `eth_sendTransaction` and also remembered in the browser per attempt and per API instance, so a refresh restores the uncertainty even while the server view lags; a marker that cannot be written prompts nothing (`PROMPT_MARKER_FAILED`); a `409 ATTEMPT_OPEN` whose open attempt carries a marker is reconciled (recover once, then observe) instead of being offered to the wallet; an ambiguous wallet answer writes `unknown-submission`, reconciles first (`/recover`), then observes every ~2 s with a recover every third tick for up to 60 s, and leaves the visitor's explicit abandon as the only "nothing was sent"; the validation window is re-read after every await (`eth_accounts`, `eth_chainId`, the marker call) immediately before the prompt.

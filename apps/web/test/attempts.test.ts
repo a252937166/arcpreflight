@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, setApiBase, type AttemptView } from "../src/lib/api";
-import { AMBIGUOUS_OPEN_TEXT, AMBIGUOUS_TEXT, attemptMessage, deviationRows, executeAttempt, executionInFlight, findOpenAttempt, insideWindow, isOpen, isTerminal, isUserRejection, pollAttempt, preSendCheck, rememberAttempt, rememberedAttempts, resetExecutionGuard, sendValidatedAttempt, txRequestFromPlan } from "../src/lib/attempts";
+import { AMBIGUOUS_OPEN_TEXT, AMBIGUOUS_TEXT, UNCERTAIN_OPEN_TEXT, UNCERTAIN_TEXT, attemptMessage, deviationRows, executeAttempt, executionInFlight, findOpenAttempt, insideWindow, isOpen, isTerminal, isUncertain, isUserRejection, pollAttempt, preSendCheck, reconcileUncertainAttempt, rememberAttempt, rememberedAttempt, rememberedAttempts, resetExecutionGuard, sendValidatedAttempt, txRequestFromPlan, windowCheck } from "../src/lib/attempts";
 import { ACCOUNT, D, MERCHANT, NOW, REQUEST, response } from "./fixtures";
 
 // Wallet execution from the browser (docs/LIFECYCLE.md §3, §9, AP33-07): the attempt is remembered before the wallet is prompted, the wallet
 // is re-checked right before the prompt (account, chain, window), the wallet signs exactly the plan (no nonce), the hash is reported right
 // away, the observe route is polled until the state leaves the open set, a rejected prompt abandons, a refusal sends nothing, an
 // unexplained wallet error reconciles instead of prompting again, and one execution runs at a time.
+// Review round 3 (§10): the `prompted` marker is written on the server right before the prompt (no marker → no prompt), `unknown-submission`
+// when the wallet answered with anything but a rejection; an attempt carrying a marker is uncertain — restored, it is reconciled and never
+// handed to the wallet again; the validation window is re-read from the clock after every await that precedes eth_sendTransaction (item 4).
 const ORDER = `0x${"ab".repeat(32)}`;
+const PROMPTED = { state: "PROMPTED" as const, at: NOW.toISOString(), detail: null };
 const PLAN = { chainId: 5042002, from: ACCOUNT, type: 2 as const, to: MERCHANT, data: "0x8609cad1" + "ab".repeat(32), valueNativeAtomic: "5000000000000000", nonce: "7", gasLimit: "40735", maxFeePerGasNativeAtomic: "29000000000", maxPriorityFeePerGasNativeAtomic: "5000000000", accessList: [], authorizationList: [] };
 const ATTEMPT = "11111111-2222-4333-8444-555555555555";
 const OTHER = "0x0000000000000000000000000000000000000b11";
@@ -57,9 +61,22 @@ describe("remembered attempts (per instance)", () => {
     expect(rememberedAttempts()[0].state).toBe("CONFIRMED"); expect(storage.has("arcpreflight.attempts:root")).toBe(true);
     setApiBase("/testnet"); expect(rememberedAttempts()).toEqual([]); // another instance's attempts never leak across
   });
+  it("§10 item 1: the prompt marker is remembered per attempt and makes a VALIDATED attempt uncertain — from the server view or from this browser's memory alone", () => {
+    expect(isUncertain(view())).toBe(false); // plainly validated: nothing was handed to a wallet yet
+    expect(isUncertain(view({ prompt: PROMPTED }))).toBe(true); // the server recorded the prompt
+    expect(isUncertain(view({ prompt: { state: "UNKNOWN_SUBMISSION", at: NOW.toISOString(), detail: "Request timed out" } }))).toBe(true);
+    rememberAttempt({ attemptId: ATTEMPT, orderId: ORDER, requestId: REQUEST, createdAt: NOW.toISOString(), state: "VALIDATED", promptState: "PROMPTED" });
+    expect(rememberedAttempt(ATTEMPT)?.promptState).toBe("PROMPTED");
+    expect(isUncertain(view())).toBe(true); // the server view lacks the key (older API) but this browser opened the prompt: still uncertain
+    expect(isUncertain(view(), null)).toBe(false); // …and the memory is what carries it
+    expect(isUncertain(view({ state: "CONFIRMED", prompt: PROMPTED }))).toBe(false); // closed attempts are what they are
+    expect(isUncertain(view({ state: "BROADCAST_ATTEMPTED", prompt: PROMPTED }))).toBe(false);
+    expect(isUncertain(null)).toBe(false);
+  });
 });
 
-function fakeApi(opts: { create?: () => Response; observe: (n: number) => Response; sent?: () => Response; recover?: (n: number) => Response; list?: () => Response }) {
+/** the prompt marker route answers like the API: the view with `prompt` set (PROMPTED, or UNKNOWN_SUBMISSION with the wallet's answer as detail) */
+function fakeApi(opts: { create?: () => Response; observe: (n: number) => Response; sent?: () => Response; recover?: (n: number) => Response; list?: () => Response; prompt?: (body: any) => Response }) {
   const calls: { path: string; method: string; body: any }[] = []; let observes = 0; let recovers = 0;
   vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(init.body as string) : null; calls.push({ path, method: init?.method ?? "GET", body });
@@ -68,26 +85,30 @@ function fakeApi(opts: { create?: () => Response; observe: (n: number) => Respon
     if (path === `/v1/wallet/attempts/${ATTEMPT}/sent`) return (opts.sent ?? (() => response(view({ state: "BROADCAST_ATTEMPTED", txHash: D }))))();
     if (path === `/v1/wallet/attempts/${ATTEMPT}/abandon`) return response(view({ state: "NOT_SENT", businessStatus: "NOT_EXECUTED" }));
     if (path === `/v1/wallet/attempts/${ATTEMPT}/recover`) return (opts.recover ?? (() => response(view())))(recovers++);
+    if (path === `/v1/wallet/attempts/${ATTEMPT}/prompt`) return (opts.prompt ?? ((b: any) => response(view({ prompt: { state: b.event === "prompted" ? "PROMPTED" : "UNKNOWN_SUBMISSION", at: NOW.toISOString(), detail: b.detail ?? null } }))))(body);
     if (path === `/v1/wallet/attempts/${ATTEMPT}`) return opts.observe(observes++);
     throw new Error(`Unexpected URL: ${path}`);
   }));
   return calls;
 }
 const paths = (calls: { path: string; method: string }[]) => calls.map((c) => `${c.method} ${c.path}`);
+const PROMPT_PATH = `POST /v1/wallet/attempts/${ATTEMPT}/prompt`;
 
 describe("executeAttempt: the state machine", () => {
   it("validates, remembers the attempt BEFORE prompting, re-reads account and chain, sends exactly the plan without a nonce, reports the hash, polls to CONFIRMED", async () => {
     const calls = fakeApi({ observe: (n) => response(n === 0 ? view({ state: "BROADCAST_ATTEMPTED", txHash: D }) : view({ state: "CONFIRMED", txHash: D, businessTxHash: D, businessStatus: "SUCCESS", block: "200", deviations: { mismatch: [], deviations: { nonce: { plan: "7", actual: "8" } } } })) });
-    const events: string[] = []; let rememberedAtPrompt: string[] = [];
-    const provider = wallet(() => { rememberedAtPrompt = rememberedAttempts().map((a) => a.attemptId); return D; });
+    const events: string[] = []; let rememberedAtPrompt: any[] = []; let callsAtPrompt: string[] = [];
+    const provider = wallet(() => { rememberedAtPrompt = rememberedAttempts(); callsAtPrompt = paths(calls); return D; });
     const policy = { ownerPrincipal: "x" };
     const result = await executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy, withToken, onEvent: (e) => events.push(e.phase), poll: { wait: async () => {}, intervalMs: 0 } });
     expect(calls[0]).toMatchObject({ path: "/v1/wallet/attempts", method: "POST", body: { requestId: REQUEST, orderId: ORDER, policy } });
-    expect(rememberedAtPrompt).toEqual([ATTEMPT]); // AP33-07: durable (here: remembered) before the wallet is asked
+    expect(rememberedAtPrompt).toEqual([{ attemptId: ATTEMPT, orderId: ORDER, requestId: REQUEST, createdAt: NOW.toISOString(), state: "VALIDATED", promptState: "PROMPTED" }]); // AP33-07 + §10: remembered, with the marker, before the wallet is asked
+    expect(callsAtPrompt).toEqual(["POST /v1/wallet/attempts", PROMPT_PATH]); // §10 item 1: the marker is on the server before eth_sendTransaction
+    expect(calls[1]).toMatchObject({ path: `/v1/wallet/attempts/${ATTEMPT}/prompt`, method: "POST", body: { event: "prompted" } });
     expect(provider.sends[0]).toEqual(txRequestFromPlan(PLAN)); expect(provider.sends[0].nonce).toBeUndefined();
     const methods = provider.request.mock.calls.map((c: any[]) => c[0].method);
     expect(methods.indexOf("eth_accounts")).toBeLessThan(methods.indexOf("eth_sendTransaction")); expect(methods.indexOf("eth_chainId")).toBeLessThan(methods.indexOf("eth_sendTransaction")); // re-read right before the prompt
-    expect(calls[1]).toMatchObject({ path: `/v1/wallet/attempts/${ATTEMPT}/sent`, method: "POST", body: { txHash: D } });
+    expect(calls[2]).toMatchObject({ path: `/v1/wallet/attempts/${ATTEMPT}/sent`, method: "POST", body: { txHash: D } });
     expect(calls.filter((c) => c.path === `/v1/wallet/attempts/${ATTEMPT}` && c.method === "GET")).toHaveLength(2);
     expect(events).toEqual(["validating", "prompting", "reporting", "polling", "polling", "polling", "done"]);
     expect(result.phase).toBe("done"); expect(result.attempt?.state).toBe("CONFIRMED"); expect(result.txHash).toBe(D);
@@ -99,8 +120,32 @@ describe("executeAttempt: the state machine", () => {
     const provider = wallet(() => { const e: any = new Error("User rejected the request."); e.code = 4001; throw e; });
     const result = await executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken });
     expect(result.phase).toBe("abandoned"); expect(result.attempt?.state).toBe("NOT_SENT");
-    expect(calls.map((c) => c.path)).toEqual(["/v1/wallet/attempts", `/v1/wallet/attempts/${ATTEMPT}/abandon`]);
+    expect(calls.map((c) => c.path)).toEqual(["/v1/wallet/attempts", `/v1/wallet/attempts/${ATTEMPT}/prompt`, `/v1/wallet/attempts/${ATTEMPT}/abandon`]); // a rejection is the one wallet answer that is NOT an unknown submission
     expect(rememberedAttempts()[0].state).toBe("NOT_SENT");
+  });
+  it("§10 item 1: a prompt marker that cannot be written means nothing is prompted — the uncertainty could not be persisted", async () => {
+    const calls = fakeApi({ observe: () => response(view()), prompt: () => response({ error: "DEPENDENCY_ERROR", reason: "store unavailable" }, 503) });
+    const provider = wallet(() => D);
+    const events: string[] = [];
+    const r = await executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken, onEvent: (e) => events.push(e.phase) });
+    expect(r.phase).toBe("error"); expect(r.error?.code).toBe("PROMPT_MARKER_FAILED"); expect(r.error?.text).toMatch(/nothing was prompted/); expect(r.error?.text).toMatch(/store unavailable/);
+    expect(provider.sends).toEqual([]); expect(events).not.toContain("prompting");
+    expect(paths(calls)).toEqual(["POST /v1/wallet/attempts", PROMPT_PATH]); // no abandon by itself: the attempt stays VALIDATED for a retry inside the window, abandon or recover
+    expect(r.attempt?.state).toBe("VALIDATED"); expect(rememberedAttempt(ATTEMPT)?.promptState).toBeUndefined(); // no marker anywhere: it stays a plain validated attempt
+    // the attempt closed meanwhile (409 ATTEMPT_NOT_OPEN from the marker route): the same rule — nothing is prompted
+    fakeApi({ observe: () => response(view()), prompt: () => response({ error: "ATTEMPT_NOT_OPEN", reason: "the attempt is NOT_EXECUTED; a prompt is recorded for a validated attempt only" }, 409) });
+    const r2 = await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view(), withToken });
+    expect(r2.phase).toBe("error"); expect(r2.error?.code).toBe("PROMPT_MARKER_FAILED"); expect(r2.error?.text).toMatch(/NOT_EXECUTED/); expect(provider.sends).toEqual([]);
+  });
+  it("§10 item 1: an attempt that carries a prompt marker is never handed to the wallet again — sendValidatedAttempt refuses before any wallet read", async () => {
+    const calls = fakeApi({ observe: () => response(view({ prompt: PROMPTED })) });
+    const provider = wallet(() => D);
+    const r = await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view({ prompt: PROMPTED }), withToken });
+    expect(r.phase).toBe("uncertain"); expect(r.error?.code).toBe("ATTEMPT_UNCERTAIN"); expect(r.error?.text).toMatch(/already handed to a wallet/); expect(r.error?.text).not.toMatch(/nothing was sent/i);
+    expect(provider.request).not.toHaveBeenCalled(); expect(calls).toEqual([]);
+    // the same from this browser's memory alone (the server view predates the route)
+    rememberAttempt({ attemptId: ATTEMPT, orderId: ORDER, requestId: REQUEST, createdAt: NOW.toISOString(), state: "VALIDATED", promptState: "PROMPTED" });
+    expect((await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view(), withToken })).error?.code).toBe("ATTEMPT_UNCERTAIN"); expect(provider.sends).toEqual([]);
   });
   it("a 409 VALIDATION_FAILED is a refusal with reasons — no prompt, nothing sent, the REFUSED attempt remembered", async () => {
     fakeApi({ create: () => response({ error: "VALIDATION_FAILED", reason: "the decision is REVIEW_REQUIRED: nothing is executed", reasons: ["BASELINE_STATUS: implementation changed"], attemptId: ATTEMPT }, 409), observe: () => response(view()) });
@@ -139,6 +184,15 @@ describe("executeAttempt: the state machine", () => {
     r = await executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken });
     expect(r.phase).toBe("error"); expect(r.error?.code).toBe("ATTEMPT_OPEN");
     expect(await findOpenAttempt(ORDER, withToken)).toBeNull();
+  });
+  it("§10 item 1: 409 ATTEMPT_OPEN whose open attempt carries a prompt marker is reconciled (recover once, then observe), never shown as 'continue in your wallet'", async () => {
+    // the full-view GET that loads the open attempt is observe #0; recover answers still open; the next observes close it through OrderPaid
+    const calls = fakeApi({ create: () => response({ error: "ATTEMPT_OPEN" }, 409), list: () => response({ attempts: [{ ...view({ prompt: PROMPTED }), plan: undefined }] }), recover: () => response(view({ prompt: PROMPTED, note: "reconciliation found no payment for this order yet" })), observe: (n) => response(n < 2 ? view({ prompt: PROMPTED }) : view({ state: "CONFIRMED", txHash: D, businessTxHash: D, businessStatus: "SUCCESS", note: "recovered through the merchant's OrderPaid event" })) });
+    const provider = wallet(() => D); const events: string[] = [];
+    const r = await executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken, onEvent: (e) => events.push(e.phase), poll: { wait: async () => {}, intervalMs: 0 } });
+    expect(events).toEqual(["validating", "uncertain", "uncertain", "uncertain", "done"]); expect(events).not.toContain("open-attempt");
+    expect(paths(calls)).toEqual(["POST /v1/wallet/attempts", "GET /v1/wallet/attempts", `GET /v1/wallet/attempts/${ATTEMPT}`, `POST /v1/wallet/attempts/${ATTEMPT}/recover`, `GET /v1/wallet/attempts/${ATTEMPT}`, `GET /v1/wallet/attempts/${ATTEMPT}`]);
+    expect(provider.request).not.toHaveBeenCalled(); expect(r.phase).toBe("done"); expect(r.attempt?.state).toBe("CONFIRMED"); expect(r.txHash).toBe(D);
   });
   it("polling stops at the deadline with 'unresolved' (recover is the next action) and tolerates transport errors", async () => {
     let t = NOW.getTime(); const now = () => t;
@@ -202,6 +256,72 @@ describe("right before eth_sendTransaction (docs/LIFECYCLE.md §9)", () => {
   });
 });
 
+describe("§10 item 4: the window is read from the clock after every await that precedes eth_sendTransaction", () => {
+  /** a wallet whose eth_accounts answers late: the clock moves while the read is pending */
+  const slowWallet = (advance: () => void) => { const sends: any[] = []; const request = vi.fn(async ({ method, params }: any) => { if (method === "eth_accounts") { advance(); return [ACCOUNT]; } if (method === "eth_chainId") return "0x4cef52"; if (method === "eth_sendTransaction") { sends.push(params[0]); return D; } throw new Error(`unexpected ${method}`); }); return { request, sends } as any; };
+  it("preSendCheck: 60 s left when the call starts, 4 s left once the wallet answered → WINDOW_CLOSED, no prompt", async () => {
+    let t = NOW.getTime(); const clock = () => t;
+    const provider = slowWallet(() => { t += 56_000; });
+    const r = await preSendCheck(provider, view(), clock);
+    expect(r).toMatchObject({ ok: false, code: "WINDOW_CLOSED" }); expect((r as any).text).toMatch(/closes in 4 s/);
+    expect(windowCheck(view(), NOW.getTime() + 54_999)).toEqual({ ok: true }); expect(windowCheck(view(), NOW.getTime() + 55_000)).toMatchObject({ ok: false, code: "WINDOW_CLOSED" }); // > 5 s must be left
+  });
+  it("sendValidatedAttempt: the slow eth_accounts read carries the plan past its window → no marker, no eth_sendTransaction, the attempt stays VALIDATED", async () => {
+    let t = NOW.getTime();
+    const calls = fakeApi({ observe: () => response(view()) });
+    const provider = slowWallet(() => { t += 61_000; });
+    const r = await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view(), withToken, poll: { now: () => t } });
+    expect(r.phase).toBe("error"); expect(r.error?.code).toBe("WINDOW_CLOSED"); expect(r.error?.text).toMatch(/The validation window closed/);
+    expect(provider.sends).toEqual([]); expect(paths(calls)).toEqual([]); // not even the marker: the check runs before it
+    expect(r.attempt?.state).toBe("VALIDATED"); expect(isUncertain(r.attempt)).toBe(false);
+  });
+  it("sendValidatedAttempt: the marker call itself is the slow await → the window is read once more right before the prompt; no eth_sendTransaction", async () => {
+    let t = NOW.getTime();
+    const calls = fakeApi({ observe: () => response(view()), prompt: (b) => { t += 57_000; return response(view({ prompt: { state: "PROMPTED", at: NOW.toISOString(), detail: b.detail ?? null } })); } });
+    const provider = wallet(() => D);
+    const events: string[] = [];
+    const r = await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view(), withToken, poll: { now: () => t }, onEvent: (e) => events.push(e.phase) });
+    expect(r.phase).toBe("error"); expect(r.error?.code).toBe("WINDOW_CLOSED"); expect(r.error?.text).toMatch(/closes in 3 s/);
+    expect(provider.sends).toEqual([]); expect(events).not.toContain("prompting");
+    expect(paths(calls)).toEqual([PROMPT_PATH]); // the marker was written — so the attempt now reads as uncertain (the safe direction: recover decides, nothing is prompted)
+    expect(isUncertain(r.attempt)).toBe(true);
+  });
+});
+
+describe("§10 item 1: a restored attempt with a prompt marker (after a refresh) is reconciled, never prompted", () => {
+  it("recovers once, then observes; CONFIRMED through OrderPaid ends done; no wallet call at all", async () => {
+    let t = NOW.getTime(); const now = () => t;
+    const calls = fakeApi({ recover: () => response(view({ prompt: PROMPTED, note: "the wallet was asked to sign this plan and reconciliation found no payment for this order yet" })), observe: (n) => response(n === 0 ? view({ prompt: PROMPTED }) : view({ state: "CONFIRMED", txHash: D, businessTxHash: D, businessStatus: "SUCCESS", prompt: PROMPTED })) });
+    const events: { phase: string; state?: string }[] = [];
+    const r = await reconcileUncertainAttempt({ attempt: view({ prompt: PROMPTED }), withToken, onEvent: (e) => events.push({ phase: e.phase, state: e.attempt?.state }), poll: { intervalMs: 2000, now, wait: async (ms) => { t += ms; } } });
+    expect(paths(calls)).toEqual([`POST /v1/wallet/attempts/${ATTEMPT}/recover`, `GET /v1/wallet/attempts/${ATTEMPT}`, `GET /v1/wallet/attempts/${ATTEMPT}`]); // recover once on restore, then observe (chain-reading on the server for such attempts)
+    expect(events.map((e) => e.phase)).toEqual(["uncertain", "uncertain", "uncertain", "done"]);
+    expect(r.phase).toBe("done"); expect(r.attempt?.state).toBe("CONFIRMED"); expect(r.txHash).toBe(D);
+    expect(calls.some((c) => c.path.endsWith("/abandon"))).toBe(false);
+  });
+  it("when nothing closes it within the window the attempt stays VALIDATED in phase uncertain: the visitor's explicit abandon is the only 'nothing was sent'; the copy never says it", async () => {
+    let t = NOW.getTime(); const now = () => t;
+    const calls = fakeApi({ recover: () => response(view({ prompt: PROMPTED })), observe: () => response(view({ prompt: PROMPTED })) });
+    const r = await reconcileUncertainAttempt({ attempt: view({ prompt: PROMPTED }), withToken, poll: { intervalMs: 2000, ambiguousMaxMs: 10_000, now, wait: async (ms) => { t += ms; } } });
+    expect(r.phase).toBe("uncertain"); expect(r.attempt?.state).toBe("VALIDATED"); expect(r.error ?? null).toBeNull();
+    expect(paths(calls).filter((p) => p.endsWith("/recover"))).toHaveLength(1); expect(paths(calls).filter((p) => p.startsWith("GET"))).toHaveLength(5); // 6 ticks over 10 s: recover at 0, observe after
+    expect(attemptMessage(r.attempt, "uncertain", { reconciling: true })).toEqual({ text: UNCERTAIN_TEXT, tone: "warn" });
+    expect(attemptMessage(r.attempt, "uncertain")).toEqual({ text: UNCERTAIN_OPEN_TEXT, tone: "warn" });
+    expect(attemptMessage(r.attempt, "idle", { uncertain: true, reconciling: true }).text).toBe(UNCERTAIN_TEXT); // restored and not yet reconciled: never "waits for your wallet"
+    expect(attemptMessage(r.attempt, "open-attempt", { uncertain: true }).text).toBe(UNCERTAIN_OPEN_TEXT);
+    for (const text of [UNCERTAIN_TEXT, UNCERTAIN_OPEN_TEXT]) expect(text.toLowerCase()).not.toMatch(/nothing was sent|continue in wallet/);
+    expect(UNCERTAIN_TEXT).toBe("The wallet was asked to sign this plan; the transaction may have been submitted. Reconciling from the order state…");
+  });
+  it("a plainly validated attempt is not reconciled (idle), and a 404 while reconciling ends with the readable error", async () => {
+    fakeApi({ observe: () => response(view()) });
+    const r = await reconcileUncertainAttempt({ attempt: view(), withToken });
+    expect(r.phase).toBe("idle");
+    fakeApi({ recover: () => response({ error: "NOT_FOUND" }, 404), observe: () => response(view({ prompt: PROMPTED })) });
+    const r2 = await reconcileUncertainAttempt({ attempt: view({ prompt: PROMPTED }), withToken, poll: { wait: async () => {}, intervalMs: 0, ambiguousMaxMs: 0 } });
+    expect(r2.phase).toBe("uncertain"); expect(r2.error?.code).toBe("NOT_FOUND");
+  });
+});
+
 describe("ambiguous submission: the wallet threw something that is not a rejection", () => {
   it("reconciles first (POST …/recover), then polls; a payment found through OrderPaid ends CONFIRMED without any second prompt", async () => {
     let t = NOW.getTime(); const now = () => t;
@@ -209,7 +329,9 @@ describe("ambiguous submission: the wallet threw something that is not a rejecti
     const events: { phase: string; state?: string }[] = [];
     const provider = wallet(() => { const e: any = new Error("Request timed out"); e.code = -32603; throw e; });
     const r = await executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken, onEvent: (e) => events.push({ phase: e.phase, state: e.attempt?.state }), poll: { intervalMs: 2000, now, wait: async (ms) => { t += ms; } } });
-    expect(paths(calls)).toEqual(["POST /v1/wallet/attempts", `POST /v1/wallet/attempts/${ATTEMPT}/recover`, `GET /v1/wallet/attempts/${ATTEMPT}`, `GET /v1/wallet/attempts/${ATTEMPT}`]); // recover first, then observe
+    expect(paths(calls)).toEqual(["POST /v1/wallet/attempts", PROMPT_PATH, PROMPT_PATH, `POST /v1/wallet/attempts/${ATTEMPT}/recover`, `GET /v1/wallet/attempts/${ATTEMPT}`, `GET /v1/wallet/attempts/${ATTEMPT}`]); // prompted → unknown-submission markers, recover first, then observe
+    expect(calls.filter((c) => c.path.endsWith("/prompt")).map((c) => c.body)).toEqual([{ event: "prompted" }, { event: "unknown-submission", detail: expect.stringMatching(/Request timed out/) }]); // §10 item 1: the wallet's answer travels as the marker's detail
+    expect(rememberedAttempt(ATTEMPT)?.promptState).toBe("UNKNOWN_SUBMISSION");
     expect(calls.some((c) => c.path.endsWith("/abandon"))).toBe(false); // never "nothing was sent" by itself
     expect(provider.sends).toHaveLength(1); // never a second prompt
     expect(events.map((e) => e.phase)).toEqual(["validating", "prompting", "unknown-submission", "unknown-submission", "unknown-submission", "done"]);
@@ -221,7 +343,7 @@ describe("ambiguous submission: the wallet threw something that is not a rejecti
     const provider = wallet(() => { throw new Error("already known"); });
     const r = await executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken, poll: { intervalMs: 2000, now, wait: async (ms) => { t += ms; } } });
     expect(r.phase).toBe("unknown-submission"); expect(r.attempt?.state).toBe("VALIDATED"); expect(r.error?.text).toMatch(/already known/);
-    const after = paths(calls).slice(1);
+    const after = paths(calls).slice(1).filter((p) => !p.endsWith("/prompt"));
     expect(after.filter((p) => p.endsWith("/recover"))).toHaveLength(11); expect(after.filter((p) => p.startsWith("GET"))).toHaveLength(20); // 31 ticks over 60 s: recover at 0, 3, 6, …
     expect(after.some((p) => p.endsWith("/abandon"))).toBe(false); expect(provider.sends).toHaveLength(1);
     expect(t - NOW.getTime()).toBe(60_000);
@@ -251,7 +373,7 @@ describe("one execution at a time", () => {
     expect(p2).toBe(p1); expect(p3).toBe(p1);
     release(); const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
     expect(r1).toBe(r2); expect(r2).toBe(r3); expect(r1.phase).toBe("done");
-    expect(calls.filter((c) => c.method === "POST" && c.path === "/v1/wallet/attempts")).toHaveLength(1); expect(provider.sends).toHaveLength(1);
+    expect(calls.filter((c) => c.method === "POST" && c.path === "/v1/wallet/attempts")).toHaveLength(1); expect(provider.sends).toHaveLength(1); expect(calls.filter((c) => c.path.endsWith("/prompt"))).toHaveLength(1);
     expect(executionInFlight()).toBe(false);
     // once finished, a new execution may start
     const again = await executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken, poll: { wait: async () => {}, intervalMs: 0 } });

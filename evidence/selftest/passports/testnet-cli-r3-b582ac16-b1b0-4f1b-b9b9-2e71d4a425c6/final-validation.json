@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0",
+  "executionAttemptId": "b582ac16-b1b0-4f1b-b9b9-2e71d4a425c6",
+  "intentDigest": "0x3f90a0e927902ed1c63273fd6e8b8893ada8373341e6956cf69423db2c96d132",
+  "reportDigest": "0xe5890ebb74251c6d6a4a1aa7236c07fbe081b10e3573255ceaddc9c0bc4a5349",
+  "decisionDigest": "0x8ff192f561fa8a78cd03ef1162723b4cc3b67c0f0f88f30c9291841fe9bb77d1",
+  "baselineDigest": "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e",
+  "policyDigest": "0x3ccf98c2c2b41ec496c51ebc14f384561131c2774fc9fa5aa7af714b5bc1fc39",
+  "snapshot": {
+    "chainId": 5042002,
+    "blockNumber": "66232717",
+    "blockHash": "0xc6e903c566855d39ed89af4b37bdeabac29b417bdbcf6f3bfdae8c68dec3dc9b",
+    "observedAt": "2026-10-09T02:07:10.919Z",
+    "providerId": "rpc.testnet",
+    "pinningMode": "BLOCK_HASH"
+  },
+  "transactionPlan": {
+    "chainId": 5042002,
+    "from": "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+    "type": 2,
+    "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+    "data": "0x8609cad180772ad6f5e7b9c47eef521a3ce456718e20401c50fd3dd1189a90a033370168",
+    "valueNativeAtomic": "50000000000000000",
+    "nonce": "28",
+    "gasLimit": "40735",
+    "maxFeePerGasNativeAtomic": "29000000000",
+    "maxPriorityFeePerGasNativeAtomic": "5000000000",
+    "accessList": [],
+    "authorizationList": []
+  },
+  "transactionPlanDigest": "0xed67b15bccf3eba77b8fc3c1e88e48b1c5f0517a4c4518bfd1fadcc28fd319be",
+  "walletEvidenceDigest": "0x2372c1996cc55f99be3f89b67da225780cd215fb39340749f89d2f76e52d9ae7",
+  "criticalStateEvidenceDigests": [
+    "0x603bada669af44510617f2f96fe8cde30cab80ea966ab17132790a42b51ce900",
+    "0xd3e152bdf82b074bc159a424fa7d470805680e46ca1abd13137274bcf8abafe5"
+  ],
+  "simulationEvidenceDigest": "0xb4d17d88d18adf993aa337feee8ba3e82dec3496a5d63dd107b03f27354f17f5",
+  "balanceNativeAtomic": "17931746400000000000",
+  "reservedGasNativeAtomic": "1181315000000000",
+  "reservedOtherNativeAtomic": "0",
+  "feeEvidenceDigest": "0x9236cb8654cb937f34b489e5b71fa9fd14f40d45c557e490d5ca4dcb1f5750dc",
+  "result": "PASS",
+  "reasons": [],
+  "validatedAt": "2026-10-09T02:07:13.880Z",
+  "expiresAt": "2026-10-09T02:07:15.919Z"
+}

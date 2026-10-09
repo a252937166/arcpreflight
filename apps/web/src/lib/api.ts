@@ -98,10 +98,17 @@ export type OrderView = { orderId: string; owner: string | null; source: "develo
 export type AttemptState = "VALIDATED" | "REFUSED" | "BROADCAST_ATTEMPTED" | "NOT_SENT" | "CONFIRMED" | "REVERTED" | "MISMATCH" | "NOT_MINED" | "NOT_EXECUTED";
 /** after-the-fact comparison of the wallet's transaction with the validated plan: a mismatch in to/data/value/chainId/type/from, deviations in wallet-set gas, fees and nonce */
 export type Deviations = { mismatch: string[]; deviations: Record<string, { plan: string; actual: string }> };
+/** docs/LIFECYCLE.md §10 item 1: recorded by POST …/{id}/prompt — `PROMPTED` right before the wallet is asked, `UNKNOWN_SUBMISSION` when it answered with
+ *  something that is not a rejection. Either makes a VALIDATED attempt *uncertain*: the transaction may have been submitted, so no second prompt and no
+ *  "nothing was sent" until the chain says so or the visitor states a rejection. */
+export type PromptMarker = { state: "PROMPTED" | "UNKNOWN_SUBMISSION"; at: string; detail?: string | null };
+export type PromptEvent = "prompted" | "unknown-submission";
 /** POST/GET /v1/wallet/attempts (docs/LIFECYCLE.md §8). The brief view (list) stops at `createdAt/updatedAt`; the full view adds the receipts. */
 export type AttemptView = {
   attemptId: string; executionMode: "wallet"; state: AttemptState; requestId: string; orderId: string; merchant: string; payer: string; amountNativeAtomic: string; labels: string[];
   decision: string; decisionReasons: string[]; refusal: { stage: "decision" | "finalValidation"; reasons: string[]; decision?: string } | null; validUntil: string | null;
+  /** §10 item 1; optional only because views recorded by an API without the route carry no key — read it as null */
+  prompt?: PromptMarker | null;
   txHash: string | null; nonce: number | null; from: string | null; broadcastBlock: string | null; businessStatus: string | null; businessTxHash: string | null; block: string | null; note: string | null;
   deviations: Deviations | null; nextAction: string; passportAvailable: boolean; businessExecution: BusinessExecution; createdAt: string; updatedAt: string;
   // full view
@@ -165,6 +172,9 @@ export const api = {
   attempt: (id: string, token: string) => req<AttemptView>(`/v1/wallet/attempts/${id}`, { token }),
   /** the hash the wallet returned, reported right after eth_sendTransaction */
   attemptSent: (id: string, txHash: string, token: string) => req<AttemptView>(`/v1/wallet/attempts/${id}/sent`, { method: "POST", body: JSON.stringify({ txHash }), token }),
+  /** §10 item 1: `prompted` right before eth_sendTransaction, `unknown-submission` when the wallet answered with anything but a rejection; the marker
+   *  survives a page refresh on the server (409 ATTEMPT_NOT_OPEN unless the attempt is VALIDATED) */
+  attemptPrompt: (id: string, event: PromptEvent, token: string, detail?: string | null) => req<AttemptView>(`/v1/wallet/attempts/${id}/prompt`, { method: "POST", body: JSON.stringify(detail ? { event, detail } : { event }), token }),
   /** the wallet prompt was rejected (4001): NOT_SENT */
   attemptAbandon: (id: string, token: string) => req<AttemptView>(`/v1/wallet/attempts/${id}/abandon`, { method: "POST", token }),
   /** bounded reconciliation of THAT attempt now: the hash, the order state and the merchant's OrderPaid event; never re-signs or re-sends */

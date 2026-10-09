@@ -315,12 +315,12 @@ describe("CLI", () => {
 describe("review round 2 — approval validity, format completeness and statement values", () => {
   const f = syntheticRun("APPROVED"); const w = syntheticRun("WALLET");
   it("a wallet run whose approval was recorded revoked at validation fails APPROVAL_COVERAGE (no signed hash exists in wallet mode)", async () => {
-    const src = structuredClone(w.source); src.result!.approvalStatusAtValidation = { revoked: true, validUntil: null, fetchedAt: "2026-10-08T10:00:03.000Z" };
+    const src = structuredClone(w.source); src.result!.approvalStatusAtValidation = { revoked: true, validUntil: null, fetchedAt: "2026-10-08T10:00:00.000Z" };
     const r = await verifyPassport(roundTrip(buildPassport(src).files), { anchors: w.anchors, rpc: w.rpc() });
     expect(finding(r, "APPROVAL_COVERAGE")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/recorded as revoked at final validation, yet a transaction was executed/) });
   });
   it("an approval recorded as already expired when it was read fails; an unretained status or an omitted baseline is UNVERIFIED for an executed run, in wallet mode too", async () => {
-    const expired = structuredClone(f.source); expired.result!.approvalStatusAtValidation = { revoked: false, validUntil: "2026-10-08T09:00:00.000Z", fetchedAt: "2026-10-08T10:00:03.000Z" };
+    const expired = structuredClone(f.source); expired.result!.approvalStatusAtValidation = { revoked: false, validUntil: "2026-10-08T09:00:00.000Z", fetchedAt: "2026-10-08T10:00:00.000Z" };
     expect(finding(await verifyPassport(roundTrip(buildPassport(expired).files), { anchors: f.anchors }), "APPROVAL_COVERAGE")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/recorded as expired/) });
     const unretained = structuredClone(w.source); unretained.result!.approvalStatusAtValidation = null;
     expect(finding(await verifyPassport(roundTrip(buildPassport(unretained).files), { anchors: w.anchors }), "APPROVAL_COVERAGE")).toMatchObject({ status: "UNVERIFIED", detail: expect.stringMatching(/not retained/) });
@@ -349,5 +349,39 @@ describe("review round 2 — approval validity, format completeness and statemen
     const wrongRole = await verifyPassport(costWith((c) => { c.buyer.role = "visitor-wallet"; }), { rpc: f.rpc(), anchors: f.anchors });
     expect(finding(wrongRole, "COST_STATEMENT")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/buyer\.role/) });
     expect(JSON.parse(roundTrip(buildPassport(w.source).files)["cost-statement.json"]).buyer.role).toBe("visitor-wallet");
+  });
+});
+
+describe("review round 3 — malformed approval evidence and the unresolved reservation", () => {
+  const f = syntheticRun("APPROVED"); const w = syntheticRun("WALLET");
+  const withStatus = (src: any, status: any) => { const c = structuredClone(src); c.result.approvalStatusAtValidation = status; return roundTrip(buildPassport(c).files); };
+  it("an empty object, a non-boolean revoked flag, an invalid or out-of-range timestamp never PASS for an executed run", async () => {
+    for (const [status, why] of [
+      [{}, /revoked is not a boolean/], [{ revoked: null, validUntil: null, fetchedAt: "2026-10-08T10:00:00.000Z" }, /revoked is not a boolean/],
+      [{ revoked: false, validUntil: null, fetchedAt: "not-a-date" }, /fetchedAt is not a valid timestamp/],
+      [{ revoked: false, validUntil: "soon", fetchedAt: "2026-10-08T10:00:00.000Z" }, /validUntil is neither null nor a valid timestamp/],
+      [{ revoked: false, fetchedAt: "2026-10-08T10:00:00.000Z" }, /validUntil is missing/],
+      [{ revoked: false, validUntil: null, fetchedAt: "2026-10-08T09:59:00.000Z" }, /precedes the report's observation/],
+      [{ revoked: false, validUntil: null, fetchedAt: "2026-10-08T10:00:03.000Z" }, /after the execution record/],
+    ] as const) {
+      for (const src of [f.source, w.source]) {
+        const r = await verifyPassport(withStatus(src, status), { anchors: f.anchors, rpc: f.rpc() });
+        expect(finding(r, "APPROVAL_COVERAGE"), JSON.stringify(status)).toMatchObject({ status: "FAIL", detail: expect.stringMatching(why) });
+        expect(r.counts.fail).toBeGreaterThan(0);
+      }
+    }
+    const ok = await verifyPassport(withStatus(w.source, { revoked: false, validUntil: null, fetchedAt: "2026-10-08T10:00:00.000Z" }), { anchors: w.anchors, rpc: w.rpc() });
+    expect(finding(ok, "APPROVAL_COVERAGE").status).toBe("PASS");
+  });
+  it("an unresolved reservation is never taken from the statement itself: a non-zero value leaves COST_STATEMENT UNVERIFIED, a tampered zero still has to match", async () => {
+    const files = roundTrip(buildPassport(f.source).files);
+    const costWith = (mutate: (c: any) => void) => retouch(files, (c) => { const v = JSON.parse(c["cost-statement.json"]); mutate(v); c["cost-statement.json"] = JSON.stringify(v, null, 2) + "\n"; });
+    const inflated = await verifyPassport(costWith((c) => { c.unresolvedReservation.nativeAtomic = "999999000000000000000000"; }), { rpc: f.rpc(), anchors: f.anchors });
+    expect(finding(inflated, "COST_STATEMENT")).toMatchObject({ status: "UNVERIFIED", detail: expect.stringMatching(/service-side reservation that no chain or passport record can establish/) });
+    expect(inflated.counts.fail).toBe(0);
+    const untouched = await verifyPassport(files, { rpc: f.rpc(), anchors: f.anchors });
+    expect(finding(untouched, "COST_STATEMENT").status).toBe("PASS");
+    const tamperedTotal = await verifyPassport(costWith((c) => { c.unresolvedReservation.nativeAtomic = "5"; c.buyer.totalNativeAtomic = "1"; }), { rpc: f.rpc(), anchors: f.anchors });
+    expect(finding(tamperedTotal, "COST_STATEMENT").status).toBe("FAIL");
   });
 });

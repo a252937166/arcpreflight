@@ -216,18 +216,40 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
     if (report.baselineDigest && !same(report.baselineDigest, intent.baselineDigest)) problems.push(`report evaluated approval ${report.baselineDigest}, intent references ${intent.baselineDigest}`);
     if (decision) { if (report.baselineResult !== "MATCH" && decision.decision === "NO_POLICY_VIOLATION") problems.push(`decision NO_POLICY_VIOLATION although the report's baselineResult is ${report.baselineResult}`); }
     else notes.push("check only: no decision or execution in this passport");
-    const status = summary?.referencedApproval?.statusAtFinalValidation ?? null;
+    const rawStatus = summary?.referencedApproval?.statusAtFinalValidation;
+    const status = rawStatus === undefined || rawStatus === null ? null : rawStatus;
     // "executed" in either mode: the runner records the signed hash; a wallet run records only the business hash / chain status
     const executed = !!execution && (!!execution.signedTransactionHash || !!execution.businessTxHash || !["NOT_SIGNED", "SIGNED_NOT_BROADCAST"].includes(String(execution.chainStatus)));
+    const ms = (v: unknown): number | null => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null);
+    // the recorded status must be well-formed before it may vouch for anything (review round 3): an explicit boolean, a valid read time
+    // inside the run (after the report's observation, not after the execution record), and a valid or null validUntil
+    const statusProblems: string[] = [];
+    if (status !== null) {
+      if (typeof status !== "object" || typeof status.revoked !== "boolean") statusProblems.push("statusAtFinalValidation.revoked is not a boolean");
+      const fetchedAt = ms(status?.fetchedAt);
+      if (fetchedAt === null) statusProblems.push("statusAtFinalValidation.fetchedAt is not a valid timestamp");
+      else {
+        const observed = ms(report.observation?.observedAt); const recorded = ms(execution?.recordedAt);
+        if (observed !== null && fetchedAt < observed) statusProblems.push(`statusAtFinalValidation.fetchedAt ${status.fetchedAt} precedes the report's observation ${report.observation?.observedAt}`);
+        if (recorded !== null && fetchedAt > recorded) statusProblems.push(`statusAtFinalValidation.fetchedAt ${status.fetchedAt} is after the execution record ${execution?.recordedAt}`);
+      }
+      if (status?.validUntil !== null && status?.validUntil !== undefined && ms(status.validUntil) === null) statusProblems.push("statusAtFinalValidation.validUntil is neither null nor a valid timestamp");
+      if (status?.validUntil === undefined) statusProblems.push("statusAtFinalValidation.validUntil is missing (null means no expiry)");
+    }
+    if (baseline && baseline.validUntil !== null && baseline.validUntil !== undefined && ms(baseline.validUntil) === null) statusProblems.push("baseline.validUntil is not a valid timestamp");
     let unverified = false;
     if (executed) {
       if (!baseline) { unverified = true; notes.push("baseline.json omitted: the approval's content and validity at execution cannot be checked"); }
-      else if (baseline.validUntil && fv?.validatedAt && new Date(baseline.validUntil).getTime() < new Date(fv.validatedAt).getTime()) problems.push(`the referenced approval expired at ${baseline.validUntil}, before final validation at ${fv.validatedAt}, yet a transaction was executed`);
-      if (!status) { unverified = true; notes.push("revocation state at execution not retained"); }
+      else if (baseline.validUntil && fv?.validatedAt && ms(baseline.validUntil) !== null && ms(fv.validatedAt) !== null && ms(baseline.validUntil)! < ms(fv.validatedAt)!) problems.push(`the referenced approval expired at ${baseline.validUntil}, before final validation at ${fv.validatedAt}, yet a transaction was executed`);
+      if (statusProblems.length) problems.push(`malformed approval status recorded for an executed transaction: ${statusProblems.join("; ")}`);
+      else if (!status) { unverified = true; notes.push("revocation state at execution not retained"); }
       else if (status.revoked) problems.push("the referenced approval was recorded as revoked at final validation, yet a transaction was executed");
-      else if (status.validUntil && status.fetchedAt && new Date(status.validUntil).getTime() < new Date(status.fetchedAt).getTime()) problems.push(`the referenced approval was recorded as expired (valid until ${status.validUntil}) when it was read at ${status.fetchedAt}, yet a transaction was executed`);
+      else if (status.validUntil && ms(status.validUntil)! < ms(status.fetchedAt)!) problems.push(`the referenced approval was recorded as expired (valid until ${status.validUntil}) when it was read at ${status.fetchedAt}, yet a transaction was executed`);
       else notes.push(`approval ${intent.baselineDigest} read as not revoked at ${status.fetchedAt}${status.validUntil ? ` (valid until ${status.validUntil})` : ""}`);
-    } else if (status?.revoked && decision?.decision === "NO_POLICY_VIOLATION") problems.push("the referenced approval was recorded as revoked at final validation, yet the decision is NO_POLICY_VIOLATION");
+    } else {
+      if (statusProblems.length) notes.push(`approval status recorded but malformed (nothing was executed): ${statusProblems.join("; ")}`);
+      else if (status?.revoked && decision?.decision === "NO_POLICY_VIOLATION") problems.push("the referenced approval was recorded as revoked at final validation, yet the decision is NO_POLICY_VIOLATION");
+    }
     unverified = unverified && !problems.length;
     set("APPROVAL_COVERAGE", problems.length ? "FAIL" : unverified ? "UNVERIFIED" : "PASS", problems.length ? list(problems) : [`every receipt references approval ${intent.baselineDigest}; report result ${report.baselineResult}${decision ? `, decision ${decision.decision}` : ""}`, ...notes].join("; "));
   }
@@ -408,6 +430,11 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
       return { receipt: { gasUsed: used.toString(), effectiveGasPrice: price.toString(), from: sender, transactionHash: hash }, sender };
     };
     if (!/^(0|[1-9][0-9]*)$/.test(String(cost.unresolvedReservation?.nativeAtomic))) problems.push(`unresolvedReservation.nativeAtomic ${JSON.stringify(cost.unresolvedReservation?.nativeAtomic)} is not a decimal native-unit string`);
+    // a service-side reservation cannot be derived from the chain or the passport: it is never fed back into the recomputation, and a
+    // non-zero value leaves the statement UNVERIFIED on that point (review round 3, item 6)
+    const reservation = /^(0|[1-9][0-9]*)$/.test(String(cost.unresolvedReservation?.nativeAtomic)) ? String(cost.unresolvedReservation.nativeAtomic) : "0";
+    let reservationUnverified = false;
+    if (reservation !== "0") { reservationUnverified = true; notes.push(`unresolvedReservation.nativeAtomic ${reservation} is a service-side reservation that no chain or passport record can establish; it is not counted as verified`); }
     if (cost.costStatementVersion !== "1.0" && cost.costStatementVersion !== "1.1") problems.push(`unsupported costStatementVersion ${JSON.stringify(cost.costStatementVersion)}`);
     const fee = await fetchFor("fee relay", feeSrc, cost.operator?.feeRelay, cost.operator?.feeRelay?.address);
     const biz = await fetchFor("business payment", bizSrc, cost.buyer?.businessGas, cost.buyer?.address);
@@ -427,20 +454,20 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
           policy: { maxNativePaymentAtomic: String(policy.maxNativePaymentAtomic), maxServiceFeeTokenAtomic: String(policy.maxServiceFeeTokenAtomic) },
           receipts: { feeTx: fee.receipt, businessTx: biz.receipt, createOrderTx: create.receipt },
           txs: { feeTx: feeSrc, businessTx: bizSrc, createOrderTx: createSrc },
-          unresolvedReservationNativeAtomic: typeof cost.unresolvedReservation?.nativeAtomic === "string" ? cost.unresolvedReservation.nativeAtomic : undefined,
+          unresolvedReservationNativeAtomic: "0", // never the statement's own value
           capturedAt: typeof cost.capturedAt === "string" ? cost.capturedAt : undefined,
         });
         // a 1.0 statement predates the completeness flags and the buyer role: compare it against the 1.0 projection of the recomputation
         const recomputed: any = cost.costStatementVersion === "1.0"
           ? (() => { const { role: _r, complete: _c, ...buyer } = recomputedFull.buyer as any; const { complete: _oc, ...operator } = recomputedFull.operator as any; return { ...recomputedFull, costStatementVersion: "1.0", buyer, operator, notes: recomputedFull.notes.filter((n) => !/total is incomplete/.test(n)) }; })()
           : recomputedFull;
-        const normalise = (c: any) => ({ ...c, notes: Array.isArray(c?.notes) ? [...c.notes].map(String).sort() : c?.notes });
+        const normalise = (c: any) => { const { unresolvedReservation: _u, ...rest } = c ?? {}; return { ...rest, notes: Array.isArray(c?.notes) ? [...c.notes].map(String).sort() : c?.notes }; };
         const diffs = fieldDiffs(JSON.parse(JSON.stringify(normalise(recomputed))), normalise(cost));
         if (diffs.length) problems.push(`statement differs from the recomputation in ${diffs.length} field${diffs.length === 1 ? "" : "s"}: ${list(diffs, 4)}`);
         if (!problems.length) notes.unshift(`recomputed from intent, execution, payment, plan, policy and the three receipts: buyer total ${recomputed.buyer.totalUsdc} USDC (principal ${recomputed.buyer.businessPrincipal.usdc}, check fee ${recomputed.buyer.checkFee?.usdc ?? "0"}, gas ${recomputed.buyer.businessGas?.usdc ?? "none"}), operator total ${recomputed.operator.totalUsdc} USDC, authorized maximum gas ${recomputed.authorizedMaximum.businessGasNativeAtomic ?? "none"} native units`);
       } catch (e) { missing++; notes.push(`statement could not be recomputed from the records: ${errText(e)}`); }
     }
-    set("COST_STATEMENT", problems.length ? "FAIL" : missing ? "UNVERIFIED" : "PASS", problems.length ? list(problems) : missing ? list(notes) : [`statement recomputed from the passport's own records and the receipts matches the statement field by field (buyer ${cost.buyer?.address})`, ...notes].join("; "));
+    set("COST_STATEMENT", problems.length ? "FAIL" : missing || reservationUnverified ? "UNVERIFIED" : "PASS", problems.length ? list(problems) : missing ? list(notes) : reservationUnverified ? [`every field except the unresolved reservation matches the recomputation`, ...notes].join("; ") : [`statement recomputed from the passport's own records and the receipts matches the statement field by field (buyer ${cost.buyer?.address})`, ...notes].join("; "));
   }
   return finish(manifest);
 }

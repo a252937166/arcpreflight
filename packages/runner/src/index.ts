@@ -58,7 +58,7 @@ export type RunOptions = {
   /** labelled interruption (design v3.3 §4): persist, mark and send, then stop waiting — the attempt is left to reconciliation */
   interruptAfterBroadcast?: boolean;
 };
-export type ArtifactName = "order" | "intent" | "quote" | "feeAuthorization" | "report" | "decision" | "finalValidation" | "execution" | "postcondition";
+export type ArtifactName = "order" | "intent" | "quote" | "feeAuthorization" | "report" | "approval" | "decision" | "finalValidation" | "execution" | "postcondition";
 export type OrderStore = {
   planned(o: { orderId: Hex; payer: Hex; amountNativeAtomic: string; merchant: Hex }): Promise<void> | void;
   sent(o: { orderId: Hex; tx: Hex }): Promise<void> | void;
@@ -182,10 +182,12 @@ export async function runFixture(o: RunOptions) {
   let feeReceipt: { from: Hex | null; gasUsed: string | null; effectiveGasPriceNativeAtomic: string | null; blockNumber: string | null } | null = null;
   const finalValidationEvidence: { evidence: RpcEvidence; digest: Hex }[] = [];
   let approvalStatusAtValidation: { revoked: boolean; validUntil: string | null; fetchedAt: string } | null = null;
-  await artifact("report", { report, reportDigest: j.reportDigest, serviceFeeTx, simulation: j.simulation ?? null, evidence: Array.isArray(j.evidence) ? j.evidence : [] });
+  await artifact("report", { report, reportDigest: j.reportDigest, serviceFeeTx, simulation: j.simulation ?? null, evidence: Array.isArray(j.evidence) ? j.evidence : [],
+    settlement: j.payment ? { backend: j.payment.backend === "relay" ? "relay" : "circle", state: j.payment.state ?? "COMPLETED", transactionHash: j.payment.transaction ?? serviceFeeTx ?? null, evidence: j.payment.evidence ?? null } : null });
   log("reportDelivered", { serviceFeeTx, reportDigest: j.reportDigest, pinnedBlock: report.observation.blockNumber, baselineResult: report.baselineResult, decisionEligible: report.decisionEligible, signals: report.signals.filter((s) => s.basis !== "network_advisory").map((s) => `${s.id}=${s.state}`), why: "service fee settled on Arc by ArcPreflight's relayer (the merchant account submitted my EIP-3009 authorization and paid the gas in USDC); the runner re-hashes the report and checks it is bound to its own intent" });
   // 3. local decision
   const approval = await currentBaseline(o);
+  await artifact("approval", { baseline: approval.baseline, baselineDigest: approval.baselineDigest, revoked: approval.baselineRevoked }); // the referenced approval as read now: the passport's baseline.json
   const { decision, checks, reasons } = decide({ intent, policy, policyDigest: pDigest, ...approval, report, reportDigest: j.reportDigest, now: new Date(), simulation: j.simulation });
   const decisionReceipt = DecisionReceipt.parse({ schemaVersion: "1.0", executionAttemptId: attemptId, intentDigest: iDigest, reportDigest: j.reportDigest, baselineDigest: o.baselineDigest, policyDigest: pDigest, decision, reasons, decidedAt: new Date().toISOString() });
   const dDigest = decisionDigest(decisionReceipt);
@@ -229,6 +231,11 @@ export async function runFixture(o: RunOptions) {
         log("notBroadcast", { why: "final validation expired before broadcast; the signed transaction is discarded and nothing reached the network" });
       } else {
         const headBlock = await o.publicClient.getBlockNumber().then((b) => b.toString()).catch(() => null);
+        if (new Date(finalValidation.expiresAt) <= new Date()) { // re-checked after the last await before the send (review round 3): the head read may have taken the rest of the window
+          await o.executionStore?.persistOutcome(attemptId, { chainStatus: "SIGNED_NOT_BROADCAST", businessStatus: "NOT_EXECUTED", businessTxHash: null, note: "final validation expired while reading the head block, before the broadcast marker; nothing was sent" });
+          log("notBroadcast", { why: "final validation expired after the head-block read and before the broadcast marker; the signed transaction is discarded and nothing reached the network" });
+          execution.chainStatus = "SIGNED_NOT_BROADCAST"; execution.businessStatus = "NOT_EXECUTED";
+        } else {
         await o.executionStore?.markBroadcastAttempted(attemptId, { headBlock }); // durable: from here on the transaction MAY be on the network
         broadcastStarted = true;
         log("broadcastAttempted", { businessTxHash: txHash, headBlock, why: "the durable marker is written before the send: from here on the transaction may be on the network, whatever happens to this process" });
@@ -260,6 +267,7 @@ export async function runFixture(o: RunOptions) {
             await o.executionStore?.persistOutcome(attemptId, { chainStatus: "UNKNOWN", businessStatus: "UNKNOWN", businessTxHash: txHash, note: `receipt not obtained: ${String(e?.shortMessage ?? e?.message ?? e).slice(0, 160)}` });
             log("outcomeUnknown", { businessTxHash: txHash, why: "no receipt within the bounded wait; the transaction may have reached the network, so this attempt stays unresolved until reconciliation establishes the outcome from the original hash and the order state" });
           }
+        }
         }
       }
     } else { log("notSigned", { why: "final validation did not pass; no business transaction was signed" }); }

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "ownerPrincipal": "demo-runner",
+  "allowedSenders": [
+    "0xc6182d363d7c3da6db491f703c430dc91d0e2ace"
+  ],
+  "allowedTargets": [
+    "0xa8eb51ef994567b84215981e8d1fe17cb8e42252"
+  ],
+  "allowedSelectors": [
+    "0x8609cad1"
+  ],
+  "maxNativePaymentAtomic": "50000000000000000",
+  "maxTokenPaymentAtomic": "0",
+  "maxServiceFeeTokenAtomic": "10000",
+  "maxGasCostNativeAtomic": "2000000000000000",
+  "maxReportAgeSeconds": 60,
+  "maxFinalValidationAgeSeconds": 5,
+  "requiredSignalIds": [
+    "PROXY_TEMPLATE_VERIFIED",
+    "SUPPORTED_STATE_ORDER_PAYABLE",
+    "CALL_SIMULATION"
+  ],
+  "unknownAction": "REVIEW_REQUIRED",
+  "implementationChangeAction": "REVIEW_REQUIRED",
+  "allowedTransactionTypes": [
+    2
+  ],
+  "allowAuthorizationList": false
+}

@@ -13,7 +13,7 @@ import { buildObjectReport, buildIntentReport, client } from "./report.js";
 import { makeQuote, paymentRequirementsFor, paymentMatchesQuote, settleForRequest, reconcilePending, settlementStatus, resumeSettlements, beginSettlementResume, reconcileOpenPayments, type PaymentInput } from "./payments.js";
 import { networkInfo, startRun, getRun, listRuns, createOrderFor, listOrders, getOrder, reconcileOrderCreations, chainClient, evidenceIndex, evidenceFile, clientKey, reconcileExecutions, observeExecutions, recoverRun, claimFaucet, faucetInfo, FIXTURES } from "./demo.js";
 import { parseOrderInput } from "./orders.js";
-import { createWalletAttempt, markSent, abandonAttempt, observeAttempt, recoverAttempt, listAttempts, buildWalletPassport, reconcileWalletAttempts, walletRpcFromClient } from "./wallet.js";
+import { createWalletAttempt, markSent, markPrompted, abandonAttempt, observeAttempt, recoverAttempt, listAttempts, buildWalletPassport, reconcileWalletAttempts, backfillFeeReceipts, walletRpcFromClient } from "./wallet.js";
 import { curatedSubjects, isCuratedSubject } from "./subjects.js";
 import { buildRunPassport, buildCheckPassport } from "./passport.js";
 
@@ -155,7 +155,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50) || 50, 1), 200);
       return json(res, 200, { attempts: listAttempts(db, principal, limit) });
     }
-    if ((m = /^\/v1\/wallet\/attempts\/([0-9a-f-]{36})(?:\/(sent|abandon|recover|passport))?$/.exec(path))) {
+    if ((m = /^\/v1\/wallet\/attempts\/([0-9a-f-]{36})(?:\/(sent|prompt|abandon|recover|passport))?$/.exec(path))) {
       const principal = principalOf(req);
       if (!principal) return json(res, 401, { error: "UNAUTHENTICATED" });
       const id = m[1], action = m[2] ?? null;
@@ -166,6 +166,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         return json(res, 200, r.bundle, { "content-disposition": `attachment; filename="arcpreflight-wallet-passport-${id.slice(0, 8)}.json"` });
       }
       if (req.method === "POST" && action === "sent") { const body = await readJson(req); const r = await markSent(db, principal, id, String(body.txHash ?? "")); return r.ok ? json(res, 200, r.attempt) : json(res, r.status, { error: r.error, reason: r.reason }); }
+      if (req.method === "POST" && action === "prompt") { const body = await readJson(req); const r = markPrompted(db, principal, id, body); return r.ok ? json(res, 200, r.attempt) : json(res, r.status, { error: r.error, reason: r.reason }); }
       if (req.method === "POST" && action === "abandon") { const r = abandonAttempt(db, principal, id); return r.ok ? json(res, 200, r.attempt) : json(res, r.status, { error: r.error, reason: r.reason }); }
       if (req.method === "POST" && action === "recover") { const r = await recoverAttempt(db, principal, id, undefined, (msg) => console.log(now(), "WALLET", msg)); return r.ok ? json(res, 200, r.attempt) : json(res, r.status, { error: r.error, reason: r.reason }); }
       return json(res, 405, { error: "METHOD_NOT_ALLOWED" });
@@ -389,7 +390,8 @@ function openapi() {
       "/v1/wallet/attempts": { post: { summary: "validate a wallet execution (body: requestId of the delivered check, orderId, policy): decision + final validation for the wallet payer at a fresh pinned block; the attempt is persisted VALIDATED with its plan before any prompt; 409 VALIDATION_FAILED with reasons otherwise", security: [{ bearer: [] }] }, get: { summary: "the owner's wallet attempts", security: [{ bearer: [] }] } },
       "/v1/wallet/attempts/{attemptId}": { get: { summary: "observe one attempt (chain reads only): state, plan comparison, outcome, recovery summary, cost statement, next action", security: [{ bearer: [] }] } },
       "/v1/wallet/attempts/{attemptId}/sent": { post: { summary: "report the hash the wallet returned (body: txHash); fields are compared with the plan once visible; a mismatch in to/data/value/chainId/type is recorded MISMATCH", security: [{ bearer: [] }] } },
-      "/v1/wallet/attempts/{attemptId}/abandon": { post: { summary: "the wallet prompt was rejected: NOT_SENT", security: [{ bearer: [] }] } },
+      "/v1/wallet/attempts/{attemptId}/prompt": { post: { summary: "record that the wallet was asked to sign (event: prompted) or answered with something other than a rejection (event: unknown-submission): the attempt is then reconciled from the chain before anything else may be signed, across page refreshes", security: [{ bearer: [] }] } },
+      "/v1/wallet/attempts/{attemptId}/abandon": { post: { summary: "the visitor states that the wallet prompt was rejected: NOT_SENT", security: [{ bearer: [] }] } },
       "/v1/wallet/attempts/{attemptId}/recover": { post: { summary: "bounded reconciliation of THAT attempt now from the hash, the order state and the merchant's OrderPaid event; nothing is signed or sent", security: [{ bearer: [] }] } },
       "/v1/wallet/attempts/{attemptId}/passport": { get: { summary: "private Payment Passport of a wallet attempt (subject wallet-run, execution mode wallet)", security: [{ bearer: [] }] } },
       "/v1/evidence": { get: { summary: "index of published evidence files" } }, "/v1/evidence/{path}": { get: { summary: "one evidence file" } },
@@ -431,5 +433,6 @@ async function recoveryWorker() {
     if (o.resolved) console.log(now(), `ORDER reconciliation: resolved ${o.resolved}, pending ${o.pending}`);
     const w = await reconcileWalletAttempts(db, walletRpcFromClient(chainClient), { source: "worker", log: (m) => console.log(now(), "WALLET", m) });
     if (w.resolved) console.log(now(), `WALLET reconciliation: resolved ${w.resolved}, pending ${w.pending}`);
+    const f = await backfillFeeReceipts(db, walletRpcFromClient(chainClient)); if (f) console.log(now(), `WALLET fee receipts backfilled: ${f}`);
   } finally { workerBusy = false; }
 }

@@ -35,3 +35,16 @@ describe("CLI store: orders PLANNED → SENT → CONFIRMED and reconciliation fr
     expect(r3.kind).toBe("unknown"); store3.applyOrderReconciliation(ID, r3); expect(store3.listOrders()[0].state).toBe("UNKNOWN_CREATION");
   });
 });
+
+describe("CLI store: progressive artefacts and steps per run (review round 3 §8)", () => {
+  it("records artefacts as they come, learns the attempt id from the execution artefact, and serves them back for a passport", () => {
+    const store = new SqliteExecutionStore(openStoreDb(":memory:"), makeSealer(Buffer.alloc(32, 7)), "test");
+    const ev = store.beginRun("run-1", "APPROVED_PAYMENT");
+    ev.onArtifact("intent", { intent: { a: 1 } }); ev.onStep({ step: "createOrder", atMs: 5 }); ev.onArtifact("execution", { executionAttemptId: "att-9", chainStatus: "PENDING" }); ev.onArtifact("execution", { executionAttemptId: "att-9", chainStatus: "CONFIRMED" });
+    expect(store.runByAttempt("att-9")).toMatchObject({ run_key: "run-1", fixture: "APPROVED_PAYMENT", attempt_id: "att-9" });
+    expect(store.runByAttempt("run-1")?.run_key).toBe("run-1");
+    expect(store.artifactsOf("run-1")).toEqual({ intent: { intent: { a: 1 } }, execution: { executionAttemptId: "att-9", chainStatus: "CONFIRMED" } });
+    expect(store.stepsOf("run-1")).toEqual([{ step: "createOrder", atMs: 5 }]);
+    expect(store.listRuns()[0]).toMatchObject({ run_key: "run-1", artifacts: 2 });
+  });
+});

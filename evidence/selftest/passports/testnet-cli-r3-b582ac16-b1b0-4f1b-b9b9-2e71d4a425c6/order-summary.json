@@ -1,0 +1,37 @@
+{
+  "orderSummaryVersion": "1.0",
+  "orderId": "0x80772ad6f5e7b9c47eef521a3ce456718e20401c50fd3dd1189a90a033370168",
+  "merchant": "0xA8eB51EF994567B84215981E8d1Fe17cb8e42252",
+  "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+  "amountNativeAtomic": "50000000000000000",
+  "amountUsdc": "0.05",
+  "createOrder": {
+    "tx": "0x1d3bde8eb1c2e435802293c0a8bbf091663d986b974ce89a77de663c8a584da7",
+    "block": "66232675",
+    "signer": "order-creator"
+  },
+  "referencedApproval": {
+    "baselineDigest": "0xe80bf567d0ea5ef99a523925618862481a81048014c7ba2f7f544dadbd88bf9e",
+    "approvedImplementation": "0x342ab0e9f7951e4112e698ff69ac00ac18c009f9",
+    "observedImplementation": "0x342ab0e9f7951e4112e698ff69ac00ac18c009f9",
+    "baselineResult": "MATCH",
+    "statusAtFinalValidation": {
+      "revoked": false,
+      "validUntil": null,
+      "fetchedAt": "2026-10-09T02:07:13.880Z"
+    }
+  },
+  "executionMode": "runner",
+  "decision": "NO_POLICY_VIOLATION",
+  "chainResult": "CONFIRMED",
+  "orderResult": "paid",
+  "serviceOutcome": "NOT_EVALUATED",
+  "checkFee": {
+    "tokenAtomic": "10000",
+    "usdc": "0.01",
+    "tx": "0xfba1b91d3a9ce0b79bb2cbb73b07c457bccf72b98820a12d14b9ee692d00b855"
+  },
+  "businessTx": "0xa4795cd245efb8c52a840d8e1298a0bdba57faf667c1c48312f8e21e4ab355a0",
+  "network": "eip155:5042002",
+  "release": "cli"
+}

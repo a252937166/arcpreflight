@@ -55,7 +55,7 @@ export function openDb(path: string) {
       policy_json TEXT NOT NULL, decision_json TEXT NOT NULL, final_validation_json TEXT, fv_evidence_json TEXT, approval_status_json TEXT, plan_json TEXT, labels_json TEXT NOT NULL,
       state TEXT NOT NULL, valid_until TEXT, tx_hash TEXT, nonce INTEGER, from_addr TEXT, broadcast_block TEXT, scanned_to_block TEXT, deviations_json TEXT,
       business_status TEXT, business_tx_hash TEXT, block TEXT, receipt_json TEXT, postcondition_json TEXT, note TEXT, reconciliation_json TEXT NOT NULL DEFAULT '[]', refusal_json TEXT,
-      fee_receipt_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      fee_receipt_json TEXT, prompt_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS wallet_attempts_owner ON wallet_attempts(owner, created_at);
     CREATE INDEX IF NOT EXISTS wallet_attempts_order ON wallet_attempts(order_id);
@@ -80,7 +80,9 @@ export function openDb(path: string) {
     // v3.3: every artefact persisted as soon as it exists (a run that stops after the broadcast still exports a complete passport)
     "ALTER TABLE demo_runs ADD COLUMN artifacts_json TEXT",
     // review round 2: the fee relay receipt facts, so a wallet attempt's cost statement is complete on the operator side too
-    "ALTER TABLE wallet_attempts ADD COLUMN fee_receipt_json TEXT"]) {
+    "ALTER TABLE wallet_attempts ADD COLUMN fee_receipt_json TEXT",
+    // review round 3: the wallet-prompt marker that keeps submission uncertainty across a page refresh
+    "ALTER TABLE wallet_attempts ADD COLUMN prompt_json TEXT"]) {
     try { db.exec(sql); } catch (e: any) { if (!/duplicate column/i.test(String(e?.message ?? e))) throw e; }
   }
   // v3.3: orders created by earlier releases were written only after their receipt; carry them over as CONFIRMED (the pre-v3.3 table stays)

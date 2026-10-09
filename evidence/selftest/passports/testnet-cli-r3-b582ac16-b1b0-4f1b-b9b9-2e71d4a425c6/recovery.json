@@ -1,0 +1,31 @@
+{
+  "recoveryVersion": "1.0",
+  "attemptId": "b582ac16-b1b0-4f1b-b9b9-2e71d4a425c6",
+  "interrupted": true,
+  "counters": {
+    "ordersCreated": 1,
+    "checkFeeAuthorizations": 1,
+    "businessSignatures": 1,
+    "broadcastsOfOriginalBytes": 0,
+    "replacementSignatures": 0
+  },
+  "addedByRecovery": {
+    "ordersCreated": 0,
+    "checkFeeAuthorizations": 0,
+    "businessSignatures": 0,
+    "broadcastsOfOriginalBytes": 0
+  },
+  "originalTransaction": {
+    "hash": "0xa4795cd245efb8c52a840d8e1298a0bdba57faf667c1c48312f8e21e4ab355a0",
+    "status": "recovered-confirmed"
+  },
+  "reconciliation": [
+    {
+      "at": "2026-10-09T02:07:25.239Z",
+      "chainStatus": "CONFIRMED",
+      "businessStatus": "SUCCESS",
+      "note": "reconciled from the original transaction hash and the order state",
+      "consumedBy": null
+    }
+  ]
+}
