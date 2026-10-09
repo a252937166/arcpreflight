@@ -44,15 +44,19 @@ describe("guideFor: what happened, what to do next, what to inspect", () => {
     const run = base({ state: "RUNNING", steps: steps("orderPlanned", "createOrder", "intent"), order: { orderId: D, state: "CONFIRMED", tx: D, block: "1", payer: D, merchant: D, amountNativeAtomic: "1", reference: null, paid: false } });
     const g = guideFor(run, NET);
     expect(g.phase).toBe("checking"); expect(g.happened).toBe("Exact intent built against the order");
+    // the chip, the "now" row and the diagram agree: the diagram's active node is the preflight check (user feedback 2026-10-09)
+    expect(g.label).toBe("preflight check"); expect(g.now).toEqual({ stage: "check", label: "preflight check", detail: expect.stringMatching(/pinned report/) });
+    expect(g.stages.find((st) => st.status === "active")?.id).toBe("check");
+    expect(g.checkpoints.find((c) => c.id === "explorer")).toMatchObject({ status: "pending", hint: "after the broadcast" }); // not "n/a": the broadcast is still ahead
     expect(g.next).toMatchObject({ label: "Inspect the created order", target: "sec-order", checkpoint: "order", hint: "the run continues meanwhile" });
     expect(g.checkpoints.find((c) => c.id === "check")?.status).toBe("pending"); expect(g.checkpoints.find((c) => c.id === "payment")?.status).toBe("pending");
     const seen = guideFor(run, NET, { visited: ["order"] });
-    expect(seen.next).toMatchObject({ label: "Watch the steps", target: "sec-steps" }); expect(seen.inspect).toMatch(/order, pinned report/);
+    expect(seen.next).toMatchObject({ label: "Watch the steps", target: "sec-steps" }); expect(seen.inspect).toMatch(/pinned report/);
   });
   it("broadcasting and recovering name the moment; recovery points at the desk and the original hash", () => {
     const run = base({ state: "RECONCILE_REQUIRED", steps: steps("createOrder", "decision", "signed", "broadcastAttempted", "broadcast", "interruptedAfterBroadcast"), businessExecution: { state: "BROADCAST_ATTEMPTED", txHash: D, nonce: 1, broadcastBlock: "1", consumedBy: null, note: null, validUntil: null } });
     const g = guideFor(run, NET, { visited: ["order", "check"] });
-    expect(g.phase).toBe("recovering"); expect(g.happened).toMatch(/simulated interruption/);
+    expect(g.phase).toBe("recovering"); expect(g.happened).toMatch(/simulated interruption/); expect(g.label).toBe("recover"); expect(g.now?.stage).toBe("recover");
     expect(g.next).toMatchObject({ label: "Recover this attempt", target: "sec-recovery" }); expect(g.inspect).toMatch(/original transaction hash/);
     expect(g.interrupted).toEqual({ hash: D, status: "recovering" });
     expect(g.checkpoints.find((c) => c.id === "explorer")).toMatchObject({ status: "pending", external: true, target: expect.stringContaining(D) });
@@ -62,6 +66,7 @@ describe("guideFor: what happened, what to do next, what to inspect", () => {
     const run = paid();
     let g = guideFor(run, NET);
     expect(g.phase).toBe("confirmed"); expect(g.happened).toBe("Order read back from the chain: not paid"); // the fixture's postcondition step carries no `paid` field
+    expect(g.now).toBeNull(); expect(g.label).toBe("confirmed"); // finished: the chip says the outcome
     expect(g.next).toMatchObject({ label: "Inspect the created order", checkpoint: "order" });
     g = guideFor(run, NET, { visited: ["order"] }); expect(g.next).toMatchObject({ label: "Review the check result", target: "sec-check" }); expect(g.inspect).toMatch(/decision, its reasons/);
     g = guideFor(run, NET, { visited: ["order", "check"] }); expect(g.next).toMatchObject({ label: "Inspect the payment outcome", target: "sec-payment" });

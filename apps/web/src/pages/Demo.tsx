@@ -143,6 +143,8 @@ export default function Demo() {
   const liveSteps = walletShowing ? walletRun.run.steps : run?.steps ?? [];
   const seen = new Set(liveSteps.map((s) => s.step));
   const reached = STAGES.filter((st) => st.steps.some((x) => seen.has(x))).length;
+  // the strip, the guide and the diagram count the same seven lifecycle stages (user feedback 2026-10-09: no two notions of "step")
+  const stripStep = guide.now ? guide.stages.findIndex((st) => st.id === guide.now!.stage) + 1 : Math.max(1, guide.stages.filter((st) => st.status === "done").length);
   const pick = (id: Fixture) => { setFixture(id); setParams((p) => { p.set("fixture", id); return p; }); };
   const canRun = !busy && !walletBusy && !!net && !!f?.merchant && !gated;
   const runner = net?.accounts.demoRunner ?? null;
@@ -151,7 +153,7 @@ export default function Demo() {
       <div className="container stack" style={{ gap: 28 }}>
         {running && (
           <div className="runstrip" role="status" aria-live="polite">
-            <Spinner /><span className="small">{`running · ${f?.title ?? effective} · ${walletShowing ? "your wallet" : "project runner"} · step ${Math.max(1, reached)}/${STAGES.length}`}</span>
+            <Spinner /><span className="small">{walletShowing ? `running · ${f?.title ?? effective} · your wallet · step ${Math.max(1, reached)}/${STAGES.length}` : `running · ${f?.title ?? effective} · project runner · ${guide.now?.label ?? "starting"} (step ${stripStep}/${guide.stages.length})`}</span>
             <button className="btn sm" onClick={() => setScrollKey((k) => k + 1)}>view</button>
           </div>
         )}

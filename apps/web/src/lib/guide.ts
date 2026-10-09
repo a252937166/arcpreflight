@@ -3,7 +3,7 @@
 // checking, broadcasting, recovering, confirmed, stopped, failed); `guideFor` says what just happened, what to do next and which
 // result to inspect, as a checklist the visitor walks: order → check → payment → explorer → passport → verify.
 import { explorerTx, type NetworkInfo, type Run } from "./api";
-import type { LocalPassport } from "./outcome";
+import { idleLifecycle, lifecycleFromRun, type LifecycleId, type LifecycleStage, type LocalPassport } from "./outcome";
 import type { Tone } from "./format";
 
 export type Phase = "idle" | "waiting" | "checking" | "broadcasting" | "recovering" | "confirmed" | "stopped" | "failed";
@@ -79,8 +79,22 @@ const DEF: Record<CheckpointId, { label: string; action: string; hint: string; t
   verify: { label: "verify", action: "Verify the passport here", hint: "the verifier recomputes the digests and reads the chain — findings, never a bare PASS", target: "sec-verify" },
 };
 export type GuideLocal = LocalPassport & { visited?: Iterable<CheckpointId> };
+/** what each lifecycle stage does while it is the active one — the words under the diagram's lit node */
+export const NOW_DETAIL: Record<LifecycleId, string> = {
+  order: "creating the order on the DemoMerchant; its identity is recorded before the creation is sent",
+  approve: "re-reading the referenced approval and the buyer's policy",
+  check: "buying the pinned report over HTTP 402 and deciding from it",
+  execute: "final validation at a fresh block, then signing, broadcasting and waiting for the receipt",
+  recover: "reconciling from the original hash and the order state; nothing is re-signed",
+  passport: "exporting the passport", verify: "verifying the passport",
+};
 export type Guide = {
   phase: Phase; happened: string; inspect: string | null; blocked: string | null;
+  /** the chip's word: the diagram's active stage while the run is live, else the phase */
+  label: string;
+  /** the stage in progress, from the same lifecycle stages the diagram draws (null once the run has ended) */
+  now: { stage: LifecycleId; label: string; detail: string } | null;
+  stages: LifecycleStage[];
   next: { label: string; target: string; external?: boolean; route?: boolean; hint: string | null; checkpoint: CheckpointId | null };
   checkpoints: Checkpoint[];
   interrupted: { hash: string | null; status: "pending" | "recovering" | "resolved" } | null;
@@ -93,6 +107,10 @@ export function guideFor(run: Run | null | undefined, net: NetworkInfo | null, l
   const phase = phaseOf(run);
   const visited = new Set<CheckpointId>(local.visited ?? []);
   const live = !!run && (run.state === "RUNNING" || run.state === "RECONCILE_REQUIRED");
+  const stages = run ? lifecycleFromRun(run, { exported: local.exported, verified: local.verified }) : idleLifecycle();
+  const active = live ? stages.find((st) => st.status === "active") ?? null : null;
+  const now = active ? { stage: active.id, label: active.label, detail: NOW_DETAIL[active.id] } : null;
+  const label = now ? now.label : PHASES[phase].label;
   const finished = !!run && !live;
   const hash = run ? businessHash(run) : null;
   const executed = !!run && (EXECUTED_KINDS.has(run.outcome?.kind ?? "") || !!run.businessExecution || !!run.result?.execution?.businessTxHash || !!run.result?.execution?.signedTransactionHash);
@@ -108,7 +126,7 @@ export function guideFor(run: Run | null | undefined, net: NetworkInfo | null, l
     const stopped = phase === "stopped";
     cps.push(mk("payment", stopped ? "na" : !finished ? "pending" : executed ? (visited.has("payment") ? "done" : "todo") : "na",
       stopped ? { hint: "nothing was signed: the check stopped the payment" } : !finished ? { hint: phase === "recovering" ? "being established by recovery" : "being executed" } : executed ? {} : { hint: "no business transaction was signed" }));
-    cps.push(mk("explorer", hash && finished ? (visited.has("explorer") ? "done" : "todo") : hash ? "pending" : "na", hash ? { target: explorerTx(net, hash), external: true } : { hint: "no business transaction to open" }));
+    cps.push(mk("explorer", hash && finished ? (visited.has("explorer") ? "done" : "todo") : hash || !finished ? "pending" : "na", hash ? { target: explorerTx(net, hash), external: true } : { hint: finished ? "no business transaction to open" : "after the broadcast" }));
     cps.push(mk("passport", !finished ? "pending" : local.exported ? "done" : "todo", !finished ? { hint: "available once the run has ended" } : {}));
     const v = local.verified;
     cps.push(mk("verify", !local.exported ? "pending" : v === true || v === "passed" ? "done" : "todo", !local.exported ? { hint: "after the download" } : v === "failed" ? { hint: "verification failed — read the findings" } : v === "partial" ? { hint: "some findings could not be verified — read them" } : {}));
@@ -123,7 +141,7 @@ export function guideFor(run: Run | null | undefined, net: NetworkInfo | null, l
   else if (current) next = { label: current.action, target: current.target, external: current.external, hint: live ? "the run continues meanwhile" : null, checkpoint: current.id };
   else if (live) next = { label: "Watch the steps", target: "sec-steps", hint: "no action needed — every step is recorded as it happens", checkpoint: null };
   else next = { label: "Try it with your wallet", target: "/developer", route: true, hint: "the same seven steps; your wallet pays on Arc testnet", checkpoint: null };
-  const inspect = current ? current.hint : phase === "recovering" ? "the original transaction hash and the order state, in the recovery desk" : live ? PHASES[phase].detail : null;
+  const inspect = current ? current.hint : phase === "recovering" ? "the original transaction hash and the order state, in the recovery desk" : now ? now.detail : live ? PHASES[phase].detail : null;
   const interrupted = run && has(run, "interruptedAfterBroadcast") ? { hash, status: (run.state === "RECONCILE_REQUIRED" ? "recovering" : has(run, "reconciled") || phase === "confirmed" ? "resolved" : "pending") as "pending" | "recovering" | "resolved" } : null;
-  return { phase, happened: happenedOf(run), inspect, blocked, next, checkpoints: cps, interrupted };
+  return { phase, label, now, stages, happened: happenedOf(run), inspect, blocked, next, checkpoints: cps, interrupted };
 }

@@ -754,7 +754,7 @@ describe("P3 · hashes, run strip", () => {
     }));
     render(Demo); await flush(); await button(render(Demo), "live").props.onClick(); await flush(); let tree = render(Demo);
     const strip = nodes(tree).find((n) => n.props?.className === "runstrip");
-    expect(strip).toBeDefined(); expect(content(strip)).toContain("project runner"); expect(content(strip)).toContain("step 3/8"); expect(button(strip, "view")).toBeDefined();
+    expect(strip).toBeDefined(); expect(content(strip)).toContain("project runner"); expect(content(strip)).toContain("preflight check (step 3/7)"); expect(button(strip, "view")).toBeDefined();
     expect(nodes(tree).some((n) => n.props?.className === "pick-row")).toBe(true);
     state = "DONE"; await vi.advanceTimersByTimeAsync(1500); tree = render(Demo);
     expect(nodes(tree).find((n) => n.props?.className === "runstrip")).toBeUndefined();

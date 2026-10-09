@@ -21,12 +21,13 @@ export function GuidePanel({ guide, origin, reason, network, onGo, link = (to) =
   return (
     <aside className={`guide ${underStrip ? "under-strip" : ""}`} aria-label="next step" aria-live="polite" data-testid="guide" data-phase={guide.phase}>
       <div className="guide-head">
-        <Chip tone={p.tone}>{p.live && <Spinner />}{p.label}</Chip>
+        <Chip tone={p.tone}>{p.live && <Spinner />}{guide.label}</Chip>
         {origin && <span className={`origin ${origin === "live" ? "live" : "rec"}`} data-testid="origin">{ORIGIN_LABEL[origin]}{network ? ` · ${network}` : ""}</span>}
         {origin && origin !== "live" && reason && <span className="tiny dim">{reason} · no new transaction was initiated</span>}
       </div>
       <div className="guide-grid">
-        <span className="k">happened</span><span data-testid="guide-happened">{guide.happened}</span>
+        {guide.now && <><span className="k">now</span><span data-testid="guide-now"><b>{guide.now.label}</b> — {guide.now.detail}</span></>}
+        <span className="k">{guide.now ? "done" : "happened"}</span><span data-testid="guide-happened">{guide.happened}</span>
         <span className="k">next</span>
         <span className="row" style={{ gap: 8 }}>
           {n.route
