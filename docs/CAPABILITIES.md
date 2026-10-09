@@ -3,7 +3,7 @@
 > **Status: DRAFT, not frozen.** This describes what the code at baseline `8c59d10` (the former `360f086`; commit identities (email and, for early commits, name) were corrected on 2026-10-07, trees unchanged) implements, plus the docs in this folder.
 > It becomes the release record only at the freeze step: set `releaseSha`, re-run the acceptance record
 > ([ACCEPTANCE.md](ACCEPTANCE.md)) against that SHA, and confirm the live `/health/live` reports the same SHA.
-> As of 2026-10-08 the public site runs the **testnet preview** of `f214802` (design v3.3 + review round 2, `ops/testnet-preview.sh`); the Arc mainnet cutover has not happened yet.
+> As of 2026-10-09 the public site runs the **testnet preview** of `0c0d406` (design v3.3 + review rounds 2 and 3, `ops/testnet-preview.sh`); the Arc mainnet cutover has not happened yet.
 
 Closing a capability here means the server route, principal check and signer path reject it — not that a button is hidden.
 
