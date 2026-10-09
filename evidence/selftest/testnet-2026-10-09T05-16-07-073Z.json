@@ -1,0 +1,104 @@
+{
+  "chainId": 5042002,
+  "release": "3c1726b",
+  "testedAtUTC": "2026-10-09T05:16:07.074Z",
+  "repeats": 1,
+  "runs": [
+    {
+      "round": 1,
+      "fixture": "CHANGED_IMPLEMENTATION",
+      "runId": "caab4c09-759e-4ad1-9145-e265afe11116",
+      "decision": "REVIEW_REQUIRED",
+      "serviceFeeTx": "0x2f93d3b99bc96d87d0ffca5a6253268d3a4717a25141577d2877adaca7fb3c86",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 12316,
+      "reportDigest": "0x4910e4d3cd134a6268e7ed0661965a8d1b96cc2e8928aa5d3ec6b276950003e5",
+      "passport": {
+        "counts": {
+          "pass": 8,
+          "fail": 0,
+          "unverified": 2,
+          "notEvaluated": 1
+        },
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "UNVERIFIED",
+          "ORDER_OUTCOME": "UNVERIFIED",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        }
+      }
+    },
+    {
+      "round": 1,
+      "fixture": "AMOUNT_UNIT_MISMATCH",
+      "runId": "42efbd72-7cce-4b6a-bdd2-dd1ce760f44c",
+      "decision": "BLOCKED",
+      "serviceFeeTx": "0xd48d881f395bb25b3994797fa3eeac0a7799037247ccbc999cd4f4740bff13ef",
+      "businessTxHash": null,
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 13733,
+      "reportDigest": "0x621770435ca011ba972dc1f2568796984f1384c1bb62de8d4e9702739f23e75d",
+      "passport": {
+        "counts": {
+          "pass": 8,
+          "fail": 0,
+          "unverified": 2,
+          "notEvaluated": 1
+        },
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "UNVERIFIED",
+          "ORDER_OUTCOME": "UNVERIFIED",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        }
+      }
+    },
+    {
+      "round": 1,
+      "fixture": "APPROVED_PAYMENT",
+      "runId": "8e7b9b4d-8a19-40fd-90c6-393972868179",
+      "decision": "NO_POLICY_VIOLATION",
+      "serviceFeeTx": "0x698a03346e79caf3c41a1ba3911923aabeb4ef32027cfc21663d0832dd1fd5a5",
+      "businessTxHash": "0x74d402c18ee82951032ec7396ce201ab66bc714e75ebce1a8101828711776c34",
+      "businessStatus": "SUCCESS",
+      "durationMs": 19912,
+      "reportDigest": "0xf58875a86541a612e87745cd40118a3f9df869ad9c0f7d3ba4d88f0d99f66b95",
+      "passport": {
+        "counts": {
+          "pass": 10,
+          "fail": 0,
+          "unverified": 0,
+          "notEvaluated": 1
+        },
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "PASS",
+          "ORDER_OUTCOME": "PASS",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        }
+      }
+    }
+  ]
+}

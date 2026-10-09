@@ -101,6 +101,18 @@ if (scenarios.includes("wallet")) {
   assert.equal((await get(`/v1/wallet/attempts/${attemptId}/passport`, token)).status, 409, "an open attempt is not exported");
   const second = await post("/v1/wallet/attempts", { requestId: quoted.body.requestId, orderId: order.body.orderId, policy }, token);
   assert.equal(second.status, 409); assert.equal(second.body.error, "ATTEMPT_OPEN");
+  // review of 0c0d406 (P1-1): the prompt claim is exclusive — probed with two claim ids before this process signs; the holder's hand-back leaves a plain VALIDATED attempt
+  const claimA = `selftest-a-${crypto.randomUUID()}`, claimB = `selftest-b-${crypto.randomUUID()}`;
+  const c1 = await post(`/v1/wallet/attempts/${attemptId}/prompt`, { event: "prompted", claimId: claimA }, token);
+  assert.equal(c1.status, 200, JSON.stringify(c1.body).slice(0, 200)); assert.equal(c1.body.prompt?.state, "PROMPTED"); assert(!JSON.stringify(c1.body).includes(claimA), "the claim id must not appear in the view");
+  const c2 = await post(`/v1/wallet/attempts/${attemptId}/prompt`, { event: "prompted", claimId: claimB }, token);
+  assert.equal(c2.status, 409, JSON.stringify(c2.body).slice(0, 200)); assert.equal(c2.body.error, "PROMPT_CLAIMED"); assert.equal(c2.body.attempt?.state, "VALIDATED");
+  const c3 = await post(`/v1/wallet/attempts/${attemptId}/prompt`, { event: "not-prompted", claimId: claimB }, token);
+  assert.equal(c3.status, 409); assert.equal(c3.body.error, "PROMPT_CLAIMED");
+  const c4 = await post(`/v1/wallet/attempts/${attemptId}/prompt`, { event: "not-prompted", claimId: claimA }, token);
+  assert.equal(c4.status, 200, JSON.stringify(c4.body).slice(0, 200)); assert.equal(c4.body.prompt, null); assert.equal(c4.body.state, "VALIDATED");
+  const claimProbe = { granted: c1.status, secondClaim: `${c2.status} ${c2.body.error}`, strangerHandBack: `${c3.status} ${c3.body.error}`, holderHandBack: `${c4.status} prompt=${c4.body.prompt}` };
+  log(`prompt claim probe: granted once (200), second claim ${claimProbe.secondClaim}, stranger's hand-back ${claimProbe.strangerHandBack}, holder's hand-back 200 → plain VALIDATED again`);
   // 5. the "wallet" signs EXACTLY the plan and broadcasts it itself (the service never sees the bytes), then reports the hash
   const raw = await wallet.signTransaction({ chainId: plan.chainId, type: "eip1559", to: plan.to as Hex, data: plan.data as Hex, value: BigInt(plan.valueNativeAtomic), nonce: Number(plan.nonce), gas: BigInt(plan.gasLimit), maxFeePerGas: BigInt(plan.maxFeePerGasNativeAtomic), maxPriorityFeePerGas: BigInt(plan.maxPriorityFeePerGasNativeAtomic), accessList: [] });
   const parsed = parseTransaction(raw); assert.equal(parsed.to?.toLowerCase(), plan.to.toLowerCase()); assert.equal(parsed.data?.toLowerCase(), plan.data.toLowerCase());
@@ -124,7 +136,7 @@ if (scenarios.includes("wallet")) {
   log(`verifier: exit ${v.exit}, pass ${v.counts.pass}, fail ${v.counts.fail}, unverified ${v.counts.unverified ?? 0}; TRANSACTION_PLAN_AGREEMENT=${v.findings.TRANSACTION_PLAN_AGREEMENT} ORDER_OUTCOME=${v.findings.ORDER_OUTCOME} COST_STATEMENT=${v.findings.COST_STATEMENT}`);
   assert.equal(v.counts.fail, 0, JSON.stringify(v.findings));
   const manifest = JSON.parse(passport.body.files["manifest.json"]); assert.equal(manifest.subject.kind, "wallet-run"); assert.equal(manifest.subject.executionMode, "wallet");
-  evidence.scenarios.wallet = { payer: wallet.address, order: { orderId: order.body.orderId, tx: order.body.tx, block: order.body.block, amountNativeAtomic: amount.toString(), reference }, requestId: quoted.body.requestId, feeTx: delivered.body.payment.transaction, attemptId, plan, txHash, outcome: { state: a.body.state, businessStatus: a.body.businessStatus, block: a.body.block, deviations: a.body.deviations }, costStatement: a.body.costStatement, passport: passportPath, verifier: v };
+  evidence.scenarios.wallet = { payer: wallet.address, claimProbe, order: { orderId: order.body.orderId, tx: order.body.tx, block: order.body.block, amountNativeAtomic: amount.toString(), reference }, requestId: quoted.body.requestId, feeTx: delivered.body.payment.transaction, attemptId, plan, txHash, outcome: { state: a.body.state, businessStatus: a.body.businessStatus, block: a.body.block, deviations: a.body.deviations }, costStatement: a.body.costStatement, passport: passportPath, verifier: v };
 }
 
 if (scenarios.includes("interrupt")) {
