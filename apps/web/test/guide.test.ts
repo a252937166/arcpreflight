@@ -62,6 +62,22 @@ describe("guideFor: what happened, what to do next, what to inspect", () => {
     expect(g.checkpoints.find((c) => c.id === "explorer")).toMatchObject({ status: "pending", external: true, target: expect.stringContaining(D) });
     expect(phaseOf(base({ state: "RUNNING", steps: steps("createOrder", "decision", "signed", "broadcastAttempted") }))).toBe("broadcasting");
   });
+  it("waiting for the receipt keeps execution active at 4/7 — chip, now and diagram agree; the order checkpoint waits for the confirmed creation (review 2026-10-09)", () => {
+    const o = { orderId: D, state: "CONFIRMED", tx: D, block: "1", payer: D, merchant: D, amountNativeAtomic: "1", reference: null, paid: null };
+    const waiting = base({ state: "RUNNING", steps: steps("orderPlanned", "createOrder", "intent", "quote", "signServiceFee", "reportDelivered", "decision", "finalValidation", "signed", "broadcastAttempted", "broadcast"), order: o,
+      businessExecution: { state: "BROADCAST_ATTEMPTED", txHash: D, nonce: 1, broadcastBlock: "1", consumedBy: null, note: null, validUntil: null } });
+    const g = guideFor(waiting, NET, { visited: ["order", "check"] });
+    expect(g.phase).toBe("broadcasting"); expect(g.label).toBe("execute payment");
+    expect(g.now).toEqual({ stage: "execute", label: "execute payment", detail: "broadcast · waiting for the receipt" });
+    expect(g.stages.findIndex((st) => st.status === "active")).toBe(3); expect(g.next).toMatchObject({ label: "Watch the steps" });
+    expect(g.checkpoints.find((c) => c.id === "explorer")).toMatchObject({ status: "pending", external: true });
+    const sent = base({ state: "RUNNING", steps: steps("orderPlanned"), order: { ...o, state: "SENT", block: null } });
+    const gs = guideFor(sent, NET);
+    expect(gs.label).toBe("create order"); expect(gs.now?.detail).toBe("creation sent · waiting for the receipt");
+    expect(gs.checkpoints[0]).toMatchObject({ id: "order", status: "pending", hint: "creation sent · waiting for the receipt" }); expect(gs.next.label).toBe("Watch the steps");
+    const failed = base({ state: "FAILED", steps: steps("orderPlanned"), order: { ...o, state: "FAILED", block: null } });
+    expect(guideFor(failed, NET).checkpoints[0]).toMatchObject({ id: "order", status: "current", action: "Inspect the order creation", hint: "creation failed" });
+  });
   it("a confirmed run walks order → check → payment → explorer → passport → verify, then hands over to the Developer workflow", () => {
     const run = paid();
     let g = guideFor(run, NET);

@@ -109,7 +109,7 @@ export function guideFor(run: Run | null | undefined, net: NetworkInfo | null, l
   const live = !!run && (run.state === "RUNNING" || run.state === "RECONCILE_REQUIRED");
   const stages = run ? lifecycleFromRun(run, { exported: local.exported, verified: local.verified }) : idleLifecycle();
   const active = live ? stages.find((st) => st.status === "active") ?? null : null;
-  const now = active ? { stage: active.id, label: active.label, detail: NOW_DETAIL[active.id] } : null;
+  const now = active ? { stage: active.id, label: active.label, detail: active.note ?? NOW_DETAIL[active.id] } : null;
   const label = now ? now.label : PHASES[phase].label;
   const finished = !!run && !live;
   const hash = run ? businessHash(run) : null;
@@ -119,8 +119,10 @@ export function guideFor(run: Run | null | undefined, net: NetworkInfo | null, l
   const cps: Checkpoint[] = [];
   if (!run) { for (const id of Object.keys(DEF) as CheckpointId[]) cps.push(mk(id, "todo")); }
   else {
-    const hasOrder = !!run.order || has(run, "createOrder");
-    cps.push(mk("order", hasOrder ? (visited.has("order") ? "done" : "todo") : finished ? "na" : "pending", hasOrder ? {} : { hint: finished ? "no order was created" : "the order is being created" }));
+    const orderStage = stages.find((st) => st.id === "order")!;
+    const orderInspectable = orderStage.status === "done" || orderStage.status === "stop" || orderStage.status === "warn"; // confirmed, or a failure worth reading
+    cps.push(mk("order", orderInspectable ? (visited.has("order") ? "done" : "todo") : finished ? "na" : "pending",
+      orderInspectable ? (orderStage.status === "done" ? {} : { action: "Inspect the order creation", hint: orderStage.note ?? "the creation did not confirm" }) : { hint: finished ? "no order was created" : orderStage.note ?? "the order is being created" }));
     const decided = !!d || has(run, "decision");
     cps.push(mk("check", decided ? (visited.has("check") ? "done" : "todo") : finished ? "na" : "pending", decided ? {} : { hint: finished ? "no decision was recorded" : "the report is being bought and read" }));
     const stopped = phase === "stopped";

@@ -338,6 +338,53 @@ it("RunPanel downloads the passport through the API route, refuses while RUNNING
   expect(h.saveJson).toHaveBeenCalledTimes(1);
 });
 
+it("the passport state belongs to one run: another run shown by the same panel starts clean, and a download that resolves after the switch is dropped (review 2026-10-09)", async () => {
+  memStorage();
+  const bundle = { passportBundleVersion: "1.0", files: { "manifest.json": "{}" } };
+  let release: (() => void) | null = null;
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => { if (path.endsWith("/passport")) await new Promise<void>((r) => { release = r; }); return response(bundle); }));
+  const onLocal = vi.fn(); const saved = h.saveJson.mock.calls.length;
+  let tree = render(() => RunPanel({ run: DONE_RUN, net: h.net, onLocal }));
+  const inflight = button(tree, "Download Payment Passport").props.onClick(); // run A's download is in flight…
+  const B = { ...DONE_RUN, runId: "22222222-2222-4222-8222-222222222222" };
+  tree = render(() => RunPanel({ run: B, net: h.net, onLocal })); // …when the same panel is handed run B
+  expect(content(button(tree, "Download Payment Passport"))).not.toContain("exporting"); expect(content(tree)).not.toContain("Download Payment Passport again");
+  release!(); await inflight; await flush();
+  tree = render(() => RunPanel({ run: B, net: h.net, onLocal }));
+  expect(h.saveJson.mock.calls.length).toBe(saved); expect(onLocal).not.toHaveBeenCalled(); // A's late result is dropped, not attributed to B
+  expect(nodes(tree).some((n) => typeof n.type === "function" && n.type.name === "VerifyInBrowser")).toBe(false);
+  expect(nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "FlowCanvas")?.props.stages[5].status).toBe("todo"); // the diagram does not say "export done"
+  // a fresh download for A is stored under A, and B still starts clean
+  vi.stubGlobal("fetch", vi.fn(async () => response(bundle)));
+  tree = render(() => RunPanel({ run: DONE_RUN, net: h.net, onLocal }));
+  await button(tree, "Download Payment Passport").props.onClick(); await flush();
+  tree = render(() => RunPanel({ run: DONE_RUN, net: h.net, onLocal }));
+  expect(onLocal).toHaveBeenCalledWith(REQUEST, { exported: true, verified: null }); expect(content(tree)).toContain("Download Payment Passport again");
+  expect(nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "FlowCanvas")?.props.stages[5].status).toBe("done");
+  tree = render(() => RunPanel({ run: B, net: h.net, onLocal }));
+  expect(content(tree)).not.toContain("Download Payment Passport again");
+  expect(nodes(tree).some((n) => typeof n.type === "function" && n.type.name === "VerifyInBrowser")).toBe(false);
+  expect(nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "FlowCanvas")?.props.stages[5].status).toBe("todo");
+});
+
+it("the run strip, the guide and the diagram keep execution active at step 4/7 while the runner waits for the receipt (review 2026-10-09)", async () => {
+  memStorage(); h.net.fixtures = [CHANGED_FIXTURE];
+  const run = { runId: REQUEST, fixture: "CHANGED_IMPLEMENTATION", state: "RUNNING", labels: ["LIVE_REQUEST"], steps: ["orderPlanned", "createOrder", "intent", "quote", "signServiceFee", "reportDelivered", "decision", "finalValidation", "signed", "broadcastAttempted", "broadcast"].map((step, i) => ({ step, atMs: i })),
+    result: null, order: { orderId: D, state: "CONFIRMED", tx: D, block: "1", payer: ACCOUNT, merchant: MERCHANT, amountNativeAtomic: "50000000000000000", reference: null, paid: null },
+    businessExecution: { state: "BROADCAST_ATTEMPTED", txHash: D, nonce: 1, broadcastBlock: "1", consumedBy: null, note: null, validUntil: null }, outcome: { kind: "RUNNING", text: "", source: "state" } };
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+    if (path === "/v1/demo/run") return response({ runId: REQUEST, poll: `/v1/demo/runs/${REQUEST}`, admission: "new" }, 202);
+    if (path === `/v1/demo/runs/${REQUEST}`) return response(run);
+    return response({ runs: [], total: 0 });
+  }));
+  render(Demo); await flush(); await button(render(Demo), "live").props.onClick(); await flush(); const tree = render(Demo);
+  const strip = nodes(tree).find((n) => n.props?.className === "runstrip");
+  expect(content(strip)).toContain("execute payment (step 4/7)"); expect(content(strip)).not.toContain("starting");
+  const guide = nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "GuidePanel")?.props.guide; // child components are elements here: assert on what the panel is handed
+  expect(guide.label).toBe("execute payment"); expect(guide.now).toMatchObject({ stage: "execute", detail: "broadcast · waiting for the receipt" });
+  expect(guide.stages.map((s: any) => s.status)).toEqual(["done", "done", "done", "active", "skipped", "todo", "todo"]);
+});
+
 it("Verify's offline preview reproduces digests, flags a tampered file and an unsafe path, and shows counts instead of a verdict", async () => {
   const intent = IntentCore.parse({ schemaVersion: "1.0", clientRequestId: "demo", chainId: 5042002, walletMode: "EOA_DIRECT_NON_DELEGATED", from: ACCOUNT, operation: "CALL", to: MERCHANT, data: "0x12345678", valueNativeAtomic: "50000000000000000", businessExpectation: { sourceId: "order", sourceDigest: D, action: "MERCHANT_PAY", recipient: MERCHANT, asset: "ARC_NATIVE_USDC", amountNativeAtomic: "50000000000000000", orderId: D }, baselineDigest: D, policyDigest: D, expiresAt: "2026-10-03T12:10:00Z" });
   const sha = (s: string) => "0x" + createHash("sha256").update(s, "utf8").digest("hex");

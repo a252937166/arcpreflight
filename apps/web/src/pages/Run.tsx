@@ -27,7 +27,7 @@ export default function RunPage() {
       <div className="container stack" style={{ gap: 16 }}>
         <div className="row between"><div><span className="kicker">Run · permanent record · {net?.network === "mainnet" ? "Arc mainnet" : "Arc testnet"}</span><h2 style={{ marginTop: 6 }}>{run ? <>{run.fixture.replace(/_/g, " ").toLowerCase()} <em className="dim" style={{ fontSize: "0.6em" }}>#{id?.slice(0, 8)}</em></> : `#${id?.slice(0, 8)}`}</h2></div><Link to={link("/demo")} className="btn">← demo</Link></div>
         {err && <div className="banner bad">{err}</div>}
-        {run ? <RunPanel run={run} net={net} onUpdate={setRun} /> : !err && <div className="card"><span className="spinner" /></div>}
+        {run ? <RunPanel key={run.runId} run={run} net={net} onUpdate={setRun} /> : !err && <div className="card"><span className="spinner" /></div>}
       </div>
     </section>
   );

@@ -51,6 +51,26 @@ describe("lifecycle from a run", () => {
     expect(lifecycleFromRun(run)[4].note).toMatch(/simulated interruption/);
     expect(ids(lifecycleFromRun(run, { exported: true, verified: true })).slice(5)).toEqual(["passport:done", "verify:done"]);
   });
+  it("order creation is complete only once confirmed; a sent, failed or unknown creation is said as such (review 2026-10-09)", () => {
+    const o = (state: string, over: Record<string, unknown> = {}) => ({ orderId: D, state, tx: D, block: null, payer: D, merchant: D, amountNativeAtomic: "1", reference: null, paid: null, ...over });
+    const st = (step: string, i: number) => ({ step, atMs: i });
+    const sent = lifecycleFromRun(base({ state: "RUNNING", steps: [st("orderPlanned", 1)], order: o("SENT") }));
+    expect(ids(sent)[0]).toBe("order:active"); expect(sent[0].note).toBe("creation sent · waiting for the receipt"); expect(ids(sent)[1]).toBe("approve:todo");
+    expect(ids(lifecycleFromRun(base({ state: "FAILED", steps: [st("orderPlanned", 1)], order: o("FAILED") })))[0]).toBe("order:stop");
+    expect(lifecycleFromRun(base({ state: "FAILED", steps: [st("orderPlanned", 1)], order: o("FAILED") }))[0].note).toBe("creation failed");
+    expect(ids(lifecycleFromRun(base({ state: "FAILED", steps: [st("orderPlanned", 1)], order: o("UNKNOWN_CREATION") })))[0]).toBe("order:warn");
+    expect(ids(lifecycleFromRun(base({ state: "FAILED", steps: [st("orderPlanned", 1)], order: o("SENT") })))[0]).toBe("order:warn"); // the run ended while the creation was in flight
+    expect(ids(lifecycleFromRun(base({ state: "RUNNING", steps: [st("orderPlanned", 1), st("createOrder", 2)], order: o("CONFIRMED", { block: "1" }) })))[0]).toBe("order:done");
+    expect(ids(lifecycleFromRun(base({ steps: [st("createOrder", 1)] })))[0]).toBe("order:done"); // recorded before v3.3: no order object, the step counts
+  });
+  it("execution stays active while the run waits for the receipt (RUNNING + BROADCAST_ATTEMPTED); it warns only once the run has left RUNNING", () => {
+    const run = base({ state: "RUNNING", steps: ["createOrder", "intent", "quote", "signServiceFee", "reportDelivered", "decision", "finalValidation", "signed", "broadcastAttempted", "broadcast"].map((step, i) => ({ step, atMs: i })),
+      businessExecution: { state: "BROADCAST_ATTEMPTED", txHash: D, nonce: 1, broadcastBlock: "1", consumedBy: null, note: null, validUntil: null } });
+    expect(ids(lifecycleFromRun(run))).toEqual(["order:done", "approve:done", "check:done", "execute:active", "recover:skipped", "passport:todo", "verify:todo"]);
+    expect(lifecycleFromRun(run)[3].note).toBe("broadcast · waiting for the receipt");
+    expect(lifecycleFromRun({ ...run, steps: run.steps.slice(0, 8), businessExecution: null })[3].note).toBe("signed"); // signed, marker not yet written
+    expect(ids(lifecycleFromRun({ ...run, state: "DONE", outcome: { kind: "BROADCAST_UNRESOLVED", text: "", source: "store" } }))[3]).toBe("execute:warn");
+  });
   it("while the interrupted run waits for reconciliation: execute warns, recover is active", () => {
     const run = signedThenStopped("BROADCAST_UNRESOLVED", "BROADCAST_ATTEMPTED"); run.steps.push({ step: "broadcastAttempted", atMs: 7 }, { step: "broadcast", atMs: 8 }, { step: "interruptedAfterBroadcast", atMs: 9 });
     expect(ids(lifecycleFromRun(run))).toEqual(["order:done", "approve:done", "check:done", "execute:warn", "recover:active", "passport:todo", "verify:todo"]);

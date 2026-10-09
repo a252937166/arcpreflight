@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useNet } from "../App";
 import { Chip, DecisionBadge, Hex, Labels, Spinner } from "./Badges";
@@ -108,7 +108,7 @@ export function RecoveryDesk({ run, net, onUpdate }: { run: Run; net: NetworkInf
 /** `origin` (review of 2026-10-09, item 4): "live" = started in this session, "history" = opened from the records, "sample" = the API's fallback when
  *  execution was unavailable (`reason` says why); `onLocal` reports what this browser did with the passport (export, verification state). */
 export type RunOrigin = "live" | "history" | "sample";
-export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = null, onLocal }: { run: Run; net: NetworkInfo | null; sample?: boolean; onUpdate?: (run: Run) => void; origin?: RunOrigin | null; reason?: string | null; onLocal?: (local: { exported: boolean; verified: "passed" | "failed" | "partial" | null }) => void }) {
+export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = null, onLocal }: { run: Run; net: NetworkInfo | null; sample?: boolean; onUpdate?: (run: Run) => void; origin?: RunOrigin | null; reason?: string | null; onLocal?: (runId: string, local: { exported: boolean; verified: "passed" | "failed" | "partial" | null }) => void }) {
   const { link = (to: string) => to } = useNet(); // permanent links carry ?net= when the selected instance is not the root (P2)
   const r = run.result;
   const running = run.state === "RUNNING";
@@ -118,12 +118,22 @@ export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = n
   const decisionStep = run.steps.find((s) => s.step === "decision");
   const reasons = (r?.decision?.reasons ?? (decisionStep?.reasons as string[] | undefined) ?? []) as string[];
   const narration = useMemo(() => run.steps.map(narrate).filter((x): x is string => !!x), [run.steps]);
-  const [dl, setDl] = useState<{ busy: boolean; err: string | null; bundle: PassportBundle | null; name: string | null }>({ busy: false, err: null, bundle: null, name: null });
-  const [verified, setVerified] = useState<"passed" | "failed" | "partial" | null>(null);
+  // the passport state belongs to ONE run (review 2026-10-09): a different run shown by the same panel starts clean, and a download or
+  // verification that resolves after the switch is dropped rather than attributed to the run now on screen
+  const [dl, setDl] = useState<{ runId: string | null; busy: boolean; err: string | null; bundle: PassportBundle | null; name: string | null }>({ runId: null, busy: false, err: null, bundle: null, name: null });
+  const [verified, setVerified] = useState<{ runId: string; kind: "passed" | "failed" | "partial" } | null>(null);
+  const current = useRef(run.runId); current.current = run.runId;
+  const mine = dl.runId === run.runId;
+  const bundle = mine ? dl.bundle : null, bundleName = mine ? dl.name : null, dlBusy = mine && dl.busy, dlErr = mine ? dl.err : null;
+  const verifiedKind = verified?.runId === run.runId ? verified.kind : null;
   const download = async () => {
-    setDl((d) => ({ ...d, busy: true, err: null }));
-    try { const { __status: _s, ...bundle } = (await api.passport(run.runId)) as any; const name = `arcpreflight-passport-${run.runId.slice(0, 8)}.json`; saveJson(name, bundle); setDl({ busy: false, err: null, bundle, name }); setVerified(null); onLocal?.({ exported: true, verified: null }); }
-    catch (e: any) { setDl((d) => ({ ...d, busy: false, err: errText(e) })); }
+    const id = run.runId;
+    setDl((d) => (d.runId === id ? { ...d, busy: true, err: null } : { runId: id, busy: true, err: null, bundle: null, name: null }));
+    try {
+      const { __status: _s, ...b } = (await api.passport(id)) as any;
+      if (current.current !== id) { setDl((d) => (d.runId === id ? { ...d, busy: false } : d)); return; } // another run is shown now: this is not its passport — dropped, not stored
+      const name = `arcpreflight-passport-${id.slice(0, 8)}.json`; saveJson(name, b); setDl({ runId: id, busy: false, err: null, bundle: b, name }); setVerified(null); onLocal?.(id, { exported: true, verified: null });
+    } catch (e: any) { if (current.current !== id) { setDl((d) => (d.runId === id ? { ...d, busy: false } : d)); return; } setDl({ runId: id, busy: false, err: errText(e), bundle: null, name: null }); }
   };
   const ex = r?.execution; const cost = r?.costStatement ?? null; const rec = run.recovery ?? null; const be = run.businessExecution ?? null;
   const ord = orderResultOf(r);
@@ -141,7 +151,7 @@ export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = n
   const reconciledStep = [...run.steps].reverse().find((s) => s.step === "reconciled") ?? null;
   const lastRec = rec?.reconciliation?.at(-1) ?? null;
   const added = rec?.addedByRecovery ?? null;
-  const stages = useMemo(() => lifecycleFromRun(run, { exported: !!dl.bundle, verified }), [run, dl.bundle, verified]);
+  const stages = useMemo(() => lifecycleFromRun(run, { exported: !!bundle, verified: verifiedKind }), [run, bundle, verifiedKind]);
   const anchors = useMemo(() => ({ baselineDigests: Array.from(new Set((net?.fixtures ?? []).map((f) => f.baselineDigest).filter((x): x is string => !!x))), policyDigests: r?.policyDigest ? [r.policyDigest] : [] }), [net, r?.policyDigest]);
   const beTone: Tone = be?.state === "CONFIRMED" ? "ok" : be?.state === "REVERTED" || be?.state === "NOT_MINED" ? "bad" : be?.state === "BROADCAST_ATTEMPTED" ? "warn" : "neutral";
   // the lifecycle diagram jumps to the section that holds the stage's result (review of 2026-10-09, item 5)
@@ -210,17 +220,17 @@ export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = n
           </div>
         </div>
         <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <button className="btn primary" id="btn-passport" disabled={running || dl.busy} title={running ? "available once the run has ended" : unresolved ? "the outcome of this attempt is not established yet; the passport records it as unresolved" : "the passport's files as one JSON document"} onClick={download}>{dl.busy ? <><Spinner /> exporting…</> : unresolved ? "Download Payment Passport (outcome unresolved)" : dl.bundle ? "Download Payment Passport again" : "Download Payment Passport"}</button>
+          <button className="btn primary" id="btn-passport" disabled={running || dlBusy} title={running ? "available once the run has ended" : unresolved ? "the outcome of this attempt is not established yet; the passport records it as unresolved" : "the passport's files as one JSON document"} onClick={download}>{dlBusy ? <><Spinner /> exporting…</> : unresolved ? "Download Payment Passport (outcome unresolved)" : bundle ? "Download Payment Passport again" : "Download Payment Passport"}</button>
           <a href="#sec-verify" className="btn">Verify in browser</a>
           <Link to={link(`/verify?run=${run.runId}`)} className="btn ghost">Verify elsewhere</Link>
           <a href="#receipt-chain" className="btn ghost">Technical evidence</a>
           {sample && <span className="tiny dim">recorded sample — the counters and costs are that run's, not today's</span>}
         </div>
-        {dl.err && <div className="banner bad">{dl.err}</div>}
+        {dlErr && <div className="banner bad">{dlErr}</div>}
         <CostTable statement={cost} net={net} title="Cost disclosure" context={{ executionMode: run.executionMode ?? "runner", subjectKind: run.executionMode === "wallet" ? "wallet-run" : "demo-run" }} />
         <div className="stack" style={{ gap: 6 }} id="sec-verify">
           <h3>Verify independently</h3>
-          {dl.bundle ? <VerifyInBrowser bundle={dl.bundle} name={dl.name} net={net} anchors={anchors} anchorsSource="site" onVerified={(_r, s) => { setVerified(s.kind); onLocal?.({ exported: true, verified: s.kind }); }} compact />
+          {bundle ? <VerifyInBrowser bundle={bundle} name={bundleName} net={net} anchors={anchors} anchorsSource="site" onVerified={(_r, s) => { const id = run.runId; if (current.current !== id) return; setVerified({ runId: id, kind: s.kind }); onLocal?.(id, { exported: true, verified: s.kind }); }} compact />
             : <p className="small dim">download the passport first; the verifier then runs here against {net?.rpc ?? "the Arc RPC"}, with this site's digests as anchors (not independent)</p>}
         </div>
       </div>

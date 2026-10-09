@@ -47,7 +47,15 @@ export function lifecycleFromRun(run: Run, local: LocalPassport = {}): Lifecycle
   const kind = run.outcome?.kind ?? null;
   const be = run.businessExecution ?? null;
   const st = (id: LifecycleId, status: StageStatus, note?: string | null): LifecycleStage => ({ id, label: LIFECYCLE_LABELS[id], status, note: note ?? null });
-  const order = seen.has("createOrder") || !!run.order?.tx ? st("order", "done", run.order?.reference ? `“${run.order.reference}”` : null) : st("order", seen.has("orderPlanned") ? "active" : running ? "active" : "todo", seen.has("orderPlanned") ? "identity recorded, creation pending" : null);
+  // order creation is complete only once its receipt confirmed it (review 2026-10-09): SENT is still pending, FAILED / UNKNOWN are said as such
+  const o = run.order ?? null;
+  let order: LifecycleStage;
+  if (o ? o.state === "CONFIRMED" : seen.has("createOrder")) order = st("order", "done", o?.reference ? `“${o.reference}”` : null);
+  else if (o?.state === "FAILED") order = st("order", "stop", "creation failed");
+  else if (o?.state === "UNKNOWN_CREATION") order = st("order", "warn", "creation could not be established");
+  else if (o?.state === "SENT") order = st("order", running ? "active" : "warn", "creation sent · waiting for the receipt");
+  else if (o?.state === "PLANNED" || seen.has("orderPlanned")) order = st("order", running ? "active" : "warn", "creation planned, not yet sent");
+  else order = st("order", running ? "active" : "todo");
   const approve = seen.has("intent") ? st("approve", "done", "approval referenced by the intent") : st("approve", order.status === "done" && running ? "active" : "todo");
   let check: LifecycleStage;
   if (seen.has("decision")) check = st("check", decision === "BLOCKED" ? "stop" : decision === "REVIEW_REQUIRED" ? "review" : "done", decision ? decision.replace(/_/g, " ").toLowerCase() : null);
@@ -56,6 +64,8 @@ export function lifecycleFromRun(run: Run, local: LocalPassport = {}): Lifecycle
   let execute: LifecycleStage;
   if (stopped) execute = st("execute", "skipped", "nothing signed");
   else if (kind === "PAID") execute = st("execute", "done", "paid");
+  // still RUNNING with the check done: execution is in progress up to the receipt — never "warn" while the runner is waiting (review 2026-10-09)
+  else if (running && check.status === "done" && !seen.has("postcondition") && !seen.has("outcomeUnknown")) execute = st("execute", "active", seen.has("broadcast") || be?.state === "BROADCAST_ATTEMPTED" ? "broadcast · waiting for the receipt" : seen.has("broadcastAttempted") ? "broadcast marker written" : seen.has("signed") ? "signed" : seen.has("finalValidation") ? "final validation passed" : "final validation");
   else if (kind === "BROADCAST_UNRESOLVED" || be?.state === "BROADCAST_ATTEMPTED") execute = st("execute", "warn", "broadcast attempted");
   else if (kind === "REVERTED" || kind === "CONFIRMED_UNPAID") execute = st("execute", "stop", kind.toLowerCase().replace(/_/g, " "));
   else if (kind === "NOT_MINED" || kind === "SIGNED_NOT_BROADCAST" || kind === "NOT_SIGNED" || kind === "SUPERSEDED") execute = st("execute", "warn", kind.toLowerCase().replace(/_/g, " "));

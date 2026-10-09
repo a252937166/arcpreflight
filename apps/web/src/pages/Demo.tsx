@@ -52,7 +52,7 @@ export default function Demo() {
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [reason, setReason] = useState<string | null>(null);
   const [visited, setVisited] = useState<CheckpointId[]>([]);
-  const [local, setLocal] = useState<{ exported?: boolean; verified?: "passed" | "failed" | "partial" | null }>({});
+  const [local, setLocal] = useState<{ runId: string; exported?: boolean; verified?: "passed" | "failed" | "partial" | null } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -98,7 +98,7 @@ export default function Demo() {
     };
     void tick();
   }, [loadRuns, refresh]);
-  const fresh = () => { setOrigin(null); setReason(null); setVisited([]); setLocal({}); };
+  const fresh = () => { setOrigin(null); setReason(null); setVisited([]); setLocal(null); };
   const start = async (opts: DemoOptions = {}) => {
     setBusy(true); setNotice(null); setSample(false); setRun(null); walletRun.reset(); fresh();
     try {
@@ -124,7 +124,7 @@ export default function Demo() {
     refreshBal(); loadRuns();
   };
   const open = async (id: string) => { setSample(false); setNotice(null); walletRun.reset(); fresh(); setOrigin("history"); try { const r = await api.run(id); setRun(r); if (r.state === "RUNNING" || r.state === "RECONCILE_REQUIRED") { setBusy(r.state === "RUNNING"); poll(id); } } catch { /* ignore */ } };
-  const guide = useMemo(() => guideFor(run, net, { ...local, visited }), [run, net, local, visited]);
+  const guide = useMemo(() => guideFor(run, net, { ...(local && run && local.runId === run.runId ? local : {}), visited }), [run, net, local, visited]);
   const onGo = useCallback((id: CheckpointId | null) => { if (id) setVisited((v) => (v.includes(id) ? v : [...v, id])); }, []);
   // the element the guide points at gets the highlight (review of 2026-10-09, item 2)
   useEffect(() => {
@@ -237,7 +237,7 @@ export default function Demo() {
         {!walletShowing && <GuidePanel guide={guide} origin={run ? origin : null} reason={reason} network={netLabel} onGo={onGo} link={link} underStrip={running} />}
         {notice && <div className={`banner ${notice.tone === "info" ? "info" : notice.tone === "bad" ? "bad" : ""}`}>{notice.text}{notice.raw?.code && <details className="error-raw"><summary>raw response ({notice.raw.code})</summary><pre className="json">{JSON.stringify(notice.raw.raw, null, 2)}</pre></details>}</div>}
         <div ref={panelRef} className="scroll-target stack" style={{ gap: 28 }}>
-          {run && <><HandRule /><RunPanel run={run} net={net} sample={sample} onUpdate={setRun} origin={origin} reason={reason} onLocal={setLocal} /></>}
+          {run && <><HandRule /><RunPanel key={run.runId} run={run} net={net} sample={sample} onUpdate={setRun} origin={origin} reason={reason} onLocal={(id, l) => setLocal({ runId: id, ...l })} /></>}
           {!run && walletShowing && <><HandRule /><WalletRunPanel run={walletRun.run} net={net} account={w.account} fixture={f ?? null} /></>}
         </div>
 
