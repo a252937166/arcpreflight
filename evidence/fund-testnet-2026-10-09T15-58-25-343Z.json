@@ -1,0 +1,38 @@
+{
+  "network": "testnet",
+  "from": "deployer-admin",
+  "sender": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
+  "transfers": [
+    {
+      "role": "visitor-rehearsal",
+      "to": "0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2",
+      "valueUsdc": "0.01",
+      "tx": "0x5d221ddf943ac4b5dc9f0b0bd4d51075df5f8c8523e2a555742bce1c2a540995",
+      "block": "66331306",
+      "gasUsed": "21000",
+      "costUsdc": "0.010525",
+      "receivedUsdc": "0.01",
+      "ok": true
+    }
+  ],
+  "spend": {
+    "label": "fund",
+    "network": "testnet",
+    "perTxCapUsdc": "0.2",
+    "totalCapUsdc": "0.2",
+    "maxFeeCeilingGwei": "40",
+    "committedUsdc": "0.010525",
+    "remainingUsdc": "0.189475",
+    "entries": [
+      {
+        "purpose": "fund visitor-rehearsal",
+        "to": "0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2",
+        "worstNativeAtomic": "10730800000000000",
+        "actualNativeAtomic": "10525000000000000",
+        "status": "settled",
+        "txHash": "0x5d221ddf943ac4b5dc9f0b0bd4d51075df5f8c8523e2a555742bce1c2a540995",
+        "at": "2026-10-09T15:58:23.052Z"
+      }
+    ]
+  }
+}

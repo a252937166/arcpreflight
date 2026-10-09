@@ -1,0 +1,368 @@
+{
+  "generatedAt": "2026-10-09T15:24:00.890Z",
+  "api": "https://arcpreflight.axiqo.xyz",
+  "network": "eip155:5042002",
+  "release": "aac0454",
+  "scenarios": {
+    "wallet": {
+      "payer": "0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2",
+      "claimProbe": {
+        "granted": 200,
+        "secondClaim": "409 PROMPT_CLAIMED",
+        "strangerHandBack": "409 PROMPT_CLAIMED",
+        "holderHandBack": "200 prompt=null"
+      },
+      "order": {
+        "orderId": "0x42f2893411363867ed4007de24f0b2f03b3c0614f9dde7b222b09767c170493f",
+        "tx": "0x8ae6d033972c2da92235d64c07e2b597b4ad20e99c9d31e47808a35098a2476c",
+        "block": "66327248",
+        "amountNativeAtomic": "5000000000000000",
+        "reference": "lifecycle rehearsal 2026-10-09T15-24-00"
+      },
+      "requestId": "955638fa-f697-4351-9086-a3d8a170ffeb",
+      "feeTx": "0x643f84076b9072ef5be374a2e8cd8b8d45def14174bd11a0504ff9171a2fedd7",
+      "attemptId": "17dcc660-ce2b-41c6-ac51-b0e8246dd56e",
+      "plan": {
+        "chainId": 5042002,
+        "from": "0xa71138ff271db9a18d2b216caf13b830eeab3ff2",
+        "type": 2,
+        "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+        "data": "0x8609cad142f2893411363867ed4007de24f0b2f03b3c0614f9dde7b222b09767c170493f",
+        "valueNativeAtomic": "5000000000000000",
+        "nonce": "6",
+        "gasLimit": "40735",
+        "maxFeePerGasNativeAtomic": "29000000000",
+        "maxPriorityFeePerGasNativeAtomic": "5000000000",
+        "accessList": [],
+        "authorizationList": []
+      },
+      "txHash": "0x3e029d79da5220397cbff259de3023ad4b29bfea1ec9fb86909532d0f9c9856c",
+      "outcome": {
+        "state": "CONFIRMED",
+        "businessStatus": "SUCCESS",
+        "block": "66327311",
+        "deviations": {
+          "mismatch": [],
+          "deviations": {}
+        }
+      },
+      "costStatement": {
+        "costStatementVersion": "1.1",
+        "unit": "USDC",
+        "nativeDecimals": 18,
+        "tokenDecimals": 6,
+        "capturedAt": "2026-10-09T15:24:43.725Z",
+        "buyer": {
+          "address": "0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2",
+          "role": "visitor-wallet",
+          "businessPrincipal": {
+            "nativeAtomic": "5000000000000000",
+            "usdc": "0.005"
+          },
+          "checkFee": {
+            "tokenAtomic": "10000",
+            "nativeAtomicEquivalent": "10000000000000000",
+            "usdc": "0.01"
+          },
+          "businessGas": {
+            "nativeAtomic": "1009100000000000",
+            "usdc": "0.0010091",
+            "gasUsed": "40364",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0x3e029d79da5220397cbff259de3023ad4b29bfea1ec9fb86909532d0f9c9856c"
+          },
+          "totalNativeAtomic": "16009100000000000",
+          "totalUsdc": "0.0160091",
+          "complete": true
+        },
+        "operator": {
+          "feeRelay": {
+            "nativeAtomic": "2179125000000000",
+            "usdc": "0.002179125",
+            "gasUsed": "87165",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0x643f84076b9072ef5be374a2e8cd8b8d45def14174bd11a0504ff9171a2fedd7",
+            "address": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0"
+          },
+          "orderCreation": {
+            "nativeAtomic": "2507600000000000",
+            "usdc": "0.0025076",
+            "gasUsed": "100304",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0x8ae6d033972c2da92235d64c07e2b597b4ad20e99c9d31e47808a35098a2476c",
+            "address": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b"
+          },
+          "totalNativeAtomic": "4686725000000000",
+          "totalUsdc": "0.004686725",
+          "complete": true
+        },
+        "authorizedMaximum": {
+          "businessPrincipalNativeAtomic": "5000000000000000",
+          "checkFeeTokenAtomic": "10000",
+          "businessGasNativeAtomic": "1181315000000000"
+        },
+        "actual": {
+          "businessPrincipalNativeAtomic": "5000000000000000",
+          "checkFeeTokenAtomic": "10000",
+          "businessGasNativeAtomic": "1009100000000000"
+        },
+        "unresolvedReservation": {
+          "nativeAtomic": "0",
+          "note": "reservations released only after reconciliation"
+        },
+        "sources": {
+          "feeTx": "0x643f84076b9072ef5be374a2e8cd8b8d45def14174bd11a0504ff9171a2fedd7",
+          "createOrderTx": "0x8ae6d033972c2da92235d64c07e2b597b4ad20e99c9d31e47808a35098a2476c",
+          "businessTx": "0x3e029d79da5220397cbff259de3023ad4b29bfea1ec9fb86909532d0f9c9856c"
+        },
+        "notes": [
+          "gas deductions are not payment Transfer events",
+          "the fee's native-system and ERC-20 event representations are one payment",
+          "sub-micro-USDC gas precision is preserved; usdc strings are exact decimal renderings of the atomic values"
+        ]
+      },
+      "passport": "/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/passports/testnet-wallet-2026-10-09T15-24-00-889Z.passport.json",
+      "verifier": {
+        "exit": 0,
+        "counts": {
+          "pass": 10,
+          "fail": 0,
+          "unverified": 0,
+          "notEvaluated": 1
+        },
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "PASS",
+          "ORDER_OUTCOME": "PASS",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "anchorsPath": "/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/passports/testnet-wallet-2026-10-09T15-24-00-889Z.anchors.json"
+      }
+    },
+    "interrupt": {
+      "runId": "d3cd564c-d331-4137-b429-1ea20ff52332",
+      "clientRunRequestId": "lc-d4956107-5fd3-40f6-8b52-24fdb4beba78",
+      "stateAtStop": "DONE",
+      "outcomeAtStop": {
+        "kind": "PAID",
+        "text": "confirmed: the order reads as paid by this payer for the exact amount",
+        "source": "store"
+      },
+      "steps": [
+        "orderPlanned",
+        "createOrder",
+        "intent",
+        "quote",
+        "signServiceFee",
+        "reportDelivered",
+        "decision",
+        "finalValidation",
+        "signed",
+        "broadcastAttempted",
+        "broadcast",
+        "interruptedAfterBroadcast",
+        "reconciled"
+      ],
+      "businessExecution": {
+        "attemptId": "277ea8ca-146e-40c4-b921-072a6db983b3",
+        "state": "CONFIRMED",
+        "txHash": "0x87e154bce3a0f310280301b867ba16c38fd348abe203e8b6530f458fb4ddb9c3",
+        "nonce": 46,
+        "broadcastBlock": "66327374",
+        "businessStatus": "SUCCESS",
+        "businessTxHash": "0x87e154bce3a0f310280301b867ba16c38fd348abe203e8b6530f458fb4ddb9c3",
+        "block": "66327378",
+        "consumedBy": null,
+        "note": "reconciled from the original transaction hash and the order state",
+        "validUntil": "2026-10-09T15:25:20.878Z",
+        "updatedAt": "2026-10-09T15:25:17.403Z"
+      },
+      "recovery": {
+        "recoveryVersion": "1.0",
+        "attemptId": "277ea8ca-146e-40c4-b921-072a6db983b3",
+        "interrupted": true,
+        "counters": {
+          "ordersCreated": 1,
+          "checkFeeAuthorizations": 1,
+          "businessSignatures": 1,
+          "broadcastsOfOriginalBytes": 1,
+          "replacementSignatures": 0
+        },
+        "addedByRecovery": {
+          "ordersCreated": 0,
+          "checkFeeAuthorizations": 0,
+          "businessSignatures": 0,
+          "broadcastsOfOriginalBytes": 0
+        },
+        "originalTransaction": {
+          "hash": "0x87e154bce3a0f310280301b867ba16c38fd348abe203e8b6530f458fb4ddb9c3",
+          "status": "recovered-confirmed"
+        },
+        "reconciliation": [
+          {
+            "at": "2026-10-09T15:25:17.407Z",
+            "chainStatus": "CONFIRMED",
+            "businessStatus": "SUCCESS",
+            "note": "reconciled from the original transaction hash and the order state"
+          }
+        ]
+      },
+      "reconciliation": [
+        {
+          "at": "2026-10-09T15:25:17.407Z",
+          "chainStatus": "CONFIRMED",
+          "businessStatus": "SUCCESS",
+          "note": "reconciled from the original transaction hash and the order state",
+          "consumedBy": null
+        }
+      ],
+      "costStatement": {
+        "costStatementVersion": "1.1",
+        "unit": "USDC",
+        "nativeDecimals": 18,
+        "tokenDecimals": 6,
+        "capturedAt": "2026-10-09T15:25:17.406Z",
+        "buyer": {
+          "address": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+          "role": "project-runner",
+          "businessPrincipal": {
+            "nativeAtomic": "50000000000000000",
+            "usdc": "0.05"
+          },
+          "checkFee": {
+            "tokenAtomic": "10000",
+            "nativeAtomicEquivalent": "10000000000000000",
+            "usdc": "0.01"
+          },
+          "businessGas": {
+            "nativeAtomic": "1009100000000000",
+            "usdc": "0.0010091",
+            "gasUsed": "40364",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0x87e154bce3a0f310280301b867ba16c38fd348abe203e8b6530f458fb4ddb9c3"
+          },
+          "totalNativeAtomic": "61009100000000000",
+          "totalUsdc": "0.0610091",
+          "complete": true
+        },
+        "operator": {
+          "feeRelay": {
+            "nativeAtomic": "2179125000000000",
+            "usdc": "0.002179125",
+            "gasUsed": "87165",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0xfeaaef8095b75f46ac05b0e0ad61ad5216cabe84131617997b9e1af2530d8f84",
+            "address": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0"
+          },
+          "orderCreation": {
+            "nativeAtomic": "2507300000000000",
+            "usdc": "0.0025073",
+            "gasUsed": "100292",
+            "effectiveGasPriceNativeAtomic": "25000000000",
+            "tx": "0x992f9be533c2037ddf51ee2f54ff5763fb6db495346ed77226c084782726e40f",
+            "address": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b"
+          },
+          "totalNativeAtomic": "4686425000000000",
+          "totalUsdc": "0.004686425",
+          "complete": true
+        },
+        "authorizedMaximum": {
+          "businessPrincipalNativeAtomic": "50000000000000000",
+          "checkFeeTokenAtomic": "10000",
+          "businessGasNativeAtomic": "1181315000000000"
+        },
+        "actual": {
+          "businessPrincipalNativeAtomic": "50000000000000000",
+          "checkFeeTokenAtomic": "10000",
+          "businessGasNativeAtomic": "1009100000000000"
+        },
+        "unresolvedReservation": {
+          "nativeAtomic": "0",
+          "note": "reservations released only after reconciliation"
+        },
+        "sources": {
+          "feeTx": "0xfeaaef8095b75f46ac05b0e0ad61ad5216cabe84131617997b9e1af2530d8f84",
+          "createOrderTx": "0x992f9be533c2037ddf51ee2f54ff5763fb6db495346ed77226c084782726e40f",
+          "businessTx": "0x87e154bce3a0f310280301b867ba16c38fd348abe203e8b6530f458fb4ddb9c3"
+        },
+        "notes": [
+          "gas deductions are not payment Transfer events",
+          "the fee's native-system and ERC-20 event representations are one payment",
+          "sub-micro-USDC gas precision is preserved; usdc strings are exact decimal renderings of the atomic values"
+        ]
+      },
+      "passport": "/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/passports/testnet-interrupt-2026-10-09T15-24-00-889Z.passport.json",
+      "verifier": {
+        "exit": 0,
+        "counts": {
+          "pass": 10,
+          "fail": 0,
+          "unverified": 0,
+          "notEvaluated": 1
+        },
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "PASS",
+          "ORDER_OUTCOME": "PASS",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "anchorsPath": "/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/passports/testnet-interrupt-2026-10-09T15-24-00-889Z.anchors.json"
+      }
+    }
+  },
+  "spend": {
+    "visitorKey": {
+      "label": "lifecycle-wallet",
+      "network": "testnet",
+      "perTxCapUsdc": "0.03",
+      "totalCapUsdc": "0.05",
+      "maxFeeCeilingGwei": "40",
+      "committedUsdc": "0.0160091",
+      "remainingUsdc": "0.0339909",
+      "entries": [
+        {
+          "purpose": "check fee authorization",
+          "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+          "worstNativeAtomic": "10000000000000000",
+          "actualNativeAtomic": "10000000000000000",
+          "status": "settled",
+          "txHash": null,
+          "at": "2026-10-09T15:24:24.319Z"
+        },
+        {
+          "purpose": "business payment",
+          "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+          "worstNativeAtomic": "6181315000000000",
+          "actualNativeAtomic": "6009100000000000",
+          "status": "settled",
+          "txHash": "0x3e029d79da5220397cbff259de3023ad4b29bfea1ec9fb86909532d0f9c9856c",
+          "at": "2026-10-09T15:24:40.262Z"
+        }
+      ]
+    },
+    "projectOutflow": {
+      "capUsdc": "0.12",
+      "measuredUsdc": "0.06639135",
+      "addresses": [
+        "0xa71138ff271db9a18d2b216caf13b830eeab3ff2",
+        "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+        "0xb6eef219f86ae75ffc3af9ef3cade49f89a7582b",
+        "0x06873b35575d6a22ec8008f30f56c71c19bee7b0"
+      ]
+    }
+  }
+}

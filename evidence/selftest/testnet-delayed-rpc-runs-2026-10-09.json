@@ -1,0 +1,157 @@
+{
+  "capturedAt": "2026-10-09T16:09:54Z",
+  "api": "https://arcpreflight.axiqo.xyz",
+  "network": "eip155:5042002",
+  "what": "project-funded Live Demo runs (APPROVED_PAYMENT) on the public testnet preview while the testnet instance's chain RPC went through ops/rpc-delay-proxy.mjs (ops/rpc-delay-session.sh on); read back through the public run route after the delay session was turned off. Phase A (wallet attempt + labelled interruption under a 75 s hold of the pay selector) is evidence/selftest/testnet-lifecycle-2026-10-09T15-27-04-552Z.json.",
+  "runs": [
+    {
+      "phase": "B",
+      "condition": "release aac0454: 60 s receipt hold after first sight; recorded before the patient receipt wait existed",
+      "runId": "04d13438-af45-4d5f-a986-98a056d11ee5",
+      "fixture": "APPROVED_PAYMENT",
+      "createdAt": "2026-10-09T15:33:33.864Z",
+      "updatedAt": "2026-10-09T15:36:06.561Z",
+      "state": "DONE",
+      "outcome": {
+        "kind": "PAID",
+        "text": "confirmed: the order reads as paid by this payer for the exact amount",
+        "source": "store"
+      },
+      "businessExecution": {
+        "attemptId": "cef615dc-9cfd-4127-b0e7-dcd8af03d06e",
+        "state": "CONFIRMED",
+        "txHash": "0x567e0fafef66b0d46f3243be6d8510a51157f1dd13225a5b4676cae6fa4ad696",
+        "nonce": 48,
+        "broadcastBlock": "66328411",
+        "businessStatus": "SUCCESS",
+        "businessTxHash": "0x567e0fafef66b0d46f3243be6d8510a51157f1dd13225a5b4676cae6fa4ad696",
+        "block": "66328423",
+        "consumedBy": null,
+        "note": "reconciled from the original transaction hash and the order state",
+        "validUntil": "2026-10-09T15:34:05.777Z",
+        "updatedAt": "2026-10-09T15:36:06.555Z"
+      },
+      "recovery": {
+        "interrupted": true,
+        "addedByRecovery": {
+          "ordersCreated": 0,
+          "checkFeeAuthorizations": 0,
+          "businessSignatures": 0,
+          "broadcastsOfOriginalBytes": 0
+        },
+        "reconciliation": [
+          {
+            "at": "2026-10-09T15:36:06.560Z",
+            "chainStatus": "CONFIRMED",
+            "businessStatus": "SUCCESS",
+            "note": "reconciled from the original transaction hash and the order state"
+          }
+        ],
+        "counters": {
+          "ordersCreated": 1,
+          "checkFeeAuthorizations": 1,
+          "businessSignatures": 1,
+          "broadcastsOfOriginalBytes": 1,
+          "replacementSignatures": 0
+        }
+      }
+    },
+    {
+      "phase": "B2",
+      "condition": "release 4345ed6: the upstream node refused the payment send and the proxy's 3 s send delay used up the 5 s validation window",
+      "runId": "1c6c1eda-7e9e-4510-813d-2182d6bc716e",
+      "fixture": "APPROVED_PAYMENT",
+      "createdAt": "2026-10-09T15:44:54.573Z",
+      "updatedAt": "2026-10-09T15:59:02.110Z",
+      "state": "DONE",
+      "outcome": {
+        "kind": "NOT_MINED",
+        "text": "the original hash can never be mined (its nonce was consumed by something else); the order reads as unpaid; nothing was re-signed",
+        "source": "store"
+      },
+      "businessExecution": {
+        "attemptId": "b0a9eb37-4a52-4001-805d-5072feeb6601",
+        "state": "NOT_MINED",
+        "txHash": "0x3475dd797efccac7d0e88bc50a7fcc1c96185dd4db90f0ee69caf6bedbc95ab8",
+        "nonce": 49,
+        "broadcastBlock": "66329758",
+        "businessStatus": "NOT_EXECUTED",
+        "businessTxHash": null,
+        "block": null,
+        "consumedBy": "0x3a4c1cb2c30060191702396d8d85279661d9533d81ae6071802171f6e4b2a482",
+        "note": "the signer nonce was consumed by transaction 0x3a4c1cb2c30060191702396d8d85279661d9533d81ae6071802171f6e4b2a482, which does not pay this order; this hash can never be mined; the order reads as unpaid; nothing is re-signed",
+        "validUntil": "2026-10-09T15:45:27.073Z",
+        "updatedAt": "2026-10-09T15:59:02.106Z"
+      },
+      "recovery": {
+        "interrupted": true,
+        "addedByRecovery": {
+          "ordersCreated": 0,
+          "checkFeeAuthorizations": 0,
+          "businessSignatures": 0,
+          "broadcastsOfOriginalBytes": 0
+        },
+        "reconciliation": [
+          {
+            "at": "2026-10-09T15:59:02.109Z",
+            "chainStatus": "UNKNOWN",
+            "businessStatus": "NOT_EXECUTED",
+            "note": "the signer nonce was consumed by transaction 0x3a4c1cb2c30060191702396d8d85279661d9533d81ae6071802171f6e4b2a482, which does not pay this order; this hash can never be mined; the order reads as unpaid; nothing is re-signed"
+          }
+        ],
+        "counters": {
+          "ordersCreated": 1,
+          "checkFeeAuthorizations": 1,
+          "businessSignatures": 1,
+          "broadcastsOfOriginalBytes": 0,
+          "replacementSignatures": 0
+        }
+      }
+    },
+    {
+      "phase": "B3",
+      "condition": "release 4345ed6: 60 s receipt hold after first sight, no send delay",
+      "runId": "d91e40b3-97b0-4767-bc34-a06eb182de5b",
+      "fixture": "APPROVED_PAYMENT",
+      "createdAt": "2026-10-09T15:57:09.572Z",
+      "updatedAt": "2026-10-09T15:58:36.645Z",
+      "state": "DONE",
+      "outcome": {
+        "kind": "PAID",
+        "text": "confirmed: the order reads as paid by this payer for the exact amount",
+        "source": "store"
+      },
+      "businessExecution": {
+        "attemptId": "fa8500ed-fb18-4451-94f5-bf3f7b0c4ad0",
+        "state": "CONFIRMED",
+        "txHash": "0x3a4c1cb2c30060191702396d8d85279661d9533d81ae6071802171f6e4b2a482",
+        "nonce": 49,
+        "broadcastBlock": "66331197",
+        "businessStatus": "SUCCESS",
+        "businessTxHash": "0x3a4c1cb2c30060191702396d8d85279661d9533d81ae6071802171f6e4b2a482",
+        "block": "66331203",
+        "consumedBy": null,
+        "note": null,
+        "validUntil": "2026-10-09T15:57:35.618Z",
+        "updatedAt": "2026-10-09T15:58:36.630Z"
+      },
+      "recovery": {
+        "interrupted": false,
+        "addedByRecovery": {
+          "ordersCreated": 0,
+          "checkFeeAuthorizations": 0,
+          "businessSignatures": 0,
+          "broadcastsOfOriginalBytes": 0
+        },
+        "reconciliation": [],
+        "counters": {
+          "ordersCreated": 1,
+          "checkFeeAuthorizations": 1,
+          "businessSignatures": 1,
+          "broadcastsOfOriginalBytes": 1,
+          "replacementSignatures": 0
+        }
+      }
+    }
+  ]
+}

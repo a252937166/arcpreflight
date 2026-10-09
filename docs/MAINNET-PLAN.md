@@ -9,11 +9,11 @@ evidence is recorded; opening it and pushing to GitHub are separate approvals.
 
 | | |
 |---|---|
-| Release (code) | **`78c8dc2`** — the last commit that changed what runs on the server (`apps`, `packages`, workspace files). Docs-only commits keep the label; `ops/deploy.sh` refuses uncommitted code or fixtures. |
-| Running now | the public **testnet** preview at `https://arcpreflight.axiqo.xyz` runs `78c8dc2` after its redeploy (2026-10-09); `3749ae2` before it. |
-| Found in the testnet rehearsal | the public Arc testnet RPC once answered `eth_sendRawTransaction` with "method does not exist / is not available" (a load-balanced node that does not take transactions); the runner sent once, so the transaction never reached the network and the run waited for its nonce. `78c8dc2` re-sends the identical signed bytes up to 3 times, each only after a fresh clock read inside the validation window; no different transaction is ever signed. |
-| Tests on `78c8dc2` | `pnpm -r test` exit 0: web 184, API 153, runner 49, client 20, verifier 43, passport 24, schema 11, policy 16, observer 2; typecheck incl. scripts; public build without the test wallet. |
-| Read-only preflight | `ops/mainnet-cutover.sh preflight` on release `78c8dc2`, 2026-10-09 ≈12:33Z: release clean; fund, deploy and probe preflights **OK**, nothing signed (`evidence/preflight/deploy-mainnet-2026-10-09T12-33-13-558Z.json`; first run on `3749ae2` at 12:19Z identical). |
+| Release (code) | **`305882d`** — the last commit that changed what runs on the server (`apps`, `packages`, workspace files). Docs-only commits keep the label; `ops/deploy.sh` refuses uncommitted code or fixtures. |
+| Running now | the public **testnet** preview at `https://arcpreflight.axiqo.xyz` runs `305882d` (2026-10-09); before it `4345ed6`, `aac0454`, `78c8dc2` and `3749ae2`. Lifecycle on `305882d`: wallet attempt CONFIRMED, labelled interruption reconciled, verifier 10 PASS, measured project outflow 0.0664 of 0.12 USDC (`evidence/selftest/testnet-lifecycle-2026-10-09T16-00-57-215Z.json`). |
+| Found in the testnet rehearsals | the public Arc testnet RPC sometimes routes `eth_sendRawTransaction` to a node that answers "method does not exist / is not available" (seen for a runner payment, an order creation and a fee relay on 2026-10-09). From `78c8dc2` the runner, and from `aac0454` order creation, the fee relay and the faucet, sign locally, record the hash before the broadcast and re-send only the identical signed bytes; an order whose creation is not confirmed answers 202 with its identity and is reconciled, never replaced. A node that has a transaction but not yet its receipt made viem give up about a second after the send; from `4345ed6` every receipt is waited for until its deadline. From `305882d` the deploy, fund and relay-probe scripts also sign locally, write the hash into the spend ledger before the broadcast and re-send only identical bytes. |
+| Tests on `305882d` | `pnpm -r test` exit 0: web 202, API 168, runner 61, client 22, verifier 43, passport 24, schema 11, policy 16, observer 2; typecheck incl. scripts; public build without the test wallet. |
+| Read-only preflight | `ops/mainnet-cutover.sh preflight` on release `305882d`, 2026-10-09 ≈16:07Z: release clean; fund, deploy and probe preflights **OK**, nothing signed (`evidence/preflight/cutover-preflight-mainnet-2026-10-09T16-07Z.txt`, `evidence/preflight/deploy-mainnet-2026-10-09T16-07-13-429Z.json`); identical to the runs on `3749ae2`, `78c8dc2` and `aac0454`. |
 
 ## Accounts (Arc mainnet, read 2026-10-09)
 
@@ -32,11 +32,11 @@ signs is capped at a 40 gwei max fee; above it nothing is sent.
 
 | # | Step (`ops/mainnet-cutover.sh …`) | Who signs | What happens | Expected cost | Enforced cap |
 |---|---|---|---|---|---|
-| 0 | preconditions | — | real-wallet acceptance on testnet `78c8dc2` recorded (AP33-30, needs your session); this plan approved | — | — |
+| 0 | preconditions | — | real-wallet acceptance on testnet `305882d` recorded: S10 with two real MetaMask tabs and the wallet side of S12 (MetaMask on a delayed custom RPC) re-run after the 2026-10-09 session's PARTIAL; the server side of S12 passed on the public testnet (AP33-71). AP33-30, needs your session; this plan approved | — | — |
 | 1 | `deploy` | deployer-admin | implementation A, implementation B, MAIN proxy on A, CHANGED proxy on A, `setOrderCreator` ×2, upgrade CHANGED A→B. Predicted addresses (nonce 2–5): implA `0x00e393aCDCD8cfBef4Ab5D0F826bEBD87bf4Ae14`, implB `0x816Ca9Da6D3A316D9b4cFf414890b07cBC95B399`, MAIN `0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc`, CHANGED `0x3bc7340CfE664c3b09D4e64d1B7dE239F6748605` | gas 0.0536 | 0.05 per transaction, 0.15 total (worst case 0.0772) |
 | 2 | `fund` | deployer-admin | +0.10 USDC to order-creator, +0.05 to visitor-rehearsal (allow-listed project keys; balances read back) | 0.15 moved inside the project + gas 0.0008 | 0.20 per transfer, 0.20 total incl. value (worst 0.1512) |
 | 3 | `probe` | demo-runner, merchant-payto | ONE 0.01 USDC check fee (EIP-3009) relayed by merchant-payto, proven by its logs — before `server`, so no API relays with that key on mainnet yet | fee 0.01 inside the project + gas ≈ 0.0018 | 0.016 per transaction, 0.02 total; relay gas ≤ 0.005 |
-| 4 | commit | — | `fixtures/deployments-mainnet.json` and the deploy / fund / probe evidence (the release bundle ships `fixtures/`; the label stays `78c8dc2`) | — | — |
+| 4 | commit | — | `fixtures/deployments-mainnet.json` and the deploy / fund / probe evidence (the release bundle ships `fixtures/`; the label stays `305882d`) | — | — |
 | 5 | `server` | — (no chain spend) | root → Arc mainnet with `PUBLIC_EXECUTION=0` written explicitly, daily caps sized for acceptance (14 runs; business 0.25, fees 0.15, gas 0.15 USDC), no faucet; testnet moves to `/testnet` and keeps the current public database; order-creator key on, deployer-admin key off. Then verified: network, release, order signer, deployer key absent, gate probes 503 — **any failure stops the mainnet service** | — | — |
 | 6 | `baselines` | — (admin API) | approve MAIN (live A) and CHANGED (pinned to A) at a pinned mainnet block | — | — |
 | 7 | `gatecheck` | — | `publicExecution=false`; run / order / attempt probes from a visitor answer 503 | — | — |
@@ -44,18 +44,20 @@ signs is capped at a 40 gwei max fee; above it nothing is sent.
 | 9 | `lifecycle` | visitor-rehearsal (laptop); server keys | the wallet scenario (order, paid check, validated attempt, the wallet's own broadcast, passport) and the labelled interruption (recovery adds 0 orders, 0 signatures) through the closed gate | business 0.055 into the MAIN proxy, fees 0.02 inside, gas ≈ 0.012 | visitor key 0.03 per transaction, 0.05 total; project outflow 0.12 measured |
 | 10 | record | — | evidence rows in `docs/EVIDENCE.md`, `docs/ACCEPTANCE.md` mainnet columns | — | — |
 | 11 | `open` — **separate approval** | — | `PUBLIC_EXECUTION=1`, `MAINNET_VERIFIED=1`; refused unless PASS acceptance and lifecycle evidence for the running release is recorded | — | — |
-| 12 | push — **separate approval** | — | `git push` (force-push of the rewritten history included) | — | — |
+| 12 | push — **separate approval, a FORCE-PUSH** | — | GitHub `main` is `2dc55aa` (read again 2026-10-09), which is not in the local history (rewritten on 2026-10-07 to the project identity). Publishing therefore **replaces the remote history**: `git push --force-with-lease=main:2dc55aa origin main`. It needs its own explicit approval naming the force-push | — | — |
 
 ## Money
 
-| | USDC |
-|---|---|
-| Gas burned (leaves the project) | ≈ 0.105 expected |
-| Business payments into the project's own DemoMerchant MAIN proxy (owner-withdrawable by deployer-admin) | 0.205 |
-| Moved between project keys only (funding, check fees) | 0.27 |
-| **Expected outflow from the project's keys** | **≈ 0.31** (0.105 gas + 0.205 into the merchant contract) |
-| Sum of the enforced step caps | 0.84 (deploy 0.15 + fund 0.20 + probe 0.02 + acceptance 0.35 + lifecycle 0.12) |
-| **Maximum total spend** | **0.69** — the caps minus the 0.15 the fund step only moves between project keys |
+Five different numbers, kept apart:
+
+| Category | USDC | What it is |
+|---|---|---|
+| **Expected gas** | **≈ 0.105** | burned, leaves the project: deploy 0.054, fund 0.001, probe 0.002, acceptance 0.036, lifecycle 0.012 |
+| **Payments into our own merchant contract** | **0.205** | the business payments of the approved runs (acceptance 3 × 0.05, lifecycle 0.05 + 0.005) land in the project's DemoMerchant MAIN proxy; owner-withdrawable by deployer-admin |
+| **Internal transfers** | **0.27** | stay between project keys: the funding (0.15 from deployer-admin to order-creator and visitor-rehearsal) and the check fees (0.12 from demo-runner and visitor-rehearsal to merchant-payto) |
+| Expected outflow from the project's keys | ≈ 0.31 | expected gas + payments into the merchant contract |
+| **Budget cap: 0.69** | **0.69** | the most that can leave the project's keys under the enforced caps: the sum of the step caps minus the funding step's 0.15 internal transfer |
+| **Sum of step caps: 0.84** | **0.84** | deploy 0.15 + fund 0.20 + probe 0.02 + acceptance 0.35 + lifecycle 0.12, each enforced by its script (the fund cap includes the 0.15 it only moves internally; the acceptance and lifecycle caps conservatively include the internal check fees too) |
 
 Balances after the plan (expected): deployer-admin ≈ 4.29, demo-runner ≈ 4.69, merchant-payto ≈ 0.60, order-creator ≈ 0.08,
 visitor-rehearsal ≈ 0.03. Every step's worst case fits the signing key's balance; the preflights check it again before signing.
@@ -72,10 +74,10 @@ Any of these stops the plan; nothing further is sent, the evidence (including `-
 5. The gate is not closed before acceptance or the lifecycle (`publicExecution` true or any probe other than 503).
 6. A run with an unexpected decision or outcome, an unverified fee or business transaction, a passport with a FAIL finding, or measured outflow that would pass a cap.
 7. A business transaction left `BROADCAST_ATTEMPTED` for more than 10 minutes: reconcile first, no new run.
-8. The RPC reports a chain other than 5042, or the running release is not `78c8dc2` (or an approved successor).
+8. The RPC reports a chain other than 5042, or the running release is not `305882d` (or an approved successor).
 
 ## Approvals needed
 
-1. This plan and budget (maximum 0.69 USDC out of the project's keys, expected ≈ 0.31).
+1. This plan and budget: a **0.69 USDC budget cap** out of the project's keys (the **0.84 USDC sum of step caps** minus the 0.15 internal funding); expected ≈ 0.31 (gas ≈ 0.105 + 0.205 into our own merchant contract), plus 0.27 moved between our own keys.
 2. Then one typed go per step, in order: `deploy`, `fund`, `probe`, `server`, `baselines`, `acceptance`, `lifecycle`.
-3. Separately, later: `open` (public mainnet execution) and the GitHub push.
+3. Separately, later: `open` (public mainnet execution), and the GitHub push — which is a force-push that replaces the remote `main` (`2dc55aa`) with the rewritten local history and needs its own approval naming it.

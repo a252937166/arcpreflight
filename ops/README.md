@@ -99,6 +99,15 @@ The plan, budget and stop conditions are in `docs/MAINNET-PLAN.md`. `preflight` 
 - **Real-wallet evidence:** `ops/wallet-evidence.sh <address> [since]` copies a read-only query to the server and saves what the API
   recorded for that wallet to `evidence/selftest/wallet-acceptance-<ts>.json`.
 
+## Delayed chain RPC (acceptance row S12, testnet only)
+
+- `ops/rpc-delay-proxy.mjs`: a JSON-RPC proxy that delays chosen methods (`DELAY_<METHOD>_MS`) and answers receipts `null` for a while
+  after a transaction is first seen (`HOLD_RECEIPT_MS`; `HOLD_SELECTOR=0x8609cad1 HOLD_SELECTOR_MS=…` holds only the DemoMerchant pay
+  call). Every answer that is not held is the upstream's. It refuses Arc mainnet. Run it locally and point a wallet extension's custom
+  RPC URL at it to delay the wallet's chain RPC.
+- `ops/rpc-delay-session.sh on|off|status`: routes the public testnet instance's own RPC through the proxy on the server
+  (`ARC_RPC_URL=http://127.0.0.1:8549`, `PUBLIC_RPC_URL` keeps clients on the public RPC) and restores it afterwards.
+
 ## Keys on the server (release target)
 
 The current testnet preview keeps all three project keys in `/opt/arcpreflight/keys/`. The release target is for the

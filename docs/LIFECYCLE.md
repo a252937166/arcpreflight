@@ -307,3 +307,26 @@ runner reads the clock once more after the broadcast marker — the last await b
 after the decryption, never by a time captured before them. *(P2)* The verifier requires the recorded approval status expiry to equal the
 referenced baseline's (the producer copies it from that baseline) and to hold at final validation; a disagreement is contradictory evidence
 and fails `APPROVAL_COVERAGE` for an executed run.
+
+**As built after the 2026-10-09 real-wallet session (release `aac0454`).** *Order creation* signs the `createOrder` transaction locally
+(pending nonce, explicit gas limit, fees) and records its hash, nonce, signer and signed bytes on the order row before any broadcast; it
+then hands the identical bytes to the node up to three times. `POST /v1/demo/orders` answers `201` when the receipt confirmed the
+creation, and `202 ORDER_CREATION_PENDING { orderId, state, tx, pending, nextAction }` once an identity exists but the creation is not
+confirmed (the node refused the send, or no receipt within 30 s); errors before an identity exists keep their codes and say no order was
+created. `POST /v1/demo/orders/{id}/recover` (owner; one call per order every 3 s) reconciles that order now; the worker re-sends the
+identical bytes while the 10-minute window is open; a nonce consumed by an identified other transaction closes FAILED (or CONFIRMED when
+the order exists); nothing is ever re-signed. An unconfirmed order's `paid` is `null` and its next action keeps approval closed. The fee
+relay and the testnet faucet re-send identical signed bytes too; the faucet answers `202` "sent, not yet confirmed" for an unacknowledged
+send. `/v1/network.rpc` is `PUBLIC_RPC_URL` (default the network's public RPC), so the server's own `ARC_RPC_URL` may point elsewhere.
+*Web:* step 1 is done only for a CONFIRMED order; approve, quote, buy and execute stay closed until then; payment summaries read
+"unknown" unless the order is confirmed and its paid state was read; the dialog refuses a new order while this wallet's latest is
+unconfirmed. *Wallet discovery:* one EIP-6963 listener for the page's life, re-requests on Connect, on opening the picker and on
+"Search again"; the legacy `window.ethereum` entry only when no EIP-6963 wallet announced, named from its own flags (OKX first) and
+remembered as `legacy:<kind>`; silent reconnect only to the exact remembered wallet, otherwise a "not detected in this tab" notice.
+
+**Receipts and the operator scripts (releases `4345ed6`, `305882d`).** A node can serve a just-sent transaction but not yet its receipt;
+viem's receipt wait then failed about a second after the send, and the runner recorded an unknown outcome early (seen under a delayed
+chain RPC on the testnet). Every receipt wait (runner business and order receipts, the faucet, the deploy / fund / probe scripts) now
+retries "receipt not found" until its own deadline; a real timeout and every other error still end it. The deploy, fund and relay-probe
+scripts sign locally, write the hash into the step's spend ledger before the broadcast, and re-send only the identical signed bytes; if no
+node accepts them, nothing else is sent and the step stops.

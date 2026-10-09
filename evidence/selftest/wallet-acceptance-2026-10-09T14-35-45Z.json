@@ -1,0 +1,141 @@
+{
+  "instance": "root",
+  "network": "testnet",
+  "release": "78c8dc2",
+  "payer": "0xa944fe45f10c61f94f8d6a17274673dd1fb51a7c",
+  "since": "2026-10-09T13:50:00Z",
+  "readAt": "2026-10-09T14:36:06.663Z",
+  "orders": [
+    {
+      "order_id": "0x1442b29215cdb81644f195aac63d19e9629c94237d890952e0f5020ca8f94c94",
+      "source": "developer",
+      "proxy": "MAIN",
+      "merchant": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+      "amount_atomic": "1000000000000000",
+      "reference": "real-wallet-20261009-empty-and-reject",
+      "state": "UNKNOWN_CREATION",
+      "tx_hash": null,
+      "block": null,
+      "note": "no creation hash was recorded and the order is not on chain after the window",
+      "created_at": "2026-10-09T13:57:48.728Z",
+      "updated_at": "2026-10-09T14:07:56.510Z"
+    },
+    {
+      "order_id": "0x6b8e6f871c60d1f025caa2028551a22b6d5aca5912e5a35adcfaba9e16f80cd0",
+      "source": "developer",
+      "proxy": "MAIN",
+      "merchant": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+      "amount_atomic": "1000000000000000",
+      "reference": "real-wallet-20261009-valid-flow",
+      "state": "CONFIRMED",
+      "tx_hash": "0x4edf8df93f5886111f34793f6431d38f5a6a2c97092a5facc8ef393cdd1f104e",
+      "block": "66317728",
+      "note": null,
+      "created_at": "2026-10-09T14:03:56.792Z",
+      "updated_at": "2026-10-09T14:16:01.093Z"
+    }
+  ],
+  "payments": [
+    {
+      "request_id": "163aabb6-3862-4e63-babd-b400a5bf6517",
+      "backend": "relay",
+      "state": "COMPLETED",
+      "tx_hash": "0x25826c4e0ab5fd050105d1caee4b35938c1788d636fe5f3466237cafe3bc16ac",
+      "created_at": "2026-10-09T14:04:51.222Z",
+      "updated_at": "2026-10-09T14:04:53.062Z"
+    },
+    {
+      "request_id": "ed851ec2-d3c8-4eb6-a102-407419a540c7",
+      "backend": "relay",
+      "state": "COMPLETED",
+      "tx_hash": "0x1d23e34d431f4bc3537554170c9d804070d957ec310b1d6f0ec328a67837967c",
+      "created_at": "2026-10-09T14:12:47.264Z",
+      "updated_at": "2026-10-09T14:12:49.428Z"
+    }
+  ],
+  "attempts": [
+    {
+      "attempt_id": "4e206d4c-0c83-4193-beb9-9e9839bf7079",
+      "order_id": "0x6b8e6f871c60d1f025caa2028551a22b6d5aca5912e5a35adcfaba9e16f80cd0",
+      "request_id": "163aabb6-3862-4e63-babd-b400a5bf6517",
+      "state": "NOT_SENT",
+      "business_status": "NOT_EXECUTED",
+      "business_tx_hash": null,
+      "decision": "NO_POLICY_VIOLATION",
+      "valid_until": "2026-10-09T14:06:16.854Z",
+      "tx_hash": null,
+      "nonce": null,
+      "broadcast_block": null,
+      "deviations_json": null,
+      "note": "the wallet prompt was rejected or abandoned by the visitor; nothing was sent; the order stays unpaid",
+      "created_at": "2026-10-09T14:05:17.573Z",
+      "updated_at": "2026-10-09T14:05:48.298Z",
+      "prompt": {
+        "state": "PROMPTED",
+        "at": "2026-10-09T14:05:18.121Z",
+        "detail": null
+      }
+    },
+    {
+      "attempt_id": "ca6ea8b1-187d-47a1-96a6-2f579695afc4",
+      "order_id": "0x6b8e6f871c60d1f025caa2028551a22b6d5aca5912e5a35adcfaba9e16f80cd0",
+      "request_id": "163aabb6-3862-4e63-babd-b400a5bf6517",
+      "state": "NOT_SENT",
+      "business_status": "NOT_EXECUTED",
+      "business_tx_hash": null,
+      "decision": "NO_POLICY_VIOLATION",
+      "valid_until": "2026-10-09T14:06:58.188Z",
+      "tx_hash": null,
+      "nonce": null,
+      "broadcast_block": null,
+      "deviations_json": null,
+      "note": "the wallet prompt was rejected or abandoned by the visitor; nothing was sent; the order stays unpaid",
+      "created_at": "2026-10-09T14:05:58.893Z",
+      "updated_at": "2026-10-09T14:09:18.106Z",
+      "prompt": {
+        "state": "PROMPTED",
+        "at": "2026-10-09T14:05:59.430Z",
+        "detail": null
+      }
+    },
+    {
+      "attempt_id": "9eef4f53-f0ae-4b93-9282-3e16539b3f2a",
+      "order_id": "0x6b8e6f871c60d1f025caa2028551a22b6d5aca5912e5a35adcfaba9e16f80cd0",
+      "request_id": "ed851ec2-d3c8-4eb6-a102-407419a540c7",
+      "state": "NOT_SENT",
+      "business_status": "NOT_EXECUTED",
+      "business_tx_hash": null,
+      "decision": "NO_POLICY_VIOLATION",
+      "valid_until": "2026-10-09T14:14:49.351Z",
+      "tx_hash": null,
+      "nonce": null,
+      "broadcast_block": null,
+      "deviations_json": null,
+      "note": "the wallet prompt was rejected or abandoned by the visitor; nothing was sent; the order stays unpaid",
+      "created_at": "2026-10-09T14:13:50.043Z",
+      "updated_at": "2026-10-09T14:14:48.017Z"
+    },
+    {
+      "attempt_id": "133b2761-2c4a-4969-915e-2287edcedb50",
+      "order_id": "0x6b8e6f871c60d1f025caa2028551a22b6d5aca5912e5a35adcfaba9e16f80cd0",
+      "request_id": "ed851ec2-d3c8-4eb6-a102-407419a540c7",
+      "state": "CONFIRMED",
+      "business_status": "SUCCESS",
+      "business_tx_hash": "0xa981741be2f544491e5e91abeb6cb8fc78dc6a589fd8bd92277e11461fbc119d",
+      "decision": "NO_POLICY_VIOLATION",
+      "valid_until": "2026-10-09T14:16:17.734Z",
+      "tx_hash": "0xa981741be2f544491e5e91abeb6cb8fc78dc6a589fd8bd92277e11461fbc119d",
+      "nonce": 0,
+      "broadcast_block": null,
+      "deviations_json": "{\"mismatch\":[],\"deviations\":{}}",
+      "note": "no hash was reported by the browser; the order was paid by transaction 0xa981741be2f544491e5e91abeb6cb8fc78dc6a589fd8bd92277e11461fbc119d, recovered through the merchant's OrderPaid event; its fields agree with the validated plan; nothing was re-signed or re-sent by this service",
+      "created_at": "2026-10-09T14:15:18.531Z",
+      "updated_at": "2026-10-09T14:16:15.635Z",
+      "prompt": {
+        "state": "PROMPTED",
+        "at": "2026-10-09T14:15:19.067Z",
+        "detail": null
+      }
+    }
+  ]
+}
