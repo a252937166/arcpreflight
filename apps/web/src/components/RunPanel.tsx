@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useNet } from "../App";
 import { Chip, DecisionBadge, Hex, Labels, Spinner } from "./Badges";
@@ -123,6 +123,7 @@ export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = n
   const [dl, setDl] = useState<{ runId: string | null; busy: boolean; err: string | null; bundle: PassportBundle | null; name: string | null }>({ runId: null, busy: false, err: null, bundle: null, name: null });
   const [verified, setVerified] = useState<{ runId: string; kind: "passed" | "failed" | "partial" } | null>(null);
   const current = useRef(run.runId); current.current = run.runId;
+  const alive = useRef(true); useEffect(() => () => { alive.current = false; }, []); // a keyed remount unmounts the old panel: its late results are dropped
   const mine = dl.runId === run.runId;
   const bundle = mine ? dl.bundle : null, bundleName = mine ? dl.name : null, dlBusy = mine && dl.busy, dlErr = mine ? dl.err : null;
   const verifiedKind = verified?.runId === run.runId ? verified.kind : null;
@@ -131,9 +132,10 @@ export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = n
     setDl((d) => (d.runId === id ? { ...d, busy: true, err: null } : { runId: id, busy: true, err: null, bundle: null, name: null }));
     try {
       const { __status: _s, ...b } = (await api.passport(id)) as any;
+      if (!alive.current) return; // unmounted meanwhile (another run took the panel): dropped
       if (current.current !== id) { setDl((d) => (d.runId === id ? { ...d, busy: false } : d)); return; } // another run is shown now: this is not its passport — dropped, not stored
       const name = `arcpreflight-passport-${id.slice(0, 8)}.json`; saveJson(name, b); setDl({ runId: id, busy: false, err: null, bundle: b, name }); setVerified(null); onLocal?.(id, { exported: true, verified: null });
-    } catch (e: any) { if (current.current !== id) { setDl((d) => (d.runId === id ? { ...d, busy: false } : d)); return; } setDl({ runId: id, busy: false, err: errText(e), bundle: null, name: null }); }
+    } catch (e: any) { if (!alive.current) return; if (current.current !== id) { setDl((d) => (d.runId === id ? { ...d, busy: false } : d)); return; } setDl({ runId: id, busy: false, err: errText(e), bundle: null, name: null }); }
   };
   const ex = r?.execution; const cost = r?.costStatement ?? null; const rec = run.recovery ?? null; const be = run.businessExecution ?? null;
   const ord = orderResultOf(r);
@@ -230,7 +232,7 @@ export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = n
         <CostTable statement={cost} net={net} title="Cost disclosure" context={{ executionMode: run.executionMode ?? "runner", subjectKind: run.executionMode === "wallet" ? "wallet-run" : "demo-run" }} />
         <div className="stack" style={{ gap: 6 }} id="sec-verify">
           <h3>Verify independently</h3>
-          {bundle ? <VerifyInBrowser bundle={bundle} name={bundleName} net={net} anchors={anchors} anchorsSource="site" onVerified={(_r, s) => { const id = run.runId; if (current.current !== id) return; setVerified({ runId: id, kind: s.kind }); onLocal?.(id, { exported: true, verified: s.kind }); }} compact />
+          {bundle ? <VerifyInBrowser bundle={bundle} name={bundleName} net={net} anchors={anchors} anchorsSource="site" onVerified={(_r, s) => { const id = run.runId; if (!alive.current || current.current !== id) return; setVerified({ runId: id, kind: s.kind }); onLocal?.(id, { exported: true, verified: s.kind }); }} compact />
             : <p className="small dim">download the passport first; the verifier then runs here against {net?.rpc ?? "the Arc RPC"}, with this site's digests as anchors (not independent)</p>}
         </div>
       </div>

@@ -99,6 +99,7 @@ export function WalletChip({ net }: { net: NetworkInfo | null }) {
             <a className="wp-action" role="menuitem" href={explorerAddr(net, w.account)} target="_blank" rel="noreferrer">View on explorer ↗</a>
             {faucetOn && <button type="button" className="wp-action" role="menuitem" disabled={faucet.progress.phase === "sending" || faucet.progress.phase === "sent"} onClick={() => faucet.claim()} title="0.2 testnet USDC from the project's testnet funds · one claim per wallet and per browser every 24 h">Claim testnet USDC</button>}
           </div>
+          {faucetOn && net?.faucet?.enabled && <p className="wp-hint" data-testid="wp-faucet-hint">{usdcNative(net.faucet.amountNativeAtomic, 1)} per claim · once per wallet and per browser every 24 h · {Math.max(0, net.faucet.perDay - net.faucet.usedToday)} of {net.faucet.perDay} left today · more from <a href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Circle's faucet ↗</a> · this funds your wallet, not the project runner</p>}
           {faucetStatus(faucet.progress, net)}
           <div className="wp-divider" role="separator" />
           <button type="button" className="wallet-item wp-disconnect" role="menuitem" onClick={() => { setOpen(false); void w.disconnect(); }}>Disconnect</button>

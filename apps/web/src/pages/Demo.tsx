@@ -23,6 +23,9 @@ import { WhoPays } from "../components/WhoPays";
 import { GuidePanel, type Origin } from "../components/GuidePanel";
 import { guideFor, type CheckpointId } from "../lib/guide";
 import { usdcNative } from "../lib/format";
+import { fundsSummary, fundsWarning } from "../lib/funds";
+import { useRunLocal } from "../lib/runLocal";
+import { exactUsdc } from "../lib/costTable";
 import { STAGES } from "../components/Pipeline";
 import { HandRule } from "../components/Illustrations";
 
@@ -52,7 +55,7 @@ export default function Demo() {
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [reason, setReason] = useState<string | null>(null);
   const [visited, setVisited] = useState<CheckpointId[]>([]);
-  const [local, setLocal] = useState<{ runId: string; exported?: boolean; verified?: "passed" | "failed" | "partial" | null } | null>(null);
+  const { local, onLocal, reset: resetLocal } = useRunLocal(run?.runId ?? null); // guarded: a late callback for another run never overwrites this run's state
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -98,7 +101,7 @@ export default function Demo() {
     };
     void tick();
   }, [loadRuns, refresh]);
-  const fresh = () => { setOrigin(null); setReason(null); setVisited([]); setLocal(null); };
+  const fresh = () => { setOrigin(null); setReason(null); setVisited([]); resetLocal(); };
   const start = async (opts: DemoOptions = {}) => {
     setBusy(true); setNotice(null); setSample(false); setRun(null); walletRun.reset(); fresh();
     try {
@@ -124,7 +127,7 @@ export default function Demo() {
     refreshBal(); loadRuns();
   };
   const open = async (id: string) => { setSample(false); setNotice(null); walletRun.reset(); fresh(); setOrigin("history"); try { const r = await api.run(id); setRun(r); if (r.state === "RUNNING" || r.state === "RECONCILE_REQUIRED") { setBusy(r.state === "RUNNING"); poll(id); } } catch { /* ignore */ } };
-  const guide = useMemo(() => guideFor(run, net, { ...(local && run && local.runId === run.runId ? local : {}), visited }), [run, net, local, visited]);
+  const guide = useMemo(() => guideFor(run, net, { ...(local ?? {}), visited }), [run, net, local, visited]);
   const onGo = useCallback((id: CheckpointId | null) => { if (id) setVisited((v) => (v.includes(id) ? v : [...v, id])); }, []);
   // the element the guide points at gets the highlight (review of 2026-10-09, item 2)
   useEffect(() => {
@@ -148,6 +151,9 @@ export default function Demo() {
   const pick = (id: Fixture) => { setFixture(id); setParams((p) => { p.set("fixture", id); return p; }); };
   const canRun = !busy && !walletBusy && !!net && !!f?.merchant && !gated;
   const runner = net?.accounts.demoRunner ?? null;
+  const fundsNotice = fundsWarning(fundsSummary(net), netLabel); // the worker's reading (operator decision 2026-10-09): a low key is said before a visitor presses Run
+  const runnerKey = net?.funds?.keys?.find((k) => k.role === "demo-runner") ?? null;
+  const runnerBalance = runnerKey?.balanceNativeAtomic ? `${usdcNative(runnerKey.balanceNativeAtomic, 4)} (project funds)` : null;
   return (
     <section className="section demo">
       <div className="container stack" style={{ gap: 28 }}>
@@ -159,21 +165,23 @@ export default function Demo() {
         )}
         <div className="cols" style={{ alignItems: "end" }}>
           <div><div className="kicker">Live demo · {netLabel}</div><h2 style={{ marginTop: 8 }}>Pick a situation. <em>Watch the payment handled, on-chain.</em></h2></div>
-          {net && <p className="ticker" style={{ justifyContent: "flex-end" }}><span>live runs today <b>{net.budget.usedToday}/{net.budget.maxRunsPerDay}</b></span><span>cooldown <b>{net.budget.clientCooldownSeconds}s</b></span><span>business payment <b>{orderText} USDC</b></span>{(net.budget.unresolvedBusinessTransactions ?? 0) > 0 && <span><b>{net.budget.unresolvedBusinessTransactions} unresolved business tx</b></span>}{net.budget.activeRun && <span><b>a run is in progress</b></span>}</p>}
+          {net && <p className="ticker" style={{ justifyContent: "flex-end" }}><span>live runs today <b>{net.budget.usedToday}/{net.budget.maxRunsPerDay}</b></span><span>cooldown <b>{net.budget.clientCooldownSeconds}s</b></span><span>order amount per demo <b>{orderText} USDC</b></span>{(net.budget.unresolvedBusinessTransactions ?? 0) > 0 && <span><b>{net.budget.unresolvedBusinessTransactions} unresolved business tx</b></span>}{net.budget.activeRun && <span><b>a run is in progress</b></span>}</p>}
         </div>
 
         {/* two explicit entry points (docs/LIFECYCLE.md §9): who pays is decided here, never by a connected wallet */}
         <div className="entry-points" role="group" aria-label="two ways to use the demo" data-testid="entry-points">
           <section className="entry on" aria-labelledby="entry-watch">
             <div className="kicker" id="entry-watch">{WATCH_LABEL}</div>
-            <p className="small muted">The project's runner {runner ? <Hex value={runner} n={4} /> : <code>…</code>} pays everything from <b>project funds</b> (testnet USDC): the {feeText} USDC check fee, the {orderText} USDC order and the gas. Your wallet is not involved.</p>
+            <p className="small muted">The project's runner {runner ? <Hex value={runner} n={4} /> : <code>…</code>} pays everything from <b>project funds</b> ({mainnet ? "USDC" : "testnet USDC"}): the {feeText} USDC check fee, the {orderText} USDC order and its own gas. Your wallet is not involved.</p>
             <WhoPays mode="project" fee={feeText} order={orderText} />
+            <p className="tiny dim" data-testid="runner-funding">Project runner balance: <b>{runnerBalance ?? (net?.funds ? "not read yet" : "not reported by this API")}</b> · per run: check fee {feeText} USDC + order {orderText} USDC + gas ≈ 0.001 USDC · topped up by the operator; funding your own wallet does not add to it.</p>
             <div className="row"><a href="#situations" className="btn primary sm">{WATCH_LABEL} ↓</a><span className="tiny dim">no wallet needed{net && perRun ? ` · today ${net.budget.usedToday}/${net.budget.maxRunsPerDay} runs · ≈ ${perRun} each` : ""}</span></div>
           </section>
           <section className="entry" aria-labelledby="entry-try" data-testid="entry-try">
             <div className="kicker" id="entry-try">{TRY_LABEL}</div>
-            <p className="small muted">The <Link to={link("/developer")}>Developer workflow</Link> runs the same seven steps with <b>your</b> wallet on {netLabel}: you pay the check fee, the order and your gas{mainnet ? "" : " (faucet available)"}.</p>
+            <p className="small muted">The <Link to={link("/developer")}>Developer workflow</Link> runs the same seven steps with <b>your</b> wallet on {netLabel}. Your wallet pays: the {feeText} USDC check fee + the order amount you choose + your gas.</p>
             <WhoPays mode="wallet" fee={feeText} order={orderText} />
+            <p className="tiny dim" data-testid="faucet-help">Your wallet balance: <b>{w.account && onArc ? (bal === null ? "…" : `${exactUsdc(bal)} USDC`) : "connect a wallet to see it"}</b>.{mainnet ? " No faucet on Arc mainnet." : <> Need testnet USDC? {net?.faucet?.enabled ? <>Claim {usdcNative(net.faucet.amountNativeAtomic, 1)} from the site faucet — once per wallet and per browser every 24 h, {Math.max(0, net.faucet.perDay - net.faucet.usedToday)} of {net.faucet.perDay} claims left today — or get more from</> : "The site faucet is off on this instance; Arc testnet USDC comes from"} <a href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Circle's faucet ↗</a>.</>} Funding your wallet does not replenish the project runner.</p>
             <div className="row" style={{ gap: 10 }}><Link to={link("/developer")} className="btn sm">{TRY_LABEL} →</Link></div>
             {w.account ? (onArc
               ? <div className="stack" style={{ gap: 6 }}>
@@ -192,6 +200,7 @@ export default function Demo() {
             {instances.some((i) => i.network === "testnet") && net.network !== "testnet" && <> <button className="btn sm" onClick={() => select("testnet")}>switch to Arc testnet</button> to run zero-cost demos.</>}
           </div>
         )}
+        {fundsNotice && <div className="banner" role="status" data-testid="funds-warning">{fundsNotice}</div>}
         {net && net.fixtures.some((x) => x.merchant) && gated && (
           <div className="banner info" role="status">Execution is gated on this instance — it opens after the mainnet acceptance is recorded. Recorded runs, checks, orders and passports stay available.
             {instances.some((i) => i.network === "testnet") && net.network !== "testnet" && <> <button className="btn sm" onClick={() => select("testnet")}>use the testnet instance</button></>}
@@ -237,7 +246,7 @@ export default function Demo() {
         {!walletShowing && <GuidePanel guide={guide} origin={run ? origin : null} reason={reason} network={netLabel} onGo={onGo} link={link} underStrip={running} />}
         {notice && <div className={`banner ${notice.tone === "info" ? "info" : notice.tone === "bad" ? "bad" : ""}`}>{notice.text}{notice.raw?.code && <details className="error-raw"><summary>raw response ({notice.raw.code})</summary><pre className="json">{JSON.stringify(notice.raw.raw, null, 2)}</pre></details>}</div>}
         <div ref={panelRef} className="scroll-target stack" style={{ gap: 28 }}>
-          {run && <><HandRule /><RunPanel key={run.runId} run={run} net={net} sample={sample} onUpdate={setRun} origin={origin} reason={reason} onLocal={(id, l) => setLocal({ runId: id, ...l })} /></>}
+          {run && <><HandRule /><RunPanel key={run.runId} run={run} net={net} sample={sample} onUpdate={setRun} origin={origin} reason={reason} onLocal={onLocal} /></>}
           {!run && walletShowing && <><HandRule /><WalletRunPanel run={walletRun.run} net={net} account={w.account} fixture={f ?? null} /></>}
         </div>
 

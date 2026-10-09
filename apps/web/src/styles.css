@@ -565,3 +565,5 @@ table.t.findings tr.fail td { background: rgba(251,113,133,0.06); }
   .nav .wallet-menu.panel { left: 16px; right: 16px; width: auto; min-width: 0; max-width: none; top: calc(100% + 6px); }
   .wp-head { flex-wrap: wrap; } .wp-name-text { white-space: normal; }
 }
+.wp-hint { font-size: 0.72rem; color: var(--ink-3); margin: 2px 0 0; line-height: 1.4; }
+.wp-hint a { color: var(--sky); }

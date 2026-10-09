@@ -6,6 +6,7 @@ import { Chip, Hex, Labels } from "../components/Badges";
 import { HandRule, ReceiptChain } from "../components/Illustrations";
 import { RunsTable } from "../components/RunsTable";
 import { ago, utc, type Tone } from "../lib/format";
+import { fundsSummary, fundsWarning } from "../lib/funds";
 import type { Capability } from "../lib/api";
 
 const CAP_TONE: Record<Capability["status"], Tone> = { MAINNET_VERIFIED: "violet", IMPLEMENTED_TESTNET: "info", PROPOSED: "warn", DISABLED: "neutral" };
@@ -14,6 +15,7 @@ const PAGE = 50;
 
 export default function Evidence() {
   const { net, link = (to: string) => to } = useNet();
+  const funds = fundsSummary(net); const warning = fundsWarning(funds, net?.network === "mainnet" ? "Arc mainnet" : "Arc testnet");
   const [files, setFiles] = useState<{ path: string; bytes: number }[]>([]);
   const [reports, setReports] = useState<{ reportDigest: string; subject: string; mode: string; createdAt: string }[]>([]);
   const [history, setHistory] = useState<{ runs: RunSummary[]; total?: number; more: boolean }>({ runs: [], total: undefined, more: false });
@@ -65,6 +67,16 @@ export default function Evidence() {
                 <span className="k">demo-runner</span><span><Hex value={net?.accounts.demoRunner} n={8} link={net?.accounts.demoRunner ? explorerAddr(net, net.accounts.demoRunner) : undefined} /></span>
                 <span className="k">merchant payTo</span><span><Hex value={net?.accounts.merchantPayTo} n={8} link={net?.accounts.merchantPayTo ? explorerAddr(net, net.accounts.merchantPayTo) : undefined} /> <span className="tiny dim">receives fees, relays settlements</span></span>
               </div>
+              {funds.available ? (
+                <div className="stack" style={{ gap: 6 }} id="funds" data-testid="funds">
+                  <div className="row between"><h3 style={{ fontSize: "1.05rem" }}>Project funds (live)</h3><span className="tiny dim">read by the worker {ago(funds.checkedAt!)} · every {Math.round((net?.funds?.intervalMs ?? 0) / 60000)} min</span></div>
+                  {warning && <div className="banner" role="status">{warning}</div>}
+                  <div className="tablewrap fit"><table className="t"><thead><tr><th>key</th><th>balance</th><th>warn below</th><th>status</th></tr></thead><tbody>
+                    {funds.rows.map((r) => <tr key={r.role}><td className="small"><Hex value={r.address} n={5} link={explorerAddr(net, r.address)} /> <span className="tiny dim">{r.role}</span></td><td className="mono">{r.balance}{r.status !== "unread" ? " USDC" : ""}</td><td className="mono">{r.threshold} USDC</td><td><Chip tone={r.status === "ok" ? "ok" : r.status === "low" ? "bad" : "warn"} title={r.note}>{r.status}</Chip></td></tr>)}
+                  </tbody></table></div>
+                  <p className="tiny dim">{funds.note}</p>
+                </div>
+              ) : <p className="tiny dim">project funds: {net?.funds?.note ?? "not reported by this API"}</p>}
             </div>
           </div>
           <div className="stack" style={{ gap: 22 }}>

@@ -31,11 +31,15 @@ export type NetworkInfo = {
   passport?: { version: string; costStatementVersion: string };
   /** testnet faucet (P3): project testnet funds for a connected wallet with no USDC; `enabled: false` everywhere else, never on mainnet */
   faucet?: FaucetInfo;
+  /** the worker's latest reading of the project keys' balances (operator decision 2026-10-09): reads only, thresholds are the operator's */
+  funds?: FundsInfo;
   /** open self-service (P3): anyone who visits gets an anonymous session principal from `access.session` (POST); v3.3 adds wallet execution */
   access?: { selfService: boolean; session: string; publicExecution?: boolean; walletExecution?: boolean; note?: string };
   /** order limits (v3.3 §2): 18-decimal native units; the dialog mirrors these rules before the server sees the body */
   orders?: { minNativeAtomic: string; maxNativeAtomic: string; stepNativeAtomic: string; defaultNativeAtomic: string; maxReferenceLength: number };
 };
+export type FundsKey = { role: string; address: string; balanceNativeAtomic: string | null; warnBelowNativeAtomic: string; low: boolean; note: string };
+export type FundsInfo = { checkedAt: string | null; intervalMs: number; low: boolean; keys: FundsKey[]; note: string };
 export type FaucetInfo = { enabled: false; note?: string } | { enabled: true; amountNativeAtomic: string; perDay: number; usedToday: number; perAddressPer24h: number; sender: string | null; note?: string };
 export type FaucetClaim = { ok: true; txHash: string; amountNativeAtomic: string; address: string };
 /** One money line of the cost statement (docs/PASSPORT.md §4): atomic strings, exact decimal rendering, receipt facts. */

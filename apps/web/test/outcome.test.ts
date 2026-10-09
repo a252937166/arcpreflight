@@ -71,6 +71,16 @@ describe("lifecycle from a run", () => {
     expect(lifecycleFromRun({ ...run, steps: run.steps.slice(0, 8), businessExecution: null })[3].note).toBe("signed"); // signed, marker not yet written
     expect(ids(lifecycleFromRun({ ...run, state: "DONE", outcome: { kind: "BROADCAST_UNRESOLVED", text: "", source: "store" } }))[3]).toBe("execute:warn");
   });
+  it("the final validation's recorded result decides: REVIEW_REQUIRED never reads as passed, and notSigned wins over any in-progress reading (review 2026-10-09)", () => {
+    const st = (step: string, i: number, extra: Record<string, unknown> = {}) => ({ step, atMs: i, ...extra });
+    const common = [st("createOrder", 1), st("intent", 2), st("quote", 3), st("signServiceFee", 4), st("reportDelivered", 5), st("decision", 6, { decision: "NO_POLICY_VIOLATION" })];
+    const refusedRunning = lifecycleFromRun(base({ state: "RUNNING", steps: [...common, st("finalValidation", 7, { result: "REVIEW_REQUIRED", reasons: ["BALANCE: below the plan's maximum cost"] })] }));
+    expect(ids(refusedRunning)[3]).toBe("execute:active"); expect(refusedRunning[3].note).toBe("final validation: review required"); expect(refusedRunning[3].note).not.toMatch(/passed/);
+    const refused = lifecycleFromRun(base({ state: "DONE", outcome: { kind: "NOT_SIGNED", text: "", source: "state" }, steps: [...common, st("finalValidation", 7, { result: "REVIEW_REQUIRED" }), st("notSigned", 8)] }));
+    expect(ids(refused)[3]).toBe("execute:warn"); expect(refused[3].note).toBe("final validation: review required — nothing signed");
+    expect(lifecycleFromRun(base({ state: "RUNNING", steps: [...common, st("finalValidation", 7, { result: "PASS" })] }))[3].note).toBe("final validation passed");
+    expect(lifecycleFromRun(base({ state: "RUNNING", steps: [...common, st("finalValidation", 7)] }))[3].note).toBe("final validation: not passed"); // no result recorded is not a pass
+  });
   it("while the interrupted run waits for reconciliation: execute warns, recover is active", () => {
     const run = signedThenStopped("BROADCAST_UNRESOLVED", "BROADCAST_ATTEMPTED"); run.steps.push({ step: "broadcastAttempted", atMs: 7 }, { step: "broadcast", atMs: 8 }, { step: "interruptedAfterBroadcast", atMs: 9 });
     expect(ids(lifecycleFromRun(run))).toEqual(["order:done", "approve:done", "check:done", "execute:warn", "recover:active", "passport:todo", "verify:todo"]);

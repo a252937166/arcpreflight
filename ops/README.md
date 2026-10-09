@@ -25,6 +25,10 @@ Required env (testnet or mainnet): `ARC_NET`, `PORT`, `PROFILE`, `RELEASE_SHA`, 
 `PRINCIPAL_TOKENS` (`principal:token,…`; `demo-runner` must be present for live demo runs), `ADMIN_TOKEN`, `SUPPORTED_TARGETS`
 (the DemoMerchant proxies), `PUBLIC_BASE_URL`, optional `DEMO_MAX_RUNS_PER_DAY`, `DEMO_CLIENT_COOLDOWN_SECONDS`, `PIN_LAG`,
 `RECOVERY_INTERVAL_MS` (recovery worker, default 30000), `SESSIONS_PER_CLIENT_PER_DAY` (anonymous visitor sessions, default 10),
+`FUNDS_CHECK_INTERVAL_MS` (the low-balance watch, default 300000; reads only) and `FUNDS_WARN_DEMO_RUNNER_ATOMIC`,
+`FUNDS_WARN_ORDER_CREATOR_ATOMIC`, `FUNDS_WARN_MERCHANT_PAYTO_ATOMIC`, `FUNDS_WARN_DEPLOYER_ADMIN_ATOMIC` (warning thresholds in
+18-decimal native USDC; defaults 1, 2, 0.5 and 0.1 USDC — the log says `FUNDS LOW …` once when a key drops below, `/v1/network.funds`
+and the Evidence page show it; nothing is claimed or moved automatically),
 testnet instance only: `FAUCET_ENABLED` (default on; the faucet is refused on any chain other than 5042002), `FAUCET_AMOUNT_ATOMIC`,
 `FAUCET_PER_DAY`, `FAUCET_FLOOR_ATOMIC` — keep the order-creator key topped up on testnet (it sends the faucet claims);
 `MAINNET_VERIFIED=1` (set only after the mainnet acceptance evidence

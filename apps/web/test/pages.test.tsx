@@ -385,6 +385,20 @@ it("the run strip, the guide and the diagram keep execution active at step 4/7 w
   expect(guide.stages.map((s: any) => s.status)).toEqual(["done", "done", "done", "active", "skipped", "todo", "todo"]);
 });
 
+it("amounts, balances and funding are told apart on the Demo (review 2026-10-09): order amount per demo, who pays, the runner's balance from the funds watch, the visitor's balance, the faucet and Circle's faucet", async () => {
+  memStorage(); h.net.fixtures = [APPROVED_FIXTURE];
+  h.net.funds = { checkedAt: NOW.toISOString(), intervalMs: 300000, low: false, note: "reads only", keys: [{ role: "demo-runner", address: "0x00000000000000000000000000000000000000a1", balanceNativeAtomic: "16885600000000000000", warnBelowNativeAtomic: "1000000000000000000", low: false, note: "runs" }] };
+  vi.stubGlobal("fetch", vi.fn(async () => response({ runs: [], total: 0 })));
+  render(Demo); await flush(); const tree = render(Demo); const text = content(tree);
+  expect(text).toContain("order amount per demo"); expect(text).not.toContain("business payment");
+  const runner = content(byTestId(tree, "runner-funding"));
+  expect(runner).toContain("16.8856"); expect(runner).toContain("project funds"); expect(runner).toContain("funding your own wallet does not add to it"); expect(runner).toContain("gas ≈ 0.001 USDC");
+  expect(content(byTestId(tree, "entry-try"))).toContain("Your wallet pays");
+  const help = content(byTestId(tree, "faucet-help"));
+  expect(help).toContain("Your wallet balance"); expect(help).toContain("faucet.circle.com"); expect(help).toContain("does not replenish the project runner");
+  expect(nodes(byTestId(tree, "faucet-help")).some((n) => n.type === "a" && n.props.href === "https://faucet.circle.com/" && n.props.target === "_blank")).toBe(true);
+});
+
 it("Verify's offline preview reproduces digests, flags a tampered file and an unsafe path, and shows counts instead of a verdict", async () => {
   const intent = IntentCore.parse({ schemaVersion: "1.0", clientRequestId: "demo", chainId: 5042002, walletMode: "EOA_DIRECT_NON_DELEGATED", from: ACCOUNT, operation: "CALL", to: MERCHANT, data: "0x12345678", valueNativeAtomic: "50000000000000000", businessExpectation: { sourceId: "order", sourceDigest: D, action: "MERCHANT_PAY", recipient: MERCHANT, asset: "ARC_NATIVE_USDC", amountNativeAtomic: "50000000000000000", orderId: D }, baselineDigest: D, policyDigest: D, expiresAt: "2026-10-03T12:10:00Z" });
   const sha = (s: string) => "0x" + createHash("sha256").update(s, "utf8").digest("hex");

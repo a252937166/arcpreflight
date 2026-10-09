@@ -24,7 +24,8 @@ describe("phaseOf: the moment a run is in", () => {
     expect(phaseOf(base({ outcome: { kind: "BROADCAST_UNRESOLVED", text: "", source: "store" } }))).toBe("recovering");
     expect(phaseOf(base({ outcome: { kind: "BLOCKED", text: "", source: "decision" } }))).toBe("stopped");
     expect(phaseOf(base({ outcome: { kind: "REVIEW_REQUIRED", text: "", source: "decision" } }))).toBe("stopped");
-    for (const kind of ["NOT_MINED", "REVERTED", "CONFIRMED_UNPAID", "SIGNED_NOT_BROADCAST", "NOT_SIGNED", "FAILED"]) expect(phaseOf(base({ outcome: { kind, text: "", source: "store" } })), kind).toBe("failed");
+    for (const kind of ["NOT_MINED", "REVERTED", "CONFIRMED_UNPAID", "SIGNED_NOT_BROADCAST", "FAILED"]) expect(phaseOf(base({ outcome: { kind, text: "", source: "store" } })), kind).toBe("failed");
+    expect(phaseOf(base({ outcome: { kind: "NOT_SIGNED", text: "", source: "state" } }))).toBe("stopped"); // a refused final validation stops the payment like the check does
     // runs recorded before v3.3 (no outcome): decision and receipts decide
     expect(phaseOf(base({ steps: steps("decision"), result: { decision: { decision: "BLOCKED" } } as any }))).toBe("stopped");
     expect(phaseOf(base({ result: { execution: { chainStatus: "CONFIRMED", businessStatus: "SUCCESS" } } as any }))).toBe("confirmed");
@@ -77,6 +78,19 @@ describe("guideFor: what happened, what to do next, what to inspect", () => {
     expect(gs.checkpoints[0]).toMatchObject({ id: "order", status: "pending", hint: "creation sent · waiting for the receipt" }); expect(gs.next.label).toBe("Watch the steps");
     const failed = base({ state: "FAILED", steps: steps("orderPlanned"), order: { ...o, state: "FAILED", block: null } });
     expect(guideFor(failed, NET).checkpoints[0]).toMatchObject({ id: "order", status: "current", action: "Inspect the order creation", hint: "creation failed" });
+  });
+  it("a refused final validation stops the payment: never 'passed', its reasons shown, phase stopped (review 2026-10-09)", () => {
+    const common = steps("orderPlanned", "createOrder", "intent", "quote", "signServiceFee", "reportDelivered"); const dec = { step: "decision", atMs: 6, decision: "NO_POLICY_VIOLATION" };
+    const running = base({ state: "RUNNING", steps: [...common, dec, { step: "finalValidation", atMs: 7, result: "REVIEW_REQUIRED", reasons: ["BALANCE: 0.01 below the plan's maximum cost"] }] });
+    const g = guideFor(running, NET);
+    expect(g.happened).toBe("Final validation at a fresh pinned block: review required"); expect(g.now?.detail).toBe("final validation: review required"); expect(JSON.stringify(g)).not.toMatch(/validation passed/);
+    const refused = base({ state: "DONE", outcome: { kind: "NOT_SIGNED", text: "", source: "state" }, steps: [...running.steps, { step: "notSigned", atMs: 8 }] });
+    const r = guideFor(refused, NET);
+    expect(r.phase).toBe("stopped"); expect(r.happened).toBe("Nothing was signed: the final validation did not pass");
+    expect(r.blocked).toBe("The final validation stopped the payment: BALANCE: 0.01 below the plan's maximum cost");
+    expect(r.checkpoints.find((c) => c.id === "payment")?.status).toBe("na"); expect(JSON.stringify(r)).not.toMatch(/validation passed/);
+    const passed = guideFor(base({ state: "RUNNING", steps: [...common, dec, { step: "finalValidation", atMs: 7, result: "PASS" }] }), NET);
+    expect(passed.happened).toBe("Final validation at a fresh pinned block: passed"); expect(passed.now?.detail).toBe("final validation passed");
   });
   it("a confirmed run walks order → check → payment → explorer → passport → verify, then hands over to the Developer workflow", () => {
     const run = paid();

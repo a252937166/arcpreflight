@@ -11,7 +11,8 @@ import { principalOf as configuredPrincipalOf, sessionPrincipalOf, createSession
 const principalOf = (req: IncomingMessage) => configuredPrincipalOf(req) ?? sessionPrincipalOf(db, req);
 import { buildObjectReport, buildIntentReport, client } from "./report.js";
 import { makeQuote, paymentRequirementsFor, paymentMatchesQuote, settleForRequest, reconcilePending, settlementStatus, resumeSettlements, beginSettlementResume, reconcileOpenPayments, type PaymentInput } from "./payments.js";
-import { networkInfo, startRun, getRun, listRuns, createOrderFor, listOrders, getOrder, reconcileOrderCreations, chainClient, evidenceIndex, evidenceFile, clientKey, reconcileExecutions, observeExecutions, recoverRun, claimFaucet, faucetInfo, FIXTURES } from "./demo.js";
+import { fundsPass, FUNDS_CHECK_INTERVAL_MS } from "./funds.js";
+import { networkInfo, startRun, getRun, listRuns, createOrderFor, listOrders, getOrder, reconcileOrderCreations, chainClient, evidenceIndex, evidenceFile, clientKey, reconcileExecutions, observeExecutions, recoverRun, claimFaucet, faucetInfo, FIXTURES, projectAccounts } from "./demo.js";
 import { parseOrderInput } from "./orders.js";
 import { createWalletAttempt, markSent, markPrompted, abandonAttempt, observeAttempt, recoverAttempt, listAttempts, buildWalletPassport, reconcileWalletAttempts, backfillFeeReceipts, walletRpcFromClient } from "./wallet.js";
 import { curatedSubjects, isCuratedSubject } from "./subjects.js";
@@ -420,6 +421,10 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     reconcileWalletAttempts(db, walletRpcFromClient(chainClient), { source: "worker", log: (m) => console.log(now(), "WALLET", m) }).then((r) => { if (r.resolved || r.pending) console.log(now(), `WALLET reconciliation: resolved ${r.resolved}, pending ${r.pending}`); }).catch((e) => console.error(now(), "WALLET reconciliation failed", String(e?.message ?? e)));
     // the recovery worker is the only periodic sender: unresolved fee settlements and business transactions, from their original context
     setInterval(() => { recoveryWorker().catch((e) => console.error(now(), "RECOVERY worker failed", String(e?.message ?? e))); }, cfg.recoveryIntervalMs).unref();
+    // the low-balance watch (operator decision 2026-10-09): reads only; logs once when a key drops below its threshold; shown on /v1/network and the Evidence page
+    const fundsLog = (m: string) => (m.startsWith("LOW") ? console.warn : console.log)(now(), "FUNDS", m);
+    const watchFunds = () => fundsPass(chainClient, projectAccounts(), fundsLog).catch((e) => console.error(now(), "FUNDS watch failed", String(e?.message ?? e)));
+    void watchFunds(); setInterval(watchFunds, FUNDS_CHECK_INTERVAL_MS).unref();
   });
 }
 let workerBusy = false;

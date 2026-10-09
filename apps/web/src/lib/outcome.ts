@@ -61,15 +61,21 @@ export function lifecycleFromRun(run: Run, local: LocalPassport = {}): Lifecycle
   if (seen.has("decision")) check = st("check", decision === "BLOCKED" ? "stop" : decision === "REVIEW_REQUIRED" ? "review" : "done", decision ? decision.replace(/_/g, " ").toLowerCase() : null);
   else check = st("check", approve.status === "done" && running ? "active" : seen.has("error") ? "stop" : "todo", seen.has("reportDelivered") ? "report delivered" : seen.has("signServiceFee") ? "fee signed" : null);
   const stopped = check.status === "stop" || check.status === "review";
+  // the final validation's recorded result, never its mere presence (review 2026-10-09): only `result: "PASS"` reads as passed
+  const fvStep = [...run.steps].reverse().find((s) => s.step === "finalValidation") ?? null;
+  const fvResult = fvStep ? String((fvStep as { result?: unknown }).result ?? "") : null;
+  const fvPassed = fvResult === "PASS";
+  const fvNote = fvStep ? (fvPassed ? "final validation passed" : `final validation: ${(fvResult || "not passed").replace(/_/g, " ").toLowerCase()}`) : null;
   let execute: LifecycleStage;
   if (stopped) execute = st("execute", "skipped", "nothing signed");
   else if (kind === "PAID") execute = st("execute", "done", "paid");
+  else if (seen.has("notSigned")) execute = st("execute", "warn", fvStep && !fvPassed ? `${fvNote} — nothing signed` : "nothing signed"); // decided before any "in progress" reading
   // still RUNNING with the check done: execution is in progress up to the receipt — never "warn" while the runner is waiting (review 2026-10-09)
-  else if (running && check.status === "done" && !seen.has("postcondition") && !seen.has("outcomeUnknown")) execute = st("execute", "active", seen.has("broadcast") || be?.state === "BROADCAST_ATTEMPTED" ? "broadcast · waiting for the receipt" : seen.has("broadcastAttempted") ? "broadcast marker written" : seen.has("signed") ? "signed" : seen.has("finalValidation") ? "final validation passed" : "final validation");
+  else if (running && check.status === "done" && !seen.has("postcondition") && !seen.has("outcomeUnknown")) execute = st("execute", "active", seen.has("broadcast") || be?.state === "BROADCAST_ATTEMPTED" ? "broadcast · waiting for the receipt" : seen.has("broadcastAttempted") ? "broadcast marker written" : seen.has("signed") ? "signed" : fvNote ?? "final validation");
   else if (kind === "BROADCAST_UNRESOLVED" || be?.state === "BROADCAST_ATTEMPTED") execute = st("execute", "warn", "broadcast attempted");
   else if (kind === "REVERTED" || kind === "CONFIRMED_UNPAID") execute = st("execute", "stop", kind.toLowerCase().replace(/_/g, " "));
   else if (kind === "NOT_MINED" || kind === "SIGNED_NOT_BROADCAST" || kind === "NOT_SIGNED" || kind === "SUPERSEDED") execute = st("execute", "warn", kind.toLowerCase().replace(/_/g, " "));
-  else if (seen.has("broadcast") || seen.has("signed") || seen.has("finalValidation")) execute = st("execute", running ? "active" : "warn", seen.has("broadcast") ? "broadcast" : seen.has("signed") ? "signed" : "final validation");
+  else if (seen.has("broadcast") || seen.has("signed") || seen.has("finalValidation")) execute = st("execute", running ? "active" : "warn", seen.has("broadcast") ? "broadcast" : seen.has("signed") ? "signed" : fvNote ?? "final validation");
   else if (kind === "FAILED" || run.state === "FAILED") execute = st("execute", "stop", "run failed");
   else execute = st("execute", check.status === "done" && running ? "active" : "todo");
   const interrupted = seen.has("interruptedAfterBroadcast") || seen.has("outcomeUnknown") || seen.has("interruptedBeforeBroadcast") || seen.has("interrupted");

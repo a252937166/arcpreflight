@@ -112,3 +112,20 @@ describe("per-instance storage", () => {
     expect(storage.get("arcpreflight.trialToken:mainnet")).toBeUndefined();
   });
 });
+
+describe("project funds (operator decision 2026-10-09)", async () => {
+  const { fundsSummary, fundsWarning } = await import("../src/lib/funds");
+  it("summarises the worker's reading, names the low keys, and says nothing before the first reading", () => {
+    const net: any = { network: "testnet", funds: { checkedAt: "2026-10-09T10:00:00.000Z", intervalMs: 300000, low: true, note: "reads only", keys: [
+      { role: "demo-runner", address: "0x00000000000000000000000000000000000000a1", balanceNativeAtomic: "16885600000000000000", warnBelowNativeAtomic: "1000000000000000000", low: false, note: "runs" },
+      { role: "order-creator", address: "0x00000000000000000000000000000000000000a2", balanceNativeAtomic: "1500000000000000000", warnBelowNativeAtomic: "2000000000000000000", low: true, note: "orders + faucet" },
+      { role: "merchant-payto", address: "0x00000000000000000000000000000000000000a3", balanceNativeAtomic: null, warnBelowNativeAtomic: "500000000000000000", low: false, note: "fee relay" } ] } };
+    const s = fundsSummary(net);
+    expect(s).toMatchObject({ available: true, low: true, lowRoles: ["order-creator"], checkedAt: "2026-10-09T10:00:00.000Z", note: "reads only" });
+    expect(s.rows.map((r) => `${r.role}:${r.status}:${r.balance}:${r.threshold}`)).toEqual(["demo-runner:ok:16.8856 USDC:1.00 USDC", "order-creator:low:1.5000 USDC:2.00 USDC", "merchant-payto:unread:not read:0.50 USDC"]);
+    expect(fundsWarning(s, "Arc testnet")).toBe("Project funds are low on Arc testnet (order-creator): live runs or faucet claims may be refused until the operator tops them up. Recorded runs, checks and passports stay available.");
+    expect(fundsWarning(fundsSummary({ ...net, funds: { ...net.funds, low: false, keys: net.funds.keys.map((k: any) => ({ ...k, low: false })) } }), "Arc testnet")).toBeNull();
+    expect(fundsSummary({ network: "testnet", funds: { checkedAt: null, intervalMs: 300000, low: false, keys: [], note: "not read yet" } } as any)).toMatchObject({ available: false, low: false, rows: [], note: "not read yet" });
+    expect(fundsSummary(null)).toMatchObject({ available: false, low: false });
+  });
+});

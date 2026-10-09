@@ -26,7 +26,7 @@ export function FaucetCard({ net, wallet, balance, required, step, needs = "chec
       <div className="row between" style={{ alignItems: "center" }}>
         <div className="stack" style={{ gap: 2 }}>
           <span className="small"><b>Your wallet holds {balance === null ? "…" : `${exactUsdc(balance)} USDC`} on Arc testnet</b> — {step ?? "this step"} needs ≥ {exactUsdc(required)} USDC ({needs}), all paid from your own balance.</span>
-          <span className="tiny dim">Testnet only · {usdcNative(f.amountNativeAtomic, 2)} per claim from the project's testnet funds · one claim per wallet and per client every 24 h · {f.perDay - f.usedToday} of {f.perDay} claims left today</span>
+          <span className="tiny dim">Testnet only · {usdcNative(f.amountNativeAtomic, 2)} per claim from the project's testnet funds · one claim per wallet and per client every 24 h · {f.perDay - f.usedToday} of {f.perDay} claims left today · more from <a href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Circle's faucet ↗</a> · funding your wallet does not replenish the project runner</span>
         </div>
         <button className="btn" disabled={state.busy || !!state.claim} onClick={claim}>{state.busy ? <><Spinner /> sending…</> : state.claim ? "Claimed ✓" : "Claim testnet USDC"}</button>
       </div>

@@ -16,6 +16,7 @@ import { planOrder, orderSent, orderConfirmed, orderFailed, runnerOrderStore, ge
 import { cfg } from "./config.js";
 import { curatedSubjects } from "./subjects.js";
 import { capabilities, PASSPORT_VERSIONS } from "./capabilities.js";
+import { fundsSnapshot, type FundsRole } from "./funds.js";
 import { runRecovery, runCostStatement, assembleFromArtifacts } from "./passport.js";
 import { sealJson, openJson } from "./payments.js";
 import { type Db, row, rows, run, now } from "./db.js";
@@ -98,6 +99,11 @@ let adminQueue: Promise<unknown> = Promise.resolve();
 const adminLock = <T,>(fn: () => Promise<T>): Promise<T> => { const p = adminQueue.then(fn, fn); adminQueue = p.catch(() => {}); return p; };
 
 let headCache: { at: number; head: string | null } = { at: 0, head: null };
+/** the project keys the low-balance watch reads (public addresses; the keys themselves never leave their process) */
+export function projectAccounts(): Partial<Record<FundsRole, string | null>> {
+  const dep = deployments();
+  return { "demo-runner": runnerAcct?.address ?? null, "order-creator": orderSignerRole === "order-creator" ? orderSignerAcct?.address ?? null : dep?.orderCreator ?? null, "merchant-payto": cfg.merchant?.address ?? null, "deployer-admin": dep?.deployer ?? null };
+}
 export async function networkInfo(db: Db) {
   if (Date.now() - headCache.at > 5000) { try { headCache = { at: Date.now(), head: (await publicClient.getBlockNumber()).toString() }; } catch { headCache = { at: Date.now(), head: null }; } }
   const dep = deployments();
@@ -122,6 +128,7 @@ export async function networkInfo(db: Db) {
     observableSubjects: curatedSubjects(),
     capabilities: capabilities(), passport: PASSPORT_VERSIONS,
     faucet: faucetInfo(db),
+    funds: fundsSnapshot(),
     access: { selfService: true, session: "/v1/session", publicExecution: cfg.publicExecution, walletExecution: cfg.publicExecution && !!dep && !!orderWallet,
       note: cfg.publicExecution ? "any visitor: anonymous session, own orders, paid checks, wallet execution with after-the-fact plan comparison, recovery, private passports" : "business execution on this instance is gated until the operator records the mainnet acceptance (PUBLIC_EXECUTION); checks, orders, recovery and passports stay available" },
     orders: { minNativeAtomic: ORDER_LIMITS.minNativeAtomic.toString(), maxNativeAtomic: ORDER_LIMITS.maxNativeAtomic.toString(), stepNativeAtomic: ORDER_LIMITS.stepNativeAtomic.toString(), defaultNativeAtomic: ORDER_LIMITS.defaultNativeAtomic.toString(), maxReferenceLength: ORDER_LIMITS.maxReferenceLength },

@@ -34,7 +34,7 @@ export function phaseOf(run: Run | null | undefined): Phase {
   const kind = run.outcome?.kind ?? null;
   if (kind === "PAID" || kind === "SUPERSEDED") return "confirmed";
   if (kind === "BROADCAST_UNRESOLVED") return "recovering";
-  if (kind === "REVIEW_REQUIRED" || kind === "BLOCKED") return "stopped";
+  if (kind === "REVIEW_REQUIRED" || kind === "BLOCKED" || kind === "NOT_SIGNED") return "stopped"; // a refused final validation stops the payment like the check does
   if (kind) return "failed";
   // runs recorded before v3.3 carry no outcome: the decision and the receipts decide
   const d = decisionOf(run);
@@ -62,6 +62,8 @@ export function happenedOf(run: Run | null | undefined): string {
   const last = run.steps.at(-1);
   if (!last) return run.state === "RUNNING" ? "Run admitted; the first step is being recorded" : "No steps were recorded";
   if (last.step === "decision") return `Decision: ${words(String(last.decision ?? decisionOf(run) ?? ""))}`;
+  if (last.step === "finalValidation") return `Final validation at a fresh pinned block: ${String(last.result ?? "") === "PASS" ? "passed" : words(String(last.result || "not passed"))}`;
+  if (last.step === "notSigned") { const fv = [...run.steps].reverse().find((s) => s.step === "finalValidation"); return fv && String(fv.result ?? "") !== "PASS" ? "Nothing was signed: the final validation did not pass" : "Nothing was signed"; }
   if (last.step === "postcondition") return `Order read back from the chain: ${last.paid === true ? "paid" : "not paid"}`;
   if (last.step === "reconciled") return `Recovered from the original hash and the order state: ${words(String(last.chainStatus ?? ""))} / ${words(String(last.businessStatus ?? ""))}`;
   return HAPPENED[last.step] ?? `Step ${last.step}`;
@@ -135,8 +137,10 @@ export function guideFor(run: Run | null | undefined, net: NetworkInfo | null, l
   }
   const current = cps.find((c) => c.status === "todo") ?? null;
   if (current) current.status = "current";
-  const reasons = (run?.result?.decision?.reasons ?? (run?.steps.find((s) => s.step === "decision")?.reasons as string[] | undefined) ?? []) as string[];
-  const blocked = phase === "stopped" ? `The check stopped the payment: ${reasons.length ? shortReason(reasons[0]) : words(d) || "see the finding"}${reasons.length > 1 ? ` (+${reasons.length - 1} more)` : ""}` : null;
+  const fv = run ? [...run.steps].reverse().find((s) => s.step === "finalValidation") ?? null : null;
+  const fvFailed = !!fv && String(fv.result ?? "") !== "PASS";
+  const reasons = (fvFailed && Array.isArray(fv!.reasons) ? (fv!.reasons as string[]) : (run?.result?.decision?.reasons ?? (run?.steps.find((s) => s.step === "decision")?.reasons as string[] | undefined) ?? [])) as string[];
+  const blocked = phase === "stopped" ? `${fvFailed ? "The final validation stopped the payment" : "The check stopped the payment"}: ${reasons.length ? shortReason(reasons[0]) : fvFailed ? words(String(fv!.result || "not passed")) : words(d) || "see the finding"}${reasons.length > 1 ? ` (+${reasons.length - 1} more)` : ""}` : null;
   let next: Guide["next"];
   if (!run) next = { label: "Run the project-funded demo", target: "run-start", hint: "real Arc testnet transactions, paid by the project", checkpoint: null };
   else if (phase === "recovering") next = { label: "Recover this attempt", target: "sec-recovery", hint: "or wait: the recovery worker runs every 30 s, and reading this run observes too", checkpoint: null };
