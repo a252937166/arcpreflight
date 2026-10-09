@@ -385,3 +385,25 @@ describe("review round 3 — malformed approval evidence and the unresolved rese
     expect(finding(tamperedTotal, "COST_STATEMENT").status).toBe("FAIL");
   });
 });
+
+describe("review of 0c0d406, P2 — the approval status expiry must agree with the baseline and hold at final validation", () => {
+  const f = syntheticRun("APPROVED"); const w = syntheticRun("WALLET");
+  const withStatus = (src: any, status: any) => { const c = structuredClone(src); c.result.approvalStatusAtValidation = status; return roundTrip(buildPassport(c).files); };
+  it("a status expiry that precedes final validation, or one that contradicts the baseline's (none), fails an executed run in both modes", async () => {
+    for (const [src, anchors, rpc] of [[f.source, f.anchors, f.rpc()], [w.source, w.anchors, w.rpc()]] as const) {
+      const soon = await verifyPassport(withStatus(src, { revoked: false, validUntil: "2026-10-08T10:00:01.000Z", fetchedAt: "2026-10-08T10:00:00.000Z" }), { anchors, rpc });
+      expect(finding(soon, "APPROVAL_COVERAGE")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/precedes final validation|contradictory expiry evidence/) });
+      const far = await verifyPassport(withStatus(src, { revoked: false, validUntil: "2027-01-01T00:00:00.000Z", fetchedAt: "2026-10-08T10:00:00.000Z" }), { anchors, rpc });
+      expect(finding(far, "APPROVAL_COVERAGE")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/contradictory expiry evidence: the approval status records validUntil 2027-01-01T00:00:00.000Z while the referenced baseline says null/) });
+      expect(far.counts.fail).toBeGreaterThan(0);
+    }
+  });
+  it("a status whose expiry equals the baseline's and lies after final validation passes; a baseline expiry without a status expiry is contradictory too", async () => {
+    const files = roundTrip(buildPassport(f.source).files); // the builder refuses a baseline the intent does not reference, so the files are retouched afterwards (APPROVAL_SOURCE then fails on its own; APPROVAL_COVERAGE judges the evidence it has)
+    const edit = (c: Record<string, string>, path: string, mutate: (o: any) => void) => { const o = JSON.parse(c[path]); mutate(o); c[path] = JSON.stringify(o, null, 2) + "\n"; };
+    const consistent = retouch(files, (c) => { edit(c, "baseline.json", (b) => { b.validUntil = "2026-12-31T00:00:00.000Z"; }); edit(c, "order-summary.json", (o) => { o.referencedApproval.statusAtFinalValidation.validUntil = "2026-12-31T00:00:00.000Z"; }); });
+    expect(finding(await verifyPassport(consistent, { anchors: f.anchors, rpc: f.rpc() }), "APPROVAL_COVERAGE")).toMatchObject({ status: "PASS", detail: expect.stringMatching(/valid until 2026-12-31T00:00:00.000Z, as the baseline says/) });
+    const baselineOnly = retouch(files, (c) => { edit(c, "baseline.json", (b) => { b.validUntil = "2026-12-31T00:00:00.000Z"; }); });
+    expect(finding(await verifyPassport(baselineOnly, { anchors: f.anchors, rpc: f.rpc() }), "APPROVAL_COVERAGE")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/contradictory expiry evidence: the approval status records validUntil null while the referenced baseline says 2026-12-31/) });
+  });
+});

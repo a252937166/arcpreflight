@@ -33,7 +33,9 @@ type Scenario = { fixture: Fixture; staleQuote?: boolean; alwaysStale?: boolean;
   /** fault injection and account-path cases */
   wrongBaselineDigest?: boolean; signerHasCode?: boolean; codeReadFails?: boolean; feeReceiptMissing?: boolean; snapshotBlock?: string; broadcastThrows?: boolean; receiptTimeout?: boolean;
   /** review round 2: artefact persistence failing for one artefact name; a snapshot that is already older than the validation window */
-  artifactFails?: string; staleSnapshotSeconds?: number };
+  artifactFails?: string; staleSnapshotSeconds?: number;
+  /** review of 0c0d406 (P1-3): the broadcast-marker write takes this long (the clock jumps while it is awaited) */
+  markerTakesMs?: number };
 function harness(s: Scenario) {
   // Synthetic test account; all sends, RPC reads and payment requests are local mocks.
   const account = privateKeyToAccount(`0x${"22".repeat(32)}`);
@@ -82,7 +84,13 @@ function harness(s: Scenario) {
   const calls: string[] = []; let signed: SignedExecution | null = null; const outcomes: ExecutionOutcome[] = [];
   const store = {
     persistSigned: vi.fn(async (e: SignedExecution) => { calls.push("persistSigned"); signed = e; }),
-    markBroadcastAttempted: vi.fn(async () => { calls.push("markBroadcastAttempted"); }),
+    markBroadcastAttempted: vi.fn(async () => {
+      calls.push("markBroadcastAttempted");
+      if (s.markerTakesMs) { // the clock jumps while the marker write is awaited (Date is not among the faked timers: shim it)
+        const shift = s.markerTakesMs; const RealDate = Date;
+        vi.stubGlobal("Date", class extends RealDate { constructor(...a: any[]) { super(...((a.length ? a : [RealDate.now() + shift]) as [number])); } static now() { return RealDate.now() + shift; } });
+      }
+    }),
     persistOutcome: vi.fn(async (_id: string, o: ExecutionOutcome) => { calls.push(`persistOutcome:${o.chainStatus}`); outcomes.push(o); }),
   };
   const sendRawTransaction = vi.fn(async ({ serializedTransaction }: { serializedTransaction: Hex }) => { calls.push("send"); if (s.broadcastThrows) throw new Error("socket hang up"); return keccak256(serializedTransaction); });
@@ -241,6 +249,14 @@ describe("review round 2 — evidence before the broadcast, the real snapshot ag
     expect(h.sendRawTransaction).toHaveBeenCalledTimes(1);
     expect(result.execution).toMatchObject({ chainStatus: "CONFIRMED", businessStatus: "SUCCESS" });
     expect(result.steps.find((s: { step: string }) => s.step === "artifactNotPersisted")).toMatchObject({ artifact: "postcondition" });
+  });
+  it("review of 0c0d406 (P1-3): the window closes while the broadcast marker is written → the send is skipped and the attempt is closed as never broadcast", async () => {
+    const { h, result } = await run({ fixture: "APPROVED_PAYMENT", markerTakesMs: 6000 }); // the runner policy allows 5 s
+    expect(h.sendRawTransaction).not.toHaveBeenCalled();
+    expect(h.calls).toEqual(["persistSigned", "markBroadcastAttempted", "persistOutcome:SIGNED_NOT_BROADCAST"]);
+    expect(result.execution).toMatchObject({ chainStatus: "SIGNED_NOT_BROADCAST", businessStatus: "NOT_EXECUTED", businessTxHash: null });
+    expect(result.steps.find((s: { step: string }) => s.step === "notBroadcast").why).toMatch(/after the broadcast marker and before the send/);
+    expect(result.steps.map((s: { step: string }) => s.step)).not.toContain("broadcast");
   });
   it("the validation window counts from the pinned observation: a snapshot already older than the window is refused and nothing is signed", async () => {
     const { h, result } = await run({ fixture: "APPROVED_PAYMENT", staleSnapshotSeconds: 30 }); // the runner policy allows 5 s

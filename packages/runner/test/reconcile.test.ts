@@ -126,3 +126,29 @@ describe("shared business-transaction reconciliation (spec D07, design v3.2 §11
     expect(sent).toHaveLength(0);
   });
 });
+
+describe("review of 0c0d406, P1-3 — the clock is read again immediately before any rebroadcast", () => {
+  it("a window that closes during the reads or the decryption → nothing is sent; inside the window the identical bytes go out", async () => {
+    let t = Date.now(); const clock = () => new Date(t);
+    const slowReceipt = fakeRpc({});
+    (slowReceipt.rpc.getTransactionReceipt as any).mockImplementation(async () => { t += 6000; return null; }); // the first RPC read takes the whole window
+    const r = await reconcileExecution(slowReceipt.rpc, stored({ validUntil: new Date(t + 5000).toISOString() }), { allowSend: true, clock });
+    expect(r).toMatchObject({ kind: "pending", rebroadcast: false, reason: expect.stringContaining("after its validation window") }); expect(slowReceipt.sent).toHaveLength(0);
+    t = Date.now(); const slowOpen = fakeRpc({}); // the decryption is the last await before the send
+    const r2 = await reconcileExecution(slowOpen.rpc, stored({ validUntil: new Date(t + 5000).toISOString(), openRaw: async () => { t += 6000; return "0x02f8aa" as Hex; } }), { allowSend: true, clock });
+    expect(r2).toMatchObject({ kind: "pending", rebroadcast: false, reason: expect.stringContaining("closed during the reads or the decryption") }); expect(slowOpen.sent).toHaveLength(0);
+    t = Date.now(); const fine = fakeRpc({});
+    const r3 = await reconcileExecution(fine.rpc, stored({ validUntil: new Date(t + 5000).toISOString() }), { allowSend: true, clock });
+    expect(r3).toMatchObject({ kind: "pending", rebroadcast: true }); expect(fine.sent).toEqual(["0x02f8aa"]);
+  });
+  it("without an injected clock the wall clock is read fresh: a receipt read that outlasts the window (fake timers) → no rebroadcast", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rpc, sent } = fakeRpc({});
+      const validUntil = new Date(Date.now() + 5000).toISOString();
+      (rpc.getTransactionReceipt as any).mockImplementation(async () => { vi.advanceTimersByTime(6000); return null; });
+      expect(await reconcileExecution(rpc, stored({ validUntil }), { allowSend: true })).toMatchObject({ kind: "pending", rebroadcast: false, reason: expect.stringContaining("after its validation window") });
+      expect(sent).toHaveLength(0);
+    } finally { vi.useRealTimers(); }
+  });
+});

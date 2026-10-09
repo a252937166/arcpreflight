@@ -102,7 +102,8 @@ export type Deviations = { mismatch: string[]; deviations: Record<string, { plan
  *  something that is not a rejection. Either makes a VALIDATED attempt *uncertain*: the transaction may have been submitted, so no second prompt and no
  *  "nothing was sent" until the chain says so or the visitor states a rejection. */
 export type PromptMarker = { state: "PROMPTED" | "UNKNOWN_SUBMISSION"; at: string; detail?: string | null };
-export type PromptEvent = "prompted" | "unknown-submission";
+/** `not-prompted` hands an untouched claim back (review of `0c0d406`, P1-1/P1-2): the holder states that it did not ask the wallet after all */
+export type PromptEvent = "prompted" | "unknown-submission" | "not-prompted";
 /** POST/GET /v1/wallet/attempts (docs/LIFECYCLE.md §8). The brief view (list) stops at `createdAt/updatedAt`; the full view adds the receipts. */
 export type AttemptView = {
   attemptId: string; executionMode: "wallet"; state: AttemptState; requestId: string; orderId: string; merchant: string; payer: string; amountNativeAtomic: string; labels: string[];
@@ -174,7 +175,9 @@ export const api = {
   attemptSent: (id: string, txHash: string, token: string) => req<AttemptView>(`/v1/wallet/attempts/${id}/sent`, { method: "POST", body: JSON.stringify({ txHash }), token }),
   /** §10 item 1: `prompted` right before eth_sendTransaction, `unknown-submission` when the wallet answered with anything but a rejection; the marker
    *  survives a page refresh on the server (409 ATTEMPT_NOT_OPEN unless the attempt is VALIDATED) */
-  attemptPrompt: (id: string, event: PromptEvent, token: string, detail?: string | null) => req<AttemptView>(`/v1/wallet/attempts/${id}/prompt`, { method: "POST", body: JSON.stringify(detail ? { event, detail } : { event }), token }),
+  /** the prompt CLAIM (§10): `prompted` with this call's claimId is granted to the first caller only (409 PROMPT_CLAIMED otherwise, the attempt in the body);
+   *  `unknown-submission` records the wallet's ambiguous answer; `not-prompted` hands an untouched claim back with its claimId */
+  attemptPrompt: (id: string, event: PromptEvent, token: string, detail?: string | null, claimId?: string | null) => req<AttemptView>(`/v1/wallet/attempts/${id}/prompt`, { method: "POST", body: JSON.stringify({ event, ...(detail ? { detail } : {}), ...(claimId ? { claimId } : {}) }), token }),
   /** the wallet prompt was rejected (4001): NOT_SENT */
   attemptAbandon: (id: string, token: string) => req<AttemptView>(`/v1/wallet/attempts/${id}/abandon`, { method: "POST", token }),
   /** bounded reconciliation of THAT attempt now: the hash, the order state and the merchant's OrderPaid event; never re-signs or re-sends */

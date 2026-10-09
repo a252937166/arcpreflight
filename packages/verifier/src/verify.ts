@@ -221,6 +221,7 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
     // "executed" in either mode: the runner records the signed hash; a wallet run records only the business hash / chain status
     const executed = !!execution && (!!execution.signedTransactionHash || !!execution.businessTxHash || !["NOT_SIGNED", "SIGNED_NOT_BROADCAST"].includes(String(execution.chainStatus)));
     const ms = (v: unknown): number | null => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null);
+    const sameExpiry = (a: unknown, b: unknown) => ((a === null || a === undefined) && (b === null || b === undefined)) || (a !== null && a !== undefined && b !== null && b !== undefined && ms(a) !== null && ms(a) === ms(b));
     // the recorded status must be well-formed before it may vouch for anything (review round 3): an explicit boolean, a valid read time
     // inside the run (after the report's observation, not after the execution record), and a valid or null validUntil
     const statusProblems: string[] = [];
@@ -245,9 +246,14 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
       else if (!status) { unverified = true; notes.push("revocation state at execution not retained"); }
       else if (status.revoked) problems.push("the referenced approval was recorded as revoked at final validation, yet a transaction was executed");
       else if (status.validUntil && ms(status.validUntil)! < ms(status.fetchedAt)!) problems.push(`the referenced approval was recorded as expired (valid until ${status.validUntil}) when it was read at ${status.fetchedAt}, yet a transaction was executed`);
-      else notes.push(`approval ${intent.baselineDigest} read as not revoked at ${status.fetchedAt}${status.validUntil ? ` (valid until ${status.validUntil})` : ""}`);
+      // review of 0c0d406 (P2): the status expiry must hold at the final-validation boundary, and it must be the baseline's own expiry — the
+      // producer copies it from the referenced baseline, so two different values are contradictory evidence, not two facts
+      else if (status.validUntil && fv?.validatedAt && ms(fv.validatedAt) !== null && ms(status.validUntil)! < ms(fv.validatedAt)!) problems.push(`the referenced approval's recorded expiry ${status.validUntil} precedes final validation at ${fv.validatedAt}, yet a transaction was executed`);
+      else if (baseline && !sameExpiry(baseline.validUntil, status.validUntil)) problems.push(`contradictory expiry evidence: the approval status records validUntil ${status.validUntil ?? "null"} while the referenced baseline says ${baseline.validUntil ?? "null"} (the status is read from that baseline, so the two must agree)`);
+      else notes.push(`approval ${intent.baselineDigest} read as not revoked at ${status.fetchedAt}${status.validUntil ? ` (valid until ${status.validUntil}, as the baseline says)` : " (no expiry, as the baseline says)"}`);
     } else {
       if (statusProblems.length) notes.push(`approval status recorded but malformed (nothing was executed): ${statusProblems.join("; ")}`);
+      else if (status && baseline && !sameExpiry(baseline.validUntil, status.validUntil)) notes.push(`approval status expiry ${status.validUntil ?? "null"} differs from the baseline's ${baseline.validUntil ?? "null"} (nothing was executed)`);
       else if (status?.revoked && decision?.decision === "NO_POLICY_VIOLATION") problems.push("the referenced approval was recorded as revoked at final validation, yet the decision is NO_POLICY_VIOLATION");
     }
     unverified = unverified && !problems.length;

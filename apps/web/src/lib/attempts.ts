@@ -9,7 +9,9 @@
 // before the wallet is asked and `unknown-submission` when it answered with anything but a rejection; a marker that cannot be written means
 // nothing is prompted. A VALIDATED attempt that carries a marker (server view or this browser's memory) is *uncertain*: after a refresh it
 // is reconciled (recover once, then observe), and only "Recover" and "I rejected it — abandon" are offered. The window is re-read from the
-// clock after every await that precedes eth_sendTransaction, not once at the start (item 4).
+// clock after every await that precedes eth_sendTransaction, not once at the start (item 4). Review of 0c0d406: the claim is EXCLUSIVE (the
+// first caller gets it, everyone else 409 PROMPT_CLAIMED → reconcile), the account/chain/clock are re-read after the claim call and a failed
+// re-check hands the claim back (`not-prompted`), and the wallet request carries the plan's chainId.
 import { toHex } from "viem";
 import { api, ApiError, type AttemptState, type AttemptView, type Deviations, type PromptMarker } from "./api";
 import type { Eip1193 } from "./wallet";
@@ -26,10 +28,15 @@ export const insideWindow = (a: Pick<AttemptView, "state" | "validUntil"> | null
 /** a prompt needs more than this much of the window left, or it is not opened */
 export const MIN_WINDOW_LEFT_MS = 5000;
 
-/** The transaction request handed to the wallet: exactly the validated plan, as hex quantities. No nonce — the wallet owns it. */
-export function txRequestFromPlan(plan: { from: string; to: string; data: string; valueNativeAtomic: string; gasLimit: string; maxFeePerGasNativeAtomic: string; maxPriorityFeePerGasNativeAtomic: string }) {
-  return { from: plan.from, to: plan.to, data: plan.data, value: toHex(BigInt(plan.valueNativeAtomic)), gas: toHex(BigInt(plan.gasLimit)), maxFeePerGas: toHex(BigInt(plan.maxFeePerGasNativeAtomic)), maxPriorityFeePerGas: toHex(BigInt(plan.maxPriorityFeePerGasNativeAtomic)), type: "0x2" as const };
+/** The transaction request handed to the wallet: exactly the validated plan, as hex quantities, bound to the plan's chain (`chainId`, which
+ *  wallets that honour it refuse on another network — review of 0c0d406, P1-2). No nonce — the wallet owns it. */
+export function txRequestFromPlan(plan: { chainId: number; from: string; to: string; data: string; valueNativeAtomic: string; gasLimit: string; maxFeePerGasNativeAtomic: string; maxPriorityFeePerGasNativeAtomic: string }) {
+  return { from: plan.from, to: plan.to, data: plan.data, value: toHex(BigInt(plan.valueNativeAtomic)), gas: toHex(BigInt(plan.gasLimit)), maxFeePerGas: toHex(BigInt(plan.maxFeePerGasNativeAtomic)), maxPriorityFeePerGas: toHex(BigInt(plan.maxPriorityFeePerGasNativeAtomic)), type: "0x2" as const, chainId: toHex(plan.chainId) };
 }
+/** the prompt claim's id: generated per call, kept in this call's memory only (a reloaded page must never hand back a claim it did not make) */
+const newClaimId = (): string => { try { if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID(); } catch { /* fall through */ } return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join(""); };
+/** what a visitor reads when another tab (or an earlier call) already holds the prompt claim */
+export const CLAIMED_TEXT = "Another tab or an earlier request already asked your wallet to sign this plan; the transaction may have been submitted. Nothing is prompted again here — reconciling from the order state…";
 /** EIP-1193 4001 (user rejected), plus the message shapes MetaMask, OKX and viem use for it */
 export function isUserRejection(e: unknown): boolean {
   const x = e as any;
@@ -95,7 +102,7 @@ export async function findOpenAttempt(orderId: string, withToken: WithToken): Pr
   return brief ? withToken((t) => api.attempt(brief.attemptId, t)) : null;
 }
 
-export type PreSendCheck = { ok: true } | { ok: false; code: "ACCOUNT_CHANGED" | "CHAIN_CHANGED" | "WINDOW_CLOSED" | "WALLET_UNAVAILABLE" | "PROMPT_MARKER_FAILED" | "ATTEMPT_UNCERTAIN"; text: string };
+export type PreSendCheck = { ok: true } | { ok: false; code: "ACCOUNT_CHANGED" | "CHAIN_CHANGED" | "WINDOW_CLOSED" | "WALLET_UNAVAILABLE" | "PROMPT_MARKER_FAILED" | "ATTEMPT_UNCERTAIN" | "PROMPT_CLAIMED"; text: string };
 /** §10 item 4: more than 5 s of the validation window must be left AT THIS MOMENT — `now` is read after every await that precedes the prompt
  *  (the wallet's own reads, the prompt marker), never once at the start of the call. */
 export function windowCheck(attempt: Pick<AttemptView, "validUntil">, now: number): PreSendCheck {
@@ -184,12 +191,25 @@ async function sendInner(i: SendInput): Promise<ExecuteEvent> {
   const clock = i.poll?.now ?? Date.now;
   const pre = await preSendCheck(i.provider, attempt, clock); // item 4: the window is read after the wallet answered, inside
   if (!pre.ok) return emit({ phase: "error", attempt, error: { text: pre.text, code: pre.code, raw: null } }); // the attempt stays VALIDATED for abandon / recover
-  // §10 item 1: the marker is durable on the server BEFORE the wallet is asked; a marker that cannot be written means the uncertainty could not be persisted — nothing is prompted
-  try { const marked = await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "prompted", t)); rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: attempt.state, promptState: marked.prompt?.state ?? "PROMPTED" }); }
-  catch (e) { return emit({ phase: "error", attempt, error: { text: `The service could not record that your wallet is about to be asked (${describeError(e).text}) — nothing was prompted, because a prompt whose uncertainty cannot be kept across a refresh is not opened. The attempt stays validated: try again inside the window, or abandon it.`, code: "PROMPT_MARKER_FAILED", raw: e instanceof ApiError ? e.body : null } }); }
-  // item 4: the marker call was another await — the window is read once more, immediately before the prompt
-  const win = windowCheck(attempt, clock());
-  if (!win.ok) return emit({ phase: "error", attempt, error: { text: win.text, code: win.code, raw: null } });
+  // §10 item 1 + review of 0c0d406 (P1-1): the prompt CLAIM is durable on the server BEFORE the wallet is asked, and it is exclusive — granted to
+  // this call only; anyone else (another tab, a stale view, a retry) gets 409 PROMPT_CLAIMED and reconciles. A claim that cannot be written means
+  // the uncertainty could not be persisted — nothing is prompted.
+  const claimId = newClaimId();
+  try { const marked = await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "prompted", t, null, claimId)); rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: attempt.state, promptState: marked.prompt?.state ?? "PROMPTED" }); }
+  catch (e) {
+    if (e instanceof ApiError && e.body?.error === "PROMPT_CLAIMED") { // somebody else holds the claim: this page never prompts — it reconciles
+      const held: AttemptView = e.body.attempt && typeof e.body.attempt === "object" ? { ...attempt, ...(e.body.attempt as AttemptView) } : { ...attempt, prompt: { state: "PROMPTED", at: new Date(clock()).toISOString(), detail: null } };
+      rememberView(held);
+      const error: Described = { text: CLAIMED_TEXT, code: "PROMPT_CLAIMED", raw: e.body };
+      emit({ phase: "uncertain", attempt: held, error });
+      return reconcileLoop(held, i.withToken, i.poll, emit, { phase: "uncertain", recoverEvery: 0, error });
+    }
+    return emit({ phase: "error", attempt, error: { text: `The service could not record that your wallet is about to be asked (${describeError(e).text}) — nothing was prompted, because a prompt whose uncertainty cannot be kept across a refresh is not opened. The attempt stays validated: try again inside the window, or abandon it.`, code: "PROMPT_MARKER_FAILED", raw: e instanceof ApiError ? e.body : null } });
+  }
+  // review of 0c0d406 (P1-2): the claim call was another await — the wallet's account and chain are read AGAIN, and the clock after them,
+  // immediately before the prompt; anything that changed hands the claim back (nothing was prompted) and says why
+  const again = await preSendCheck(i.provider, attempt, clock);
+  if (!again.ok) return handBackClaim(i, attempt, claimId, again, emit);
   emit({ phase: "prompting", attempt });
   let txHash: string;
   try {
@@ -201,7 +221,7 @@ async function sendInner(i: SendInput): Promise<ExecuteEvent> {
       try { const a = await i.withToken((t) => api.attemptAbandon(attempt.attemptId, t)); rememberView(a); return emit({ phase: "abandoned", attempt: a }); }
       catch (e2) { return emit({ phase: "error", attempt, error: describeError(e2) }); }
     }
-    return reconcileAmbiguous(i, attempt, describeError(e), emit); // timeout, "already known", "nonce too low", network error: possibly submitted
+    return reconcileAmbiguous(i, attempt, describeError(e), emit, claimId); // timeout, "already known", "nonce too low", network error: possibly submitted
   }
   emit({ phase: "reporting", attempt, txHash });
   let sent: AttemptView | null = null;
@@ -214,15 +234,31 @@ async function sendInner(i: SendInput): Promise<ExecuteEvent> {
   return emit({ phase: polled.settled ? "done" : "unresolved", attempt: last, txHash });
 }
 
+/** Review of 0c0d406 (P1-2): the re-check after the claim failed — nothing was prompted, so the claim is handed back (`not-prompted` with the claim
+ *  id) and the attempt is a plain VALIDATED attempt again. If the service refuses (the marker is no longer this call's untouched claim) or cannot be
+ *  reached, the attempt stays uncertain on the server — the safe direction — and is reconciled; the visitor's explicit abandon remains the only
+ *  "nothing was sent". */
+async function handBackClaim(i: SendInput, attempt: AttemptView, claimId: string, why: Exclude<PreSendCheck, { ok: true }>, emit: (ev: ExecuteEvent) => ExecuteEvent): Promise<ExecuteEvent> {
+  try {
+    const released = await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "not-prompted", t, why.code, claimId));
+    rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: released.state, promptState: released.prompt?.state ?? null });
+    return emit({ phase: "error", attempt: released, error: { text: why.text, code: why.code, raw: null } });
+  } catch (e) {
+    const held: AttemptView = e instanceof ApiError && e.body?.attempt && typeof e.body.attempt === "object" ? { ...attempt, ...(e.body.attempt as AttemptView) } : attempt;
+    const error: Described = { text: `${why.text} The prompt claim could not be handed back (${describeError(e).text}); the attempt stays marked as possibly prompted until reconciliation clears it.`, code: why.code, raw: e instanceof ApiError ? e.body : null };
+    emit({ phase: "uncertain", attempt: held, error });
+    return reconcileLoop(held, i.withToken, i.poll, emit, { phase: "uncertain", recoverEvery: 0, error });
+  }
+}
 /** The wallet threw something that is not a rejection: the transaction MAY have been submitted. The `unknown-submission` marker is written first
  *  (§10 item 1 — best effort here: the `prompted` marker already made the attempt uncertain on the server; this browser remembers it either way),
  *  then reconcile first (POST …/recover performs the order / OrderPaid search at once, docs/LIFECYCLE.md §9), then observe every ~2 s with a
  *  recover every third tick, for up to 60 s. Ends `done` when the attempt closes (CONFIRMED through OrderPaid, or MISMATCH/REVERTED), otherwise
  *  stays `unknown-submission` with the attempt still VALIDATED: the visitor decides (explicit abandon) — never a second prompt, never "nothing was sent". */
-async function reconcileAmbiguous(i: SendInput, attempt: AttemptView, error: Described, emit: (ev: ExecuteEvent) => ExecuteEvent): Promise<ExecuteEvent> {
+async function reconcileAmbiguous(i: SendInput, attempt: AttemptView, error: Described, emit: (ev: ExecuteEvent) => ExecuteEvent, claimId: string): Promise<ExecuteEvent> {
   emit({ phase: "unknown-submission", attempt, error });
   rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: attempt.state, promptState: "UNKNOWN_SUBMISSION" });
-  try { rememberView(await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "unknown-submission", t, error.text))); } catch { /* the PROMPTED marker is already durable; reconciliation decides */ }
+  try { rememberView(await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "unknown-submission", t, error.text, claimId))); } catch { /* the PROMPTED marker is already durable; reconciliation decides */ }
   return reconcileLoop(attempt, i.withToken, i.poll, emit, { phase: "unknown-submission", recoverEvery: 3, error });
 }
 /** recover at tick 0 (and every `recoverEvery`-th tick when > 0), observe in between, every ~2 s for up to `ambiguousMaxMs` (60 s); `done` once the

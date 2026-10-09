@@ -39,7 +39,10 @@ export type ReconcileResult =
 export type ReconcileOptions = {
   /** false for read routes and other observers: never rebroadcast; true only for the recovery worker and authorized recovery commands */
   allowSend: boolean;
+  /** a fixed reference time (tests); `clock` is consulted for the fresh reads */
   now?: Date;
+  /** the clock read again immediately before any send, after every await (review of `0c0d406`, P1-3); defaults to the wall clock */
+  clock?: () => Date;
   /** how far back the nonce-consumer search may look when no broadcast block is known */
   maxSearchBlocks?: number;
 };
@@ -92,7 +95,7 @@ export async function findNonceConsumer(rpc: ReconcileRpc, x: StoredExecution, m
 
 /** Resolve one persisted business transaction. Order of evidence: broadcast marker → receipt → order state → nonce → pool. */
 export async function reconcileExecution(rpc: ReconcileRpc, x: StoredExecution, opts: ReconcileOptions): Promise<ReconcileResult> {
-  const now = opts.now ?? new Date();
+  const clock = opts.clock ?? (opts.now ? () => opts.now! : () => new Date());
   if (x.state === "SIGNED") { // the broadcast marker was never written: nothing reached the network
     return { kind: "closed", storeState: "INTERRUPTED", consumedBy: null, outcome: { chainStatus: "SIGNED_NOT_BROADCAST", businessStatus: "NOT_EXECUTED", businessTxHash: null, note: "interrupted after signing and before any broadcast; nothing reached the network; the order stays unpaid" } };
   }
@@ -143,9 +146,11 @@ export async function reconcileExecution(rpc: ReconcileRpc, x: StoredExecution, 
       note: `the signer nonce was consumed by transaction ${by.hash}, which does not pay this order; this hash can never be mined; the order reads as unpaid; nothing is re-signed` } };
   }
   if (await rpc.getTransaction({ hash: x.txHash }).catch(() => null)) return pending("still in the transaction pool");
-  if (new Date(x.validUntil) > now) { // dropped but still inside its validation window: only the IDENTICAL bytes may be re-broadcast, and only by an authorized sender
+  // P1-3: the window is judged by a clock read NOW — after the receipt, order, nonce and pool reads above — never by a time captured before them
+  if (new Date(x.validUntil) > clock()) { // dropped but still inside its validation window: only the IDENTICAL bytes may be re-broadcast, and only by an authorized sender
     if (!opts.allowSend) return pending("dropped from the pool inside its validation window; the recovery worker may rebroadcast the identical signed bytes");
     const raw = await x.openRaw();
+    if (new Date(x.validUntil) <= clock()) return pending("dropped after its validation window (it closed during the reads or the decryption, before any send); waiting for the nonce to be consumed before closing (no replacement is signed)"); // read once more after the last await before the send
     await rpc.sendRawTransaction({ serializedTransaction: raw }).catch(() => {});
     return pending("rebroadcast the identical signed bytes inside the validation window", true);
   }

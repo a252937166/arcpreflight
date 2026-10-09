@@ -19,5 +19,7 @@ listed next actions; no row may end in a second signing prompt the visitor did n
 | 10 | Insufficient funds | Use a wallet below fee + amount + gas | buy/execute disabled with "your wallet holds X; this step needs ≥ Y"; the faucet card appears on testnet |
 | 11 | Delayed RPC | Throttle the network in devtools | polling continues; the attempt shows "waiting for the receipt"; recover reads only |
 | 12 | Verification states | Verify a tampered bundle on `/verify` | red FAIL state with the failing finding; never a green banner |
+| 13 | Two tabs, one attempt (review of `0c0d406`) | Open the Developer page in two tabs; in tab A execute and leave the wallet prompt open; in tab B reload or try to continue the same attempt | tab B never opens a second prompt: it reads "submission uncertain", reconciles (recover, then observe) and offers only Recover and "I rejected it — abandon"; the wallet shows one prompt in total |
+| 14 | Network switched after the claim (review of `0c0d406`) | Click Execute, then switch the wallet's network before confirming | either the page refuses before the prompt ("on chain …; the plan was validated for chain …") and the attempt stays a plain validated attempt, or the wallet itself refuses the request's `chainId`; never a transaction on the other network |
 
 Observed results belong in `docs/ACCEPTANCE.md` §11 (AP33-30) with the date and the wallet used.

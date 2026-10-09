@@ -33,9 +33,9 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); storage = new Map(
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); setApiBase(""); resetExecutionGuard(); });
 
 describe("plan → wallet request", () => {
-  it("hands the wallet exactly the plan as hex quantities, type 2, and never a nonce", () => {
+  it("hands the wallet exactly the plan as hex quantities, type 2, bound to the plan's chain, and never a nonce", () => {
     const req = txRequestFromPlan(PLAN);
-    expect(req).toEqual({ from: ACCOUNT, to: MERCHANT, data: PLAN.data, value: "0x11c37937e08000", gas: "0x9f1f", maxFeePerGas: "0x6c088e200", maxPriorityFeePerGas: "0x12a05f200", type: "0x2" });
+    expect(req).toEqual({ from: ACCOUNT, to: MERCHANT, data: PLAN.data, value: "0x11c37937e08000", gas: "0x9f1f", maxFeePerGas: "0x6c088e200", maxPriorityFeePerGas: "0x12a05f200", type: "0x2", chainId: "0x4cef52" }); // bound to the plan's chain (review of 0c0d406, P1-2)
     expect("nonce" in req).toBe(false);
   });
   it("recognises a rejected prompt in its usual shapes", () => {
@@ -85,7 +85,7 @@ function fakeApi(opts: { create?: () => Response; observe: (n: number) => Respon
     if (path === `/v1/wallet/attempts/${ATTEMPT}/sent`) return (opts.sent ?? (() => response(view({ state: "BROADCAST_ATTEMPTED", txHash: D }))))();
     if (path === `/v1/wallet/attempts/${ATTEMPT}/abandon`) return response(view({ state: "NOT_SENT", businessStatus: "NOT_EXECUTED" }));
     if (path === `/v1/wallet/attempts/${ATTEMPT}/recover`) return (opts.recover ?? (() => response(view())))(recovers++);
-    if (path === `/v1/wallet/attempts/${ATTEMPT}/prompt`) return (opts.prompt ?? ((b: any) => response(view({ prompt: { state: b.event === "prompted" ? "PROMPTED" : "UNKNOWN_SUBMISSION", at: NOW.toISOString(), detail: b.detail ?? null } }))))(body);
+    if (path === `/v1/wallet/attempts/${ATTEMPT}/prompt`) return (opts.prompt ?? ((b: any) => b.event === "not-prompted" ? response(view()) : response(view({ prompt: { state: b.event === "prompted" ? "PROMPTED" : "UNKNOWN_SUBMISSION", at: NOW.toISOString(), detail: b.detail ?? null } }))))(body);
     if (path === `/v1/wallet/attempts/${ATTEMPT}`) return opts.observe(observes++);
     throw new Error(`Unexpected URL: ${path}`);
   }));
@@ -275,16 +275,17 @@ describe("§10 item 4: the window is read from the clock after every await that 
     expect(provider.sends).toEqual([]); expect(paths(calls)).toEqual([]); // not even the marker: the check runs before it
     expect(r.attempt?.state).toBe("VALIDATED"); expect(isUncertain(r.attempt)).toBe(false);
   });
-  it("sendValidatedAttempt: the marker call itself is the slow await → the window is read once more right before the prompt; no eth_sendTransaction", async () => {
+  it("sendValidatedAttempt: the marker call itself is the slow await → the window is read once more right before the prompt; no eth_sendTransaction, the claim is handed back", async () => {
     let t = NOW.getTime();
-    const calls = fakeApi({ observe: () => response(view()), prompt: (b) => { t += 57_000; return response(view({ prompt: { state: "PROMPTED", at: NOW.toISOString(), detail: b.detail ?? null } })); } });
+    const calls = fakeApi({ observe: () => response(view()), prompt: (b) => { if (b.event === "not-prompted") return response(view()); t += 57_000; return response(view({ prompt: { state: "PROMPTED", at: NOW.toISOString(), detail: b.detail ?? null } })); } });
     const provider = wallet(() => D);
     const events: string[] = [];
     const r = await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view(), withToken, poll: { now: () => t }, onEvent: (e) => events.push(e.phase) });
     expect(r.phase).toBe("error"); expect(r.error?.code).toBe("WINDOW_CLOSED"); expect(r.error?.text).toMatch(/closes in 3 s/);
     expect(provider.sends).toEqual([]); expect(events).not.toContain("prompting");
-    expect(paths(calls)).toEqual([PROMPT_PATH]); // the marker was written — so the attempt now reads as uncertain (the safe direction: recover decides, nothing is prompted)
-    expect(isUncertain(r.attempt)).toBe(true);
+    expect(paths(calls)).toEqual([PROMPT_PATH, PROMPT_PATH]); // the claim was granted, the re-check failed → the claim is handed back (not-prompted, with the same claim id)
+    expect(calls[0].body).toMatchObject({ event: "prompted", claimId: expect.any(String) }); expect(calls[1].body).toEqual({ event: "not-prompted", detail: "WINDOW_CLOSED", claimId: calls[0].body.claimId });
+    expect(isUncertain(r.attempt)).toBe(false); expect(rememberedAttempt(ATTEMPT)?.promptState ?? null).toBeNull(); // nothing was prompted and the service knows it: a plain validated attempt again
   });
 });
 
@@ -330,7 +331,8 @@ describe("ambiguous submission: the wallet threw something that is not a rejecti
     const provider = wallet(() => { const e: any = new Error("Request timed out"); e.code = -32603; throw e; });
     const r = await executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken, onEvent: (e) => events.push({ phase: e.phase, state: e.attempt?.state }), poll: { intervalMs: 2000, now, wait: async (ms) => { t += ms; } } });
     expect(paths(calls)).toEqual(["POST /v1/wallet/attempts", PROMPT_PATH, PROMPT_PATH, `POST /v1/wallet/attempts/${ATTEMPT}/recover`, `GET /v1/wallet/attempts/${ATTEMPT}`, `GET /v1/wallet/attempts/${ATTEMPT}`]); // prompted → unknown-submission markers, recover first, then observe
-    expect(calls.filter((c) => c.path.endsWith("/prompt")).map((c) => c.body)).toEqual([{ event: "prompted" }, { event: "unknown-submission", detail: expect.stringMatching(/Request timed out/) }]); // §10 item 1: the wallet's answer travels as the marker's detail
+    const prompts = calls.filter((c) => c.path.endsWith("/prompt")).map((c) => c.body);
+    expect(prompts).toEqual([{ event: "prompted", claimId: expect.any(String) }, { event: "unknown-submission", detail: expect.stringMatching(/Request timed out/), claimId: prompts[0].claimId }]); // §10 item 1: the wallet's answer travels as the marker's detail, under the holder's claim id
     expect(rememberedAttempt(ATTEMPT)?.promptState).toBe("UNKNOWN_SUBMISSION");
     expect(calls.some((c) => c.path.endsWith("/abandon"))).toBe(false); // never "nothing was sent" by itself
     expect(provider.sends).toHaveLength(1); // never a second prompt
@@ -401,5 +403,73 @@ describe("messages", () => {
     expect(deviationRows({ mismatch: ["to", "value"], deviations: { gasLimit: { plan: "40735", actual: "60000" } } })).toEqual([
       { field: "to", plan: null, actual: null, kind: "mismatch" }, { field: "value", plan: null, actual: null, kind: "mismatch" }, { field: "gasLimit", plan: "40735", actual: "60000", kind: "deviation" },
     ]);
+  });
+});
+
+describe("review of 0c0d406 — the exclusive prompt claim and the re-check after it", () => {
+  const UNKNOWN = { state: "UNKNOWN_SUBMISSION" as const, at: NOW.toISOString(), detail: "timeout" };
+  /** a wallet whose reads change between calls: eth_chainId answers `chains[n]` on the n-th read, eth_accounts `accounts[n]` */
+  const changingWallet = (o: { chains?: number[]; accounts?: string[][] } = {}) => {
+    let c = 0, a = 0; const sends: any[] = [];
+    const request = vi.fn(async ({ method, params }: any) => {
+      if (method === "eth_accounts") { const list = o.accounts ?? [[ACCOUNT]]; return list[Math.min(a++, list.length - 1)]; }
+      if (method === "eth_chainId") { const chains = o.chains ?? [5042002]; return `0x${chains[Math.min(c++, chains.length - 1)].toString(16)}`; }
+      if (method === "eth_sendTransaction") { sends.push(params[0]); return D; }
+      throw new Error(`unexpected ${method}`);
+    });
+    return { request, sends } as any;
+  };
+  it("P1-1: the claim is refused (409 PROMPT_CLAIMED — another tab holds it) → no eth_sendTransaction; the attempt is reconciled as uncertain and ends when it closes", async () => {
+    const calls = fakeApi({ observe: (n) => response(n === 0 ? view({ prompt: PROMPTED }) : view({ state: "CONFIRMED", txHash: D, businessTxHash: D, businessStatus: "SUCCESS", prompt: PROMPTED })), recover: () => response(view({ prompt: PROMPTED })),
+      prompt: () => response({ error: "PROMPT_CLAIMED", reason: "already claimed", attempt: view({ prompt: PROMPTED }) }, 409) });
+    const provider = wallet(() => D); const events: { phase: string; code?: string }[] = [];
+    const r = await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view(), withToken, onEvent: (e) => events.push({ phase: e.phase, code: e.error?.code }), poll: { wait: async () => {}, intervalMs: 0 } });
+    expect(provider.sends).toEqual([]); expect(events.map((e) => e.phase)).not.toContain("prompting");
+    expect(events[0]).toEqual({ phase: "uncertain", code: "PROMPT_CLAIMED" });
+    expect(paths(calls)).toEqual([PROMPT_PATH, `POST /v1/wallet/attempts/${ATTEMPT}/recover`, `GET /v1/wallet/attempts/${ATTEMPT}`, `GET /v1/wallet/attempts/${ATTEMPT}`]); // reconcile first, then observe; never a second prompt
+    expect(r.phase).toBe("done"); expect(r.attempt?.state).toBe("CONFIRMED"); expect(r.txHash).toBe(D);
+    expect(rememberedAttempt(ATTEMPT)?.promptState).toBe("PROMPTED"); // the other tab's claim is remembered here too: a refresh keeps the uncertainty
+    expect(attemptMessage(r.attempt, "done").text).toMatch(/Order payment confirmed/);
+  });
+  it("P1-1: a claim refused without the attempt in the body is still treated as held — uncertain, reconciled, no prompt", async () => {
+    let t = NOW.getTime();
+    const calls = fakeApi({ observe: () => response(view({ prompt: PROMPTED })), recover: () => response(view({ prompt: PROMPTED })), prompt: () => response({ error: "PROMPT_CLAIMED", reason: "already claimed" }, 409) });
+    const provider = wallet(() => D);
+    const r = await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view(), withToken, poll: { now: () => t, wait: async (ms) => { t += ms; }, intervalMs: 2000, ambiguousMaxMs: 4000 } });
+    expect(provider.sends).toEqual([]); expect(r.phase).toBe("uncertain"); expect(r.error?.code).toBe("PROMPT_CLAIMED"); expect(r.error?.text).toMatch(/Another tab or an earlier request/);
+    expect(calls[0].path).toBe(`/v1/wallet/attempts/${ATTEMPT}/prompt`); expect(calls.filter((c) => c.path.endsWith("/prompt"))).toHaveLength(1); // no hand-back: this call never held the claim
+    expect(isUncertain(r.attempt)).toBe(true);
+  });
+  it("P1-2: the wallet's chain changes while the claim request is pending → re-read after the claim, no eth_sendTransaction, the claim is handed back", async () => {
+    const calls = fakeApi({ observe: () => response(view()) });
+    const provider = changingWallet({ chains: [5042002, 1] });
+    const events: string[] = [];
+    const r = await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view(), withToken, onEvent: (e) => events.push(e.phase) });
+    expect(r.phase).toBe("error"); expect(r.error?.code).toBe("CHAIN_CHANGED"); expect(r.error?.text).toMatch(/on chain 1; the plan was validated for chain 5042002/); expect(r.error?.text).toMatch(/Nothing was prompted/);
+    expect(provider.sends).toEqual([]); expect(events).not.toContain("prompting");
+    expect(calls.map((c) => c.body?.event)).toEqual(["prompted", "not-prompted"]); expect(calls[1].body.claimId).toBe(calls[0].body.claimId); expect(calls[1].body.detail).toBe("CHAIN_CHANGED");
+    expect(isUncertain(r.attempt)).toBe(false); expect(rememberedAttempt(ATTEMPT)?.promptState ?? null).toBeNull();
+    const methods = provider.request.mock.calls.map((c: any[]) => c[0].method);
+    expect(methods.filter((m: string) => m === "eth_chainId")).toHaveLength(2); expect(methods.filter((m: string) => m === "eth_accounts")).toHaveLength(2); // once before the claim, once after it
+  });
+  it("P1-2: the account switches during the claim → ACCOUNT_CHANGED, nothing prompted, the claim handed back; a wallet that stops answering → WALLET_UNAVAILABLE, same", async () => {
+    let calls = fakeApi({ observe: () => response(view()) });
+    let r = await sendValidatedAttempt({ provider: changingWallet({ accounts: [[ACCOUNT], [OTHER]] }), account: ACCOUNT, attempt: view(), withToken });
+    expect(r.phase).toBe("error"); expect(r.error?.code).toBe("ACCOUNT_CHANGED"); expect(calls.map((c) => c.body?.event)).toEqual(["prompted", "not-prompted"]); expect(isUncertain(r.attempt)).toBe(false);
+    calls = fakeApi({ observe: () => response(view()) });
+    let n = 0; const flaky = { request: vi.fn(async ({ method }: any) => { if (method === "eth_accounts") { if (n++ > 0) throw new Error("wallet locked"); return [ACCOUNT]; } if (method === "eth_chainId") return "0x4cef52"; throw new Error(`unexpected ${method}`); }) } as any;
+    r = await sendValidatedAttempt({ provider: flaky, account: ACCOUNT, attempt: view(), withToken });
+    expect(r.phase).toBe("error"); expect(r.error?.code).toBe("WALLET_UNAVAILABLE"); expect(calls.map((c) => c.body?.event)).toEqual(["prompted", "not-prompted"]);
+  });
+  it("P1-2: when the hand-back is refused (the marker became UNKNOWN_SUBMISSION meanwhile) the attempt stays uncertain and is reconciled, never prompted", async () => {
+    const calls = fakeApi({ observe: () => response(view({ prompt: UNKNOWN })), recover: () => response(view({ prompt: UNKNOWN })),
+      prompt: (b) => (b.event === "not-prompted" ? response({ error: "PROMPT_NOT_RELEASABLE", reason: "the marker is UNKNOWN_SUBMISSION", attempt: view({ prompt: UNKNOWN }) }, 409) : response(view({ prompt: PROMPTED }))) });
+    const provider = changingWallet({ chains: [5042002, 1] });
+    let t = NOW.getTime(); const events: string[] = [];
+    const r = await sendValidatedAttempt({ provider, account: ACCOUNT, attempt: view(), withToken, onEvent: (e) => events.push(e.phase), poll: { now: () => t, wait: async (ms) => { t += ms; }, intervalMs: 2000, ambiguousMaxMs: 4000 } });
+    expect(provider.sends).toEqual([]); expect(events).not.toContain("prompting");
+    expect(r.phase).toBe("uncertain"); expect(r.error?.code).toBe("CHAIN_CHANGED"); expect(r.error?.text).toMatch(/could not be handed back/);
+    expect(paths(calls).slice(0, 3)).toEqual([PROMPT_PATH, PROMPT_PATH, `POST /v1/wallet/attempts/${ATTEMPT}/recover`]); // claim, failed hand-back, then reconcile first
+    expect(isUncertain(r.attempt)).toBe(true); expect(r.attempt?.prompt?.state).toBe("UNKNOWN_SUBMISSION");
   });
 });

@@ -239,33 +239,39 @@ export async function runFixture(o: RunOptions) {
         await o.executionStore?.markBroadcastAttempted(attemptId, { headBlock }); // durable: from here on the transaction MAY be on the network
         broadcastStarted = true;
         log("broadcastAttempted", { businessTxHash: txHash, headBlock, why: "the durable marker is written before the send: from here on the transaction may be on the network, whatever happens to this process" });
-        let accepted = true; let sendError: string | null = null;
-        try { await o.publicClient.sendRawTransaction({ serializedTransaction: raw }); } catch (e: any) { accepted = false; sendError = String(e?.shortMessage ?? e?.message ?? e).slice(0, 160); }
-        execution.businessTxHash = txHash; execution.chainStatus = "PENDING"; execution.businessStatus = "PENDING";
-        log("broadcast", { businessTxHash: txHash, accepted, error: sendError, why: accepted ? "raw transaction handed to the node" : "the node did not acknowledge the broadcast; it may still have propagated, so the outcome is reconciled from this hash and the order state — never by signing a replacement" });
-        await artifact("execution", execution);
-        if (o.interruptAfterBroadcast) {
-          // labelled interruption (design v3.3 §4): the process stops waiting here, exactly like a crash after the send would
-          execution.chainStatus = "UNKNOWN"; execution.businessStatus = "UNKNOWN";
-          await o.executionStore?.persistOutcome(attemptId, { chainStatus: "UNKNOWN", businessStatus: "UNKNOWN", businessTxHash: txHash, note: "simulated interruption after the broadcast: no receipt was awaited; the outcome is established by reconciliation from the original hash and the order state" });
-          log("interruptedAfterBroadcast", { businessTxHash: txHash, why: "SIMULATED interruption: this run stopped waiting right after the send, as a crashed process would; recovery works from the recorded hash and the order state, never by signing a replacement" });
+        if (new Date(finalValidation.expiresAt) <= new Date()) { // review of 0c0d406 (P1-3): the marker write was the last await before the send — the clock is read once more; a transaction this process knows it never sent is closed as never sent
+          await o.executionStore?.persistOutcome(attemptId, { chainStatus: "SIGNED_NOT_BROADCAST", businessStatus: "NOT_EXECUTED", businessTxHash: null, note: "final validation expired while the broadcast marker was being written, before the send; nothing was sent" });
+          log("notBroadcast", { why: "final validation expired after the broadcast marker and before the send; the signed transaction is discarded and nothing reached the network" });
+          execution.chainStatus = "SIGNED_NOT_BROADCAST"; execution.businessStatus = "NOT_EXECUTED";
         } else {
-          try {
-            const rcpt = await o.publicClient.waitForTransactionReceipt({ hash: txHash, timeout: o.receiptTimeoutMs ?? 90_000 });
-            execution.chainStatus = rcpt.status === "success" ? "CONFIRMED" : "REVERTED";
-            businessReceipt = { ...receiptFacts(rcpt), blockNumber: rcpt.blockNumber.toString(), status: String(rcpt.status) };
-            const ord = await o.publicClient.readContract({ address: merchant, abi: GET_ORDER_ABI, functionName: "getOrder", args: [order.orderId], blockNumber: rcpt.blockNumber });
-            const paidOk = rcpt.status === "success" && ord[2] === true && ord[0].toLowerCase() === runnerAcct.address.toLowerCase() && ord[1] === AMOUNT;
-            execution.businessStatus = paidOk ? "SUCCESS" : "FAILED";
-            postcondition = { orderId: order.orderId, paid: ord[2], payer: ord[0], amountNativeAtomic: ord[1].toString(), block: rcpt.blockNumber.toString(), receiptStatus: rcpt.status };
-            execution.postconditionEvidenceDigests = [postconditionDigest(postcondition)];
-            await o.executionStore?.persistOutcome(attemptId, { chainStatus: execution.chainStatus, businessStatus: execution.businessStatus, businessTxHash: txHash, block: rcpt.blockNumber.toString(), postcondition });
-            log("postcondition", { ...postcondition, why: "chain receipt success is not business success: the order itself must read as paid, by this payer, for the exact amount" });
-            await artifact("postcondition", { postcondition, businessReceipt });
-          } catch (e: any) {
+          let accepted = true; let sendError: string | null = null;
+          try { await o.publicClient.sendRawTransaction({ serializedTransaction: raw }); } catch (e: any) { accepted = false; sendError = String(e?.shortMessage ?? e?.message ?? e).slice(0, 160); }
+          execution.businessTxHash = txHash; execution.chainStatus = "PENDING"; execution.businessStatus = "PENDING";
+          log("broadcast", { businessTxHash: txHash, accepted, error: sendError, why: accepted ? "raw transaction handed to the node" : "the node did not acknowledge the broadcast; it may still have propagated, so the outcome is reconciled from this hash and the order state — never by signing a replacement" });
+          await artifact("execution", execution);
+          if (o.interruptAfterBroadcast) {
+            // labelled interruption (design v3.3 §4): the process stops waiting here, exactly like a crash after the send would
             execution.chainStatus = "UNKNOWN"; execution.businessStatus = "UNKNOWN";
-            await o.executionStore?.persistOutcome(attemptId, { chainStatus: "UNKNOWN", businessStatus: "UNKNOWN", businessTxHash: txHash, note: `receipt not obtained: ${String(e?.shortMessage ?? e?.message ?? e).slice(0, 160)}` });
-            log("outcomeUnknown", { businessTxHash: txHash, why: "no receipt within the bounded wait; the transaction may have reached the network, so this attempt stays unresolved until reconciliation establishes the outcome from the original hash and the order state" });
+            await o.executionStore?.persistOutcome(attemptId, { chainStatus: "UNKNOWN", businessStatus: "UNKNOWN", businessTxHash: txHash, note: "simulated interruption after the broadcast: no receipt was awaited; the outcome is established by reconciliation from the original hash and the order state" });
+            log("interruptedAfterBroadcast", { businessTxHash: txHash, why: "SIMULATED interruption: this run stopped waiting right after the send, as a crashed process would; recovery works from the recorded hash and the order state, never by signing a replacement" });
+          } else {
+            try {
+              const rcpt = await o.publicClient.waitForTransactionReceipt({ hash: txHash, timeout: o.receiptTimeoutMs ?? 90_000 });
+              execution.chainStatus = rcpt.status === "success" ? "CONFIRMED" : "REVERTED";
+              businessReceipt = { ...receiptFacts(rcpt), blockNumber: rcpt.blockNumber.toString(), status: String(rcpt.status) };
+              const ord = await o.publicClient.readContract({ address: merchant, abi: GET_ORDER_ABI, functionName: "getOrder", args: [order.orderId], blockNumber: rcpt.blockNumber });
+              const paidOk = rcpt.status === "success" && ord[2] === true && ord[0].toLowerCase() === runnerAcct.address.toLowerCase() && ord[1] === AMOUNT;
+              execution.businessStatus = paidOk ? "SUCCESS" : "FAILED";
+              postcondition = { orderId: order.orderId, paid: ord[2], payer: ord[0], amountNativeAtomic: ord[1].toString(), block: rcpt.blockNumber.toString(), receiptStatus: rcpt.status };
+              execution.postconditionEvidenceDigests = [postconditionDigest(postcondition)];
+              await o.executionStore?.persistOutcome(attemptId, { chainStatus: execution.chainStatus, businessStatus: execution.businessStatus, businessTxHash: txHash, block: rcpt.blockNumber.toString(), postcondition });
+              log("postcondition", { ...postcondition, why: "chain receipt success is not business success: the order itself must read as paid, by this payer, for the exact amount" });
+              await artifact("postcondition", { postcondition, businessReceipt });
+            } catch (e: any) {
+              execution.chainStatus = "UNKNOWN"; execution.businessStatus = "UNKNOWN";
+              await o.executionStore?.persistOutcome(attemptId, { chainStatus: "UNKNOWN", businessStatus: "UNKNOWN", businessTxHash: txHash, note: `receipt not obtained: ${String(e?.shortMessage ?? e?.message ?? e).slice(0, 160)}` });
+              log("outcomeUnknown", { businessTxHash: txHash, why: "no receipt within the bounded wait; the transaction may have reached the network, so this attempt stays unresolved until reconciliation establishes the outcome from the original hash and the order state" });
+            }
           }
         }
         }

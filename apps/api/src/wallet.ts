@@ -29,8 +29,11 @@ export type AttemptRow = {
   business_status: string | null; business_tx_hash: string | null; block: string | null; receipt_json: string | null; postcondition_json: string | null; note: string | null; reconciliation_json: string; refusal_json: string | null;
   fee_receipt_json: string | null; prompt_json: string | null; created_at: string; updated_at: string;
 };
-export type PromptMarker = { state: "PROMPTED" | "UNKNOWN_SUBMISSION"; at: string; detail: string | null };
+/** `claimId`: the prompt claim's secret, known to its holder only (never part of the attempt view); it releases an untouched claim (review of `0c0d406`, P1-1) */
+export type PromptMarker = { state: "PROMPTED" | "UNKNOWN_SUBMISSION"; at: string; detail: string | null; claimId?: string };
 const promptOf = (a: AttemptRow): PromptMarker | null => (a.prompt_json ? JSON.parse(a.prompt_json) : null);
+/** the marker as the view shows it: without the claim id */
+const publicPrompt = (a: AttemptRow): Omit<PromptMarker, "claimId"> | null => { const m = promptOf(a); if (!m) return null; const { claimId: _c, ...pub } = m; return pub; };
 /** The slice of chain access reconciliation uses (a viem PublicClient satisfies it through `walletRpcFromClient`; tests inject a fake). */
 export type WalletRpc = {
   getTransaction(a: { hash: Hex }): Promise<any>;
@@ -57,7 +60,7 @@ export const ATTEMPTS_PER_CLIENT_PER_DAY = Number(process.env.WALLET_ATTEMPTS_PE
 /** a polling browser observes at most this often; the chain is not re-read for every GET */
 const OBSERVE_MIN_INTERVAL_MS = 1500;
 
-export type AttemptResult = { ok: true; status: number; attempt: ReturnType<typeof shapeAttempt> } | { ok: false; status: number; error: string; reason: string; reasons?: string[]; attemptId?: string | null };
+export type AttemptResult = { ok: true; status: number; attempt: ReturnType<typeof shapeAttempt> } | { ok: false; status: number; error: string; reason: string; reasons?: string[]; attemptId?: string | null; /** the current attempt, when a conflict is best answered with it (PROMPT_CLAIMED) */ attempt?: ReturnType<typeof shapeAttempt> };
 const bad = (reason: string): AttemptResult => ({ ok: false, status: 400, error: "INVALID_INPUT", reason });
 const conflict = (error: string, reason: string, extra: Partial<AttemptResult> = {}): AttemptResult => ({ ok: false, status: 409, error, reason, ...(extra as object) });
 const notFound: AttemptResult = { ok: false, status: 404, error: "NOT_FOUND", reason: "unknown attempt" }; // no existence leak across owners
@@ -136,18 +139,46 @@ export async function markSent(db: Db, principal: string, attemptId: string, txH
   await reconcileWalletAttempts(db, rpc, { attemptId, source: "sent" }).catch(() => {});
   return { ok: true, status: 200, attempt: shapeAttempt(db, getAttemptRow(db, attemptId)!) };
 }
-/** POST …/prompt: the browser is about to ask the wallet (PROMPTED), or the wallet answered with something that is not a rejection
- *  (UNKNOWN_SUBMISSION). Either marker makes a VALIDATED attempt uncertain: it is reconciled from the chain before anything else
- *  may be signed, and a page refresh restores the uncertainty (review round 3, item 1). */
+const PROMPTED_NOTE = "the wallet was asked to sign this plan; until a hash is reported or the visitor states a rejection, the transaction may have been submitted";
+const UNKNOWN_NOTE = "the wallet returned an error that is not a rejection; the transaction may have been submitted — reconciled from the order state before anything else";
+const RELEASED_NOTE = "the prompt claim was handed back by its holder before any wallet request (its re-check right before the prompt failed); nothing was prompted";
+/** POST …/prompt — the prompt CLAIM (review round 3 and the review of `0c0d406`, docs/LIFECYCLE.md §10). `prompted`: the browser is about to
+ *  ask the wallet; the claim is granted atomically to the FIRST caller only (the marker is written where none exists, in one statement), so a
+ *  second tab, a stale view or a retry gets 409 PROMPT_CLAIMED with the attempt and reconciles instead of prompting again. `unknown-submission`:
+ *  the wallet answered with something that is not a rejection — recorded on top of the claim (a claim id, when given, must be the holder's),
+ *  never downgraded. `not-prompted`: the holder states that it did NOT ask the wallet after all (its re-check right before the prompt failed)
+ *  and hands the claim back with its claim id; a claim that already turned into UNKNOWN_SUBMISSION, somebody else's claim or a closed attempt
+ *  is never released. Either marker makes a VALIDATED attempt uncertain: it is reconciled from the chain before anything else may be signed,
+ *  and a page refresh restores the uncertainty. The claim id never appears in the attempt view. */
 export function markPrompted(db: Db, principal: string, attemptId: string, body: any): AttemptResult {
   const a = owned(db, principal, attemptId); if (!a) return notFound;
   const event = String(body?.event ?? "");
-  if (event !== "prompted" && event !== "unknown-submission") return bad("event must be prompted or unknown-submission");
+  if (event !== "prompted" && event !== "unknown-submission" && event !== "not-prompted") return bad("event must be prompted, unknown-submission or not-prompted");
   if (a.state !== "VALIDATED") return conflict("ATTEMPT_NOT_OPEN", `the attempt is ${a.state}; a prompt is recorded for a validated attempt only`);
+  const claimId = typeof body?.claimId === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(body.claimId) ? body.claimId : null;
+  const detail = typeof body?.detail === "string" ? body.detail.slice(0, 200) : null;
+  const view = () => shapeAttempt(db, getAttemptRow(db, attemptId)!);
   const prior = promptOf(a);
-  const next: PromptMarker = { state: event === "prompted" ? (prior?.state === "UNKNOWN_SUBMISSION" ? "UNKNOWN_SUBMISSION" : "PROMPTED") : "UNKNOWN_SUBMISSION", at: now(), detail: typeof body?.detail === "string" ? body.detail.slice(0, 200) : prior?.detail ?? null };
-  run(db, "UPDATE wallet_attempts SET prompt_json = ?, note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED'", JSON.stringify(next), next.state === "PROMPTED" ? "the wallet was asked to sign this plan; until a hash is reported or the visitor states a rejection, the transaction may have been submitted" : "the wallet returned an error that is not a rejection; the transaction may have been submitted — reconciled from the order state before anything else", now(), attemptId);
-  return { ok: true, status: 200, attempt: shapeAttempt(db, getAttemptRow(db, attemptId)!) };
+  if (event === "prompted") {
+    const next: PromptMarker = { state: "PROMPTED", at: now(), detail, claimId: claimId ?? randomUUID() };
+    const r = run(db, "UPDATE wallet_attempts SET prompt_json = ?, note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED' AND prompt_json IS NULL", JSON.stringify(next), PROMPTED_NOTE, now(), attemptId);
+    if (Number(r.changes) === 1) return { ok: true, status: 200, attempt: view() };
+    const held = promptOf(getAttemptRow(db, attemptId)!);
+    return conflict("PROMPT_CLAIMED", `the wallet prompt for this attempt was already claimed at ${held?.at ?? "an earlier time"} (${held?.state ?? "marker present"}); the transaction may have been submitted — reconcile instead of prompting again`, { attempt: view() });
+  }
+  if (event === "unknown-submission") {
+    if (prior?.claimId && claimId && claimId !== prior.claimId) return conflict("PROMPT_CLAIMED", "another prompt claim holds this attempt; its holder's answer decides — reconcile instead", { attempt: view() });
+    const next: PromptMarker = { state: "UNKNOWN_SUBMISSION", at: now(), detail: detail ?? prior?.detail ?? null, ...(prior?.claimId ?? claimId ? { claimId: prior?.claimId ?? claimId! } : {}) };
+    run(db, "UPDATE wallet_attempts SET prompt_json = ?, note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED'", JSON.stringify(next), UNKNOWN_NOTE, now(), attemptId);
+    return { ok: true, status: 200, attempt: view() };
+  }
+  // not-prompted: hand back the holder's untouched claim — compare-and-set on the exact marker that was read, so a concurrent change wins
+  if (!prior) return conflict("PROMPT_NOT_CLAIMED", "no prompt claim is recorded for this attempt; nothing to hand back");
+  if (prior.state !== "PROMPTED") return conflict("PROMPT_NOT_RELEASABLE", `the marker is ${prior.state}: the wallet answered ambiguously, so the claim cannot be handed back — reconcile instead`, { attempt: view() });
+  if (!prior.claimId || !claimId || claimId !== prior.claimId) return conflict("PROMPT_CLAIMED", "only the holder of the prompt claim may hand it back (claim id mismatch); reconcile instead", { attempt: view() });
+  const r = run(db, "UPDATE wallet_attempts SET prompt_json = NULL, note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED' AND prompt_json = ?", RELEASED_NOTE, now(), attemptId, a.prompt_json);
+  if (Number(r.changes) !== 1) return conflict("PROMPT_NOT_RELEASABLE", "the marker changed while it was being handed back; reconcile instead", { attempt: view() });
+  return { ok: true, status: 200, attempt: view() };
 }
 /** POST …/abandon: the wallet prompt was rejected; nothing was sent. */
 export function abandonAttempt(db: Db, principal: string, attemptId: string): AttemptResult {
@@ -440,7 +471,7 @@ const nextActionOf = (a: AttemptRow): string => {
 export function shapeAttempt(db: Db, a: AttemptRow, opts: { brief?: boolean } = {}) {
   const decision = JSON.parse(a.decision_json); const refusal = a.refusal_json ? JSON.parse(a.refusal_json) : null; const dev = a.deviations_json ? JSON.parse(a.deviations_json) : null;
   const base = { attemptId: a.attempt_id, executionMode: "wallet" as const, state: a.state, requestId: a.request_id, orderId: a.order_id, merchant: a.merchant, payer: a.payer, amountNativeAtomic: a.amount_atomic, labels: JSON.parse(a.labels_json),
-    decision: decision.decision, decisionReasons: decision.reasons, refusal, validUntil: a.valid_until, prompt: promptOf(a), txHash: a.tx_hash, nonce: a.nonce, from: a.from_addr, broadcastBlock: a.broadcast_block,
+    decision: decision.decision, decisionReasons: decision.reasons, refusal, validUntil: a.valid_until, prompt: publicPrompt(a), txHash: a.tx_hash, nonce: a.nonce, from: a.from_addr, broadcastBlock: a.broadcast_block,
     businessStatus: a.business_status, businessTxHash: a.business_tx_hash, block: a.block, note: a.note, deviations: dev, nextAction: nextActionOf(a), passportAvailable: a.state !== "VALIDATED",
     businessExecution: { state: a.state, txHash: a.tx_hash, nonce: a.nonce, broadcastBlock: a.broadcast_block, consumedBy: null, note: a.note, validUntil: a.valid_until },
     createdAt: a.created_at, updatedAt: a.updated_at };

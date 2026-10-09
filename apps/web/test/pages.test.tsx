@@ -73,7 +73,7 @@ function developerApi(firstPin = "100") {
     const method = init?.method ?? "GET";
     if (path === "/v1/session") return response(SESSION(++sessions), 201);
     // §10 item 1: the prompt marker route answers the view with `prompt` set
-    if (path === `/v1/wallet/attempts/${ATTEMPT_ID}/prompt`) { const b = JSON.parse(init!.body as string); prompts.push(b); return response({ ...VALIDATED, prompt: { state: b.event === "prompted" ? "PROMPTED" : "UNKNOWN_SUBMISSION", at: NOW.toISOString(), detail: b.detail ?? null } }); }
+    if (path === `/v1/wallet/attempts/${ATTEMPT_ID}/prompt`) { const b = JSON.parse(init!.body as string); prompts.push(b); return response({ ...VALIDATED, prompt: b.event === "not-prompted" ? null : { state: b.event === "prompted" ? "PROMPTED" : "UNKNOWN_SUBMISSION", at: NOW.toISOString(), detail: b.detail ?? null } }); }
     if (path === "/v1/demo/orders" && method === "POST") return response(CREATED, 201);
     if (path === "/v1/demo/orders") return response({ orders: [ORDER_VIEW] });
     if (path.startsWith("/v1/demo/orders/")) return response(ORDER_VIEW);
@@ -169,9 +169,9 @@ it("Developer step 4 executes through the attempt API: validated plan → eth_se
   expect(api.attempts).toHaveLength(1); expect(api.attempts[0]).toMatchObject({ requestId: REQUEST, orderId: order.orderId });
   expect(policyDigest(api.attempts[0].policy)).toBe(api.sent[1].intent.policyDigest); // the buyer's policy is the one the intent references
   expect(api.attempts[0].policy.maxFinalValidationAgeSeconds).toBe(60); // the human-paced window
-  expect(txRequest).toMatchObject({ from: ACCOUNT, to: MERCHANT, data: PLAN.data, type: "0x2", gas: "0x9f1f" }); expect(txRequest.nonce).toBeUndefined();
+  expect(txRequest).toMatchObject({ from: ACCOUNT, to: MERCHANT, data: PLAN.data, type: "0x2", gas: "0x9f1f", chainId: "0x4cef52" }); expect(txRequest.nonce).toBeUndefined();
   expect(JSON.parse(rememberedAtPrompt!)[ATTEMPT_ID]).toMatchObject({ attemptId: ATTEMPT_ID, orderId: order.orderId, state: "VALIDATED", promptState: "PROMPTED" }); // remembered, with the §10 marker, BEFORE the wallet was asked
-  expect(api.prompts).toEqual([{ event: "prompted" }]); // §10 item 1: the marker is durable on the server before the prompt; a hash afterwards is never an unknown submission
+  expect(api.prompts).toEqual([{ event: "prompted", claimId: expect.any(String) }]); // one exclusive claim, with this call's id; // §10 item 1: the marker is durable on the server before the prompt; a hash afterwards is never an unknown submission
   const methods = h.wallet.provider.request.mock.calls.map((c: any[]) => c[0].method);
   expect(methods.filter((m: string) => m === "eth_sendTransaction")).toHaveLength(1);
   expect(methods.lastIndexOf("eth_accounts")).toBeLessThan(methods.indexOf("eth_sendTransaction")); expect(methods.lastIndexOf("eth_chainId")).toBeLessThan(methods.indexOf("eth_sendTransaction")); // re-read right before the prompt

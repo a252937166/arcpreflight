@@ -62,6 +62,8 @@ export function maybeInjectTestWallet(): boolean {
       if (f === "timeout-tx-no-send") throw timedOut();
       if (!req || typeof req !== "object") throw new Error("eth_sendTransaction needs a transaction object");
       if (req.from && String(req.from).toLowerCase() !== account.address.toLowerCase()) { const e: any = new Error("from is not the connected account"); e.code = 4100; throw e; }
+      // like MetaMask: a request bound to another chain is refused (the page binds every request to the validated plan's chainId)
+      if (req.chainId !== undefined && req.chainId !== null && Number(req.chainId) !== chainId) { const e: any = new Error(`Invalid transaction params: chainId ${Number(req.chainId)} does not match the wallet's network ${chainId}`); e.code = -32602; throw e; }
       const to = req.to as Hex | undefined; const data = (req.data ?? req.input ?? "0x") as Hex; const value = big(req.value, 0n);
       const [nonceHex, gasHex, priceHex] = await Promise.all([
         req.nonce !== undefined ? Promise.resolve(req.nonce) : rpc("eth_getTransactionCount", [account.address, "pending"]),

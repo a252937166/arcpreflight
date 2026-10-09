@@ -289,3 +289,21 @@ so a passport built from artefacts alone (API after a crash, CLI always) has `pa
 derives the relayer from the fee transaction's sender at export. Prompt markers: a later `prompted` never downgrades an
 `UNKNOWN_SUBMISSION`; closed attempts take no prompt (409). The observe read backfills the fee relay receipt of closed attempts;
 the worker backfills attempts closed in the last 24 h (10 per pass). Browser (as built): the `prompted` marker is written before `eth_sendTransaction` and also remembered in the browser per attempt and per API instance, so a refresh restores the uncertainty even while the server view lags; a marker that cannot be written prompts nothing (`PROMPT_MARKER_FAILED`); a `409 ATTEMPT_OPEN` whose open attempt carries a marker is reconciled (recover once, then observe) instead of being offered to the wallet; an ambiguous wallet answer writes `unknown-submission`, reconciles first (`/recover`), then observes every ~2 s with a recover every third tick for up to 60 s, and leaves the visitor's explicit abandon as the only "nothing was sent"; the validation window is re-read after every await (`eth_accounts`, `eth_chainId`, the marker call) immediately before the prompt.
+
+**Follow-up (review of `0c0d406`, 2026-10-09).** *(P1-1)* The prompt marker is an **exclusive claim**: `POST …/prompt { event: "prompted",
+claimId }` writes the marker only where none exists, in one statement, so exactly one caller is granted; every other caller — a second tab, a
+stale view, a retry — receives `409 PROMPT_CLAIMED` with the current attempt in the body and reconciles instead of prompting.
+`unknown-submission` records the holder's ambiguous answer on top of the claim (a claim id, when given, must be the holder's); `{ event:
+"not-prompted", claimId }` hands an untouched claim back — the holder's re-check right before the prompt failed, so nothing was prompted and
+the attempt is a plain `VALIDATED` attempt again; an `UNKNOWN_SUBMISSION` marker (`409 PROMPT_NOT_RELEASABLE`), somebody else's claim
+(`409 PROMPT_CLAIMED`), a missing claim (`409 PROMPT_NOT_CLAIMED`) or a closed attempt (`409 ATTEMPT_NOT_OPEN`) is never released. The claim
+id is generated per call, kept in that call's memory only and never appears in the attempt view, so a reloaded page can never hand back a
+claim it did not make. *(P1-2)* After the claim call the browser reads the wallet's account and chain **again** and the clock after them,
+immediately before `eth_sendTransaction`; a change hands the claim back and says why (`ACCOUNT_CHANGED`, `CHAIN_CHANGED`, `WINDOW_CLOSED`,
+`WALLET_UNAVAILABLE`); a refused hand-back leaves the attempt uncertain and reconciles it. The request handed to the wallet carries the plan's
+`chainId`, which wallets that honour it (MetaMask-style) refuse on another network; the injected test wallet does the same. *(P1-3)* The
+runner reads the clock once more after the broadcast marker — the last await before the send — and closes a transaction it never sent as
+`SIGNED_NOT_BROADCAST`; the recovery rebroadcast judges the window by a clock read after the receipt, order, nonce and pool reads and again
+after the decryption, never by a time captured before them. *(P2)* The verifier requires the recorded approval status expiry to equal the
+referenced baseline's (the producer copies it from that baseline) and to hold at final validation; a disagreement is contradictory evidence
+and fails `APPROVAL_COVERAGE` for an executed run.

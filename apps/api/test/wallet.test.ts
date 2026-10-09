@@ -285,7 +285,7 @@ describe("review round 3 — durable prompt uncertainty, no closing without the 
     expect(prompted.ok && (prompted.attempt as any)).toMatchObject({ state: "VALIDATED", prompt: { state: "PROMPTED" }, nextAction: expect.stringContaining("may have been submitted — recover first") });
     const unknown = markPrompted(db, OWNER, id, { event: "unknown-submission", detail: "timeout after 30s" });
     expect(unknown.ok && (unknown.attempt as any).prompt).toMatchObject({ state: "UNKNOWN_SUBMISSION", detail: "timeout after 30s" });
-    expect(markPrompted(db, OWNER, id, { event: "prompted" }).ok && (getAttemptRow(db, id)!.prompt_json as string)).toContain("UNKNOWN_SUBMISSION"); // a later "prompted" never downgrades the uncertainty
+    expect(markPrompted(db, OWNER, id, { event: "prompted" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" }); expect(getAttemptRow(db, id)!.prompt_json).toContain("UNKNOWN_SUBMISSION"); // a later "prompted" is refused and never downgrades the uncertainty
     // inside the window the worker still waits, but an observe read (the page after a refresh) reconciles from the chain at once
     const paid = fakeRpc({ paid: true, receipt: minedReceipt(OTHER), txs: { [OTHER.toLowerCase()]: planTx({ hash: OTHER }) }, logs: [{ transactionHash: OTHER, blockNumber: "0x3ef1a0a" }] });
     expect(await reconcileWalletAttempts(db, fakeRpc({ paid: false }), { attemptId: id, source: "worker" })).toEqual({ resolved: 0, pending: 1 });
@@ -293,6 +293,38 @@ describe("review round 3 — durable prompt uncertainty, no closing without the 
     const seen = await observeAttempt(db, OWNER, id, paid);
     expect(seen.ok && (seen.attempt as any)).toMatchObject({ state: "CONFIRMED", businessStatus: "SUCCESS", businessTxHash: OTHER, prompt: { state: "UNKNOWN_SUBMISSION" } });
     expect(markPrompted(db, OWNER, id, { event: "prompted" })).toMatchObject({ ok: false, status: 409 }); // closed attempts take no prompt
+  });
+  it("review of 0c0d406 (P1-1): the prompt claim is exclusive — one grant, 409 PROMPT_CLAIMED with the attempt for everyone else; only the holder hands an untouched claim back", async () => {
+    const id = await validated();
+    const { markPrompted } = await import("../src/wallet.js");
+    const first = markPrompted(db, OWNER, id, { event: "prompted", claimId: "tab-a-claim-0001" });
+    expect(first.ok && (first.attempt as any).prompt).toEqual({ state: "PROMPTED", at: expect.any(String), detail: null }); // the claim id never shows in the view
+    expect(getAttemptRow(db, id)!.prompt_json).toContain("tab-a-claim-0001");
+    const second = markPrompted(db, OWNER, id, { event: "prompted", claimId: "tab-b-claim-0002" });
+    expect(second).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED", reason: expect.stringContaining("reconcile instead of prompting again"), attempt: { attemptId: id, state: "VALIDATED", prompt: { state: "PROMPTED" } } });
+    expect(getAttemptRow(db, id)!.prompt_json).toContain("tab-a-claim-0001"); // the first claim stands
+    // a stranger cannot hand it back; the holder can — and the attempt is a plain VALIDATED attempt again (nothing was prompted)
+    expect(markPrompted(db, OWNER, id, { event: "not-prompted", claimId: "tab-b-claim-0002" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" });
+    const released = markPrompted(db, OWNER, id, { event: "not-prompted", claimId: "tab-a-claim-0001" });
+    expect(released.ok && (released.attempt as any)).toMatchObject({ state: "VALIDATED", prompt: null, note: expect.stringContaining("nothing was prompted") });
+    expect(markPrompted(db, OWNER, id, { event: "not-prompted", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_NOT_CLAIMED" });
+    // tab B may claim now; its ambiguous answer upgrades ITS claim; a stale "prompted" or a stranger's "unknown-submission" is refused; an UNKNOWN_SUBMISSION is never handed back
+    expect(markPrompted(db, OWNER, id, { event: "prompted", claimId: "tab-b-claim-0002" }).ok).toBe(true);
+    expect(markPrompted(db, OWNER, id, { event: "unknown-submission", detail: "timeout", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" });
+    const unknown = markPrompted(db, OWNER, id, { event: "unknown-submission", detail: "timeout", claimId: "tab-b-claim-0002" });
+    expect(unknown.ok && (unknown.attempt as any).prompt).toMatchObject({ state: "UNKNOWN_SUBMISSION", detail: "timeout" });
+    expect(markPrompted(db, OWNER, id, { event: "prompted", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" });
+    expect(markPrompted(db, OWNER, id, { event: "not-prompted", claimId: "tab-b-claim-0002" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_NOT_RELEASABLE" });
+    // many interleaved claims on a fresh attempt: exactly one grant (the statement itself is the lock)
+    expect(abandonAttempt(db, OWNER, id).ok).toBe(true);
+    const id2 = await validated();
+    const grants = Array.from({ length: 50 }, (_, k) => markPrompted(db, OWNER, id2, { event: "prompted", claimId: `claim-${String(k).padStart(4, "0")}` })).filter((r) => r.ok);
+    expect(grants).toHaveLength(1);
+    // a claim id outside the accepted shape is replaced by a server-generated one; the holder then cannot hand it back (it never learns the id) — reconciliation decides
+    expect(abandonAttempt(db, OWNER, id2).ok).toBe(true);
+    const id3 = await validated();
+    expect(markPrompted(db, OWNER, id3, { event: "prompted", claimId: "x" }).ok).toBe(true);
+    expect(markPrompted(db, OWNER, id3, { event: "not-prompted", claimId: "x" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" });
   });
   it("a receipt without the transaction body leaves the attempt open until the plan comparison can be made", async () => {
     const id = await validated();
