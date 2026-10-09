@@ -4,6 +4,7 @@
 // external happens, a per-client cooldown, and a runner balance floor. Anything that cannot run live is served from the latest
 // recorded run with the RECORDED_SAMPLE label. Business transactions are persisted before broadcast and reconciled from their
 // original context after a crash or timeout (spec D07): nothing is re-signed, no new order or check is bought by recovery.
+import { waitForReceiptPatiently } from "@arcpreflight/client";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -195,7 +196,7 @@ export async function claimFaucet(db: Db, address: Hex, client: string): Promise
       return done(sent.hash, `sent, not yet confirmed: the node did not confirm taking the transaction (${sent.sendError ?? "no answer"}); follow the hash on the explorer — this claim is one transaction and is never re-signed`);
     }
     let rc: any;
-    try { rc = await publicClient.waitForTransactionReceipt({ hash: sent.hash, timeout: FAUCET_RECEIPT_TIMEOUT_MS }); }
+    try { rc = await waitForReceiptPatiently(publicClient, sent.hash, FAUCET_RECEIPT_TIMEOUT_MS); }
     catch { return done(sent.hash, "sent, not yet confirmed: no receipt within the wait; follow the hash on the explorer"); }
     if (rc.status !== "success") return { ok: false, status: 503, error: "FAUCET_FAILED", reason: `the faucet transaction reverted (${sent.hash})`, txHash: sent.hash };
     return done(sent.hash);

@@ -22,6 +22,8 @@ const snapshot = () => ({ chainId: 5042002 as const, blockNumber: "150", blockHa
 
 vi.mock("@arcpreflight/client", () => ({
   signTransferAuthorization: vi.fn(async () => ({ signature: "0x1234", authorization: { from: "mock", to: "mock", value: "10000", nonce: "mock" } })),
+  // the patient receipt wait delegates to the (mocked) client's waitForTransactionReceipt, as the real one does on its first call
+  waitForReceiptPatiently: (client: any, hash: string, timeoutMs: number) => client.waitForTransactionReceipt({ hash, timeout: timeoutMs }),
 }));
 vi.mock("@arcpreflight/observer", () => ({
   PIN_LAG: 8n,

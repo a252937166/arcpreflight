@@ -9,7 +9,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { encodeDeployData, encodeFunctionData, getAddress, getContractAddress, keccak256, type Hex } from "viem";
-import { SpendRefused } from "@arcpreflight/client";
+import { SpendRefused, waitForReceiptPatiently } from "@arcpreflight/client";
 import { ROOT, net, chain, publicClient, walletFor, artifact, deploymentsPath, writeJson, evidenceDir, feeParams } from "./common.js";
 import { limitsFrom, openGuard, usdc18 } from "../lib/spend-ledger.js";
 
@@ -83,7 +83,7 @@ async function send(key: string, label: string, bound: bigint, build: (gas: bigi
   let hash: Hex;
   try { hash = await build(gas, f, nonce); } catch (e) { guard.release(idx); save(); throw e; } // failed before anything was signed and sent
   guard.sent(idx, hash); save(); nonce++;
-  const rcpt = await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
+  const rcpt = await waitForReceiptPatiently(publicClient, hash, 120_000);
   const actual = rcpt.gasUsed * rcpt.effectiveGasPrice; guard.settle(idx, actual); save();
   if (rcpt.status !== "success") throw new SpendRefused(`${label} reverted: ${hash} — stopping`);
   txs[key] = { tx: hash, block: rcpt.blockNumber.toString(), gasLimit: gas.toString(), gasUsed: rcpt.gasUsed.toString(), effectiveGasPrice: rcpt.effectiveGasPrice.toString(), costUsdc: usdc18(actual), contractAddress: rcpt.contractAddress ?? null };

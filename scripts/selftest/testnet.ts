@@ -41,6 +41,8 @@ for (let round = 1; round <= repeats; round++) {
       if (run.state !== "RUNNING") break;
       await new Promise((r) => setTimeout(r, 1500));
     }
+    // a receipt that is only late leaves the run RECONCILE_REQUIRED: wait for reconciliation (bounded, 10 minutes)
+    for (const until = Date.now() + 600_000; run?.state === "RECONCILE_REQUIRED" && Date.now() < until;) { await new Promise((r) => setTimeout(r, 5000)); run = await fetch(`${api}/v1/demo/runs/${start.runId}`).then((r) => r.json()); }
     assert.equal(run.state, "DONE", JSON.stringify(run.steps?.at(-1)));
     const out = run.result;
     assert.equal(out.decision.decision, expected[i]);

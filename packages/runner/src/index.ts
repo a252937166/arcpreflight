@@ -7,7 +7,7 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { encodeFunctionData, keccak256, parseTransaction, getAddress, toHex, type Hex, type PublicClient, type WalletClient, type Transport, type Chain, type Account, type PrivateKeyAccount } from "viem";
 import { IntentCore, PolicyCore, BaselineCore, Digest, UIntString, intentDigest, policyDigest, DecisionReceipt, decisionDigest, TransactionPlan, FinalValidationReceipt, ExecutionReceipt, executionDigest, ReportCore, reportDigest } from "@arcpreflight/schema";
 import { decide, DEMO_MERCHANT_ABI, PAY_SELECTOR } from "@arcpreflight/policy";
-import { signTransferAuthorization, type ArcNet } from "@arcpreflight/client";
+import { signTransferAuthorization, type ArcNet, waitForReceiptPatiently } from "@arcpreflight/client";
 import { PIN_LAG, type RpcEvidence } from "@arcpreflight/observer";
 import { CREATE_ORDER_ABI, GET_ORDER_ABI } from "./abi.js";
 import { finalValidate } from "./validate.js";
@@ -147,7 +147,7 @@ export async function createOrder(o: Pick<RunOptions, "publicClient" | "admin" |
   });
   if (!accepted) throw new OrderCreationPending(orderId, txHash, `the node did not confirm taking the creation transaction${sendError ? ` (${sendError})` : ""}`);
   let r: any;
-  try { r = await o.publicClient.waitForTransactionReceipt({ hash: txHash, timeout: o.orderReceiptTimeoutMs ?? 90_000 }); }
+  try { r = await waitForReceiptPatiently(o.publicClient, txHash, o.orderReceiptTimeoutMs ?? 90_000); } // a lagging node's "receipt not found" is retried until the deadline
   catch (e: any) { throw new OrderCreationPending(orderId, txHash, `no receipt within the wait (${String(e?.shortMessage ?? e?.message ?? e).slice(0, 120)})`); }
   if (r.status !== "success") throw new Error(`createOrder failed: ${txHash}`);
   const created = { orderId, tx: txHash, block: r.blockNumber.toString(), ...receiptFacts(r) };
@@ -320,7 +320,7 @@ export async function runFixture(o: RunOptions) {
             log("interruptedAfterBroadcast", { businessTxHash: txHash, why: "SIMULATED interruption: this run stopped waiting right after the send, as a crashed process would; recovery works from the recorded hash and the order state, never by signing a replacement" });
           } else {
             try {
-              const rcpt = await o.publicClient.waitForTransactionReceipt({ hash: txHash, timeout: o.receiptTimeoutMs ?? 90_000 });
+              const rcpt = await waitForReceiptPatiently(o.publicClient, txHash, o.receiptTimeoutMs ?? 90_000); // a lagging node's "receipt not found" is retried until the deadline
               execution.chainStatus = rcpt.status === "success" ? "CONFIRMED" : "REVERTED";
               businessReceipt = { ...receiptFacts(rcpt), blockNumber: rcpt.blockNumber.toString(), status: String(rcpt.status) };
               const ord = await o.publicClient.readContract({ address: merchant, abi: GET_ORDER_ABI, functionName: "getOrder", args: [order.orderId], blockNumber: rcpt.blockNumber });

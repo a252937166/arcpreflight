@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 import { getAddress, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { createWalletClient, http } from "viem";
-import { SpendRefused, parseUsdc18 } from "@arcpreflight/client";
+import { SpendRefused, parseUsdc18, waitForReceiptPatiently } from "@arcpreflight/client";
 import { ROOT, net, chain, rpc, publicClient, writeJson, evidenceDir, feeParams } from "./common.js";
 import { limitsFrom, openGuard, usdc18 } from "../lib/spend-ledger.js";
 
@@ -52,7 +52,7 @@ for (const r of rows) {
   let hash: Hex;
   try { hash = await wallet.sendTransaction({ to: r.to, value: r.value, gas: r.gasLimit, nonce, ...f }); } catch (e) { guard.release(idx); save(); throw e; }
   guard.sent(idx, hash); save(); nonce++;
-  const rc = await publicClient.waitForTransactionReceipt({ hash, timeout: 120_000 });
+  const rc = await waitForReceiptPatiently(publicClient, hash, 120_000);
   const actual = r.value + rc.gasUsed * rc.effectiveGasPrice; guard.settle(idx, actual); save();
   if (rc.status !== "success") throw new SpendRefused(`transfer to ${r.role} reverted: ${hash} — stopping`);
   let after = r.before; for (let i = 0; i < 15 && after - r.before !== r.value; i++) { after = await publicClient.getBalance({ address: r.to }); if (after - r.before !== r.value) await new Promise((s) => setTimeout(s, 2000)); }

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { keccak256, type Hex } from "viem";
-import { ARC, FIAT_TOKEN_EIP3009_ABI, signTransferAuthorization, verifyTransferAuthorization, encodeTransferWithAuthorization, findSettlementInLogs } from "@arcpreflight/client";
+import { ARC, FIAT_TOKEN_EIP3009_ABI, signTransferAuthorization, verifyTransferAuthorization, encodeTransferWithAuthorization, findSettlementInLogs, waitForReceiptPatiently } from "@arcpreflight/client";
 import { net, chain, publicClient, account, feeParams, evidenceDir, ROOT } from "../demo/common.js";
 import { limitsFrom, openGuard } from "../lib/spend-ledger.js";
 
@@ -86,7 +86,7 @@ writeFileSync(file, JSON.stringify(record, null, 2)); // the signature itself is
 console.log(`signed relay tx ${hash} (nonce ${nonce}); recorded before broadcast → ${file}`);
 guard.sent(spendIdx, hash); save();
 await publicClient.sendRawTransaction({ serializedTransaction: raw });
-const rc = await publicClient.waitForTransactionReceipt({ hash, timeout: 90_000 });
+const rc = await waitForReceiptPatiently(publicClient, hash, 90_000);
 guard.settle(spendIdx, FEE_ATOMIC6 * 10n ** 12n + rc.gasUsed * rc.effectiveGasPrice); save();
 const evidence = findSettlementInLogs(rc.logs, { usdc: token, from: runner.address, to: merchant.address, value: FEE_ATOMIC6, nonce: authorization.nonce }, rc.transactionHash);
 const [runnerAfter, merchantAfter, usedAfter] = await Promise.all([

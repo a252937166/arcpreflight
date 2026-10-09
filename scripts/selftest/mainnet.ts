@@ -258,12 +258,21 @@ async function startRun(api: string, fixture: FixtureId, cooldownMs: number): Pr
 }
 async function awaitRun(api: string, runId: string): Promise<any> {
   const deadline = Date.now() + 240_000;
+  let body: any = null;
   while (Date.now() < deadline) {
     const r = await getJson(`${api}/v1/demo/runs/${runId}`).catch(() => null);
-    if (r?.body && r.body.state !== "RUNNING") return r.body;
+    if (r?.body && r.body.state !== "RUNNING") { body = r.body; break; }
     await sleep(2000);
   }
-  throw new Error(`run ${runId} is still RUNNING after 240 s; not starting anything else. Check ${api}/v1/demo/runs/${runId}`);
+  if (!body) throw new Error(`run ${runId} is still RUNNING after 240 s; not starting anything else. Check ${api}/v1/demo/runs/${runId}`);
+  // a receipt that is only late leaves the run RECONCILE_REQUIRED: wait for reconciliation (bounded: the plan's stop condition 7, 10 minutes)
+  if (body.state === "RECONCILE_REQUIRED") {
+    console.log(`  ${runId}: outcome not established yet (RECONCILE_REQUIRED) — waiting for reconciliation from the original hash and the order state`);
+    const until = Date.now() + 600_000;
+    while (Date.now() < until && body.state === "RECONCILE_REQUIRED") { await sleep(5000); const r = await getJson(`${api}/v1/demo/runs/${runId}`).catch(() => null); if (r?.body) body = r.body; }
+    if (body.state === "RECONCILE_REQUIRED") throw new Error(`run ${runId} is still unresolved after 10 minutes of reconciliation — stop condition 7: nothing else is started`);
+  }
+  return body;
 }
 
 async function main(): Promise<number> {
