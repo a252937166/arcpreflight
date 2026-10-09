@@ -38,7 +38,7 @@ export type NetworkInfo = {
   /** order limits (v3.3 §2): 18-decimal native units; the dialog mirrors these rules before the server sees the body */
   orders?: { minNativeAtomic: string; maxNativeAtomic: string; stepNativeAtomic: string; defaultNativeAtomic: string; maxReferenceLength: number };
 };
-export type FundsKey = { role: string; address: string; balanceNativeAtomic: string | null; warnBelowNativeAtomic: string; low: boolean; note: string };
+export type FundsKey = { role: string; address: string; balanceNativeAtomic: string | null; warnBelowNativeAtomic: string; low: boolean; note: string; /** the last successful reading, kept through RPC failures */ lastObserved?: { low: boolean; balanceNativeAtomic: string; at: string } | null };
 export type FundsInfo = { checkedAt: string | null; intervalMs: number; low: boolean; keys: FundsKey[]; note: string };
 export type FaucetInfo = { enabled: false; note?: string } | { enabled: true; amountNativeAtomic: string; perDay: number; usedToday: number; perAddressPer24h: number; sender: string | null; note?: string };
 export type FaucetClaim = { ok: true; txHash: string; amountNativeAtomic: string; address: string };

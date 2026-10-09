@@ -127,5 +127,10 @@ describe("project funds (operator decision 2026-10-09)", async () => {
     expect(fundsWarning(fundsSummary({ ...net, funds: { ...net.funds, low: false, keys: net.funds.keys.map((k: any) => ({ ...k, low: false })) } }), "Arc testnet")).toBeNull();
     expect(fundsSummary({ network: "testnet", funds: { checkedAt: null, intervalMs: 300000, low: false, keys: [], note: "not read yet" } } as any)).toMatchObject({ available: false, low: false, rows: [], note: "not read yet" });
     expect(fundsSummary(null)).toMatchObject({ available: false, low: false });
+    // unreadable now, low at its last successful reading: still counted as low, labelled as the last reading (review 2026-10-09)
+    const blip = fundsSummary({ network: "testnet", funds: { checkedAt: "2026-10-09T10:05:00.000Z", intervalMs: 300000, low: true, note: "reads only", keys: [
+      { role: "order-creator", address: "0x00000000000000000000000000000000000000a2", balanceNativeAtomic: null, warnBelowNativeAtomic: "2000000000000000000", low: false, note: "orders + faucet", lastObserved: { low: true, balanceNativeAtomic: "1500000000000000000", at: "2026-10-09T10:00:00.000Z" } }] } } as any);
+    expect(blip).toMatchObject({ low: true, lowRoles: ["order-creator (last reading)"] }); expect(blip.rows[0]).toMatchObject({ status: "unread", balance: "not read (last 1.5000 USDC)" });
+    expect(fundsWarning(blip, "Arc testnet")).toContain("(order-creator (last reading))");
   });
 });

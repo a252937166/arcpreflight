@@ -123,7 +123,9 @@ export function RunPanel({ run, net, sample, onUpdate, origin = null, reason = n
   const [dl, setDl] = useState<{ runId: string | null; busy: boolean; err: string | null; bundle: PassportBundle | null; name: string | null }>({ runId: null, busy: false, err: null, bundle: null, name: null });
   const [verified, setVerified] = useState<{ runId: string; kind: "passed" | "failed" | "partial" } | null>(null);
   const current = useRef(run.runId); current.current = run.runId;
-  const alive = useRef(true); useEffect(() => () => { alive.current = false; }, []); // a keyed remount unmounts the old panel: its late results are dropped
+  // a keyed remount unmounts the old panel: its late results are dropped. The setup restores the flag — StrictMode runs setup → cleanup → setup
+  // on mount in development, and a flag that only the cleanup touches would stay false and drop every result (review 2026-10-09)
+  const alive = useRef(true); useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const mine = dl.runId === run.runId;
   const bundle = mine ? dl.bundle : null, bundleName = mine ? dl.name : null, dlBusy = mine && dl.busy, dlErr = mine ? dl.err : null;
   const verifiedKind = verified?.runId === run.runId ? verified.kind : null;

@@ -8,8 +8,12 @@ export type FundsSummary = { available: boolean; checkedAt: string | null; low: 
 export function fundsSummary(net: NetworkInfo | null | undefined): FundsSummary {
   const f = net?.funds;
   if (!f || !f.checkedAt) return { available: false, checkedAt: null, low: false, lowRoles: [], rows: [], note: f?.note ?? null };
-  const rows: FundsRow[] = f.keys.map((k) => ({ role: k.role, address: k.address, balance: k.balanceNativeAtomic === null ? "not read" : `${usdcNative(k.balanceNativeAtomic, 4)}`, threshold: usdcNative(k.warnBelowNativeAtomic, 2), status: k.balanceNativeAtomic === null ? "unread" : k.low ? "low" : "ok", note: k.note }));
-  return { available: true, checkedAt: f.checkedAt, low: f.low, lowRoles: rows.filter((r) => r.status === "low").map((r) => r.role), rows, note: f.note };
+  const rows: FundsRow[] = f.keys.map((k) => ({ role: k.role, address: k.address,
+    balance: k.balanceNativeAtomic !== null ? `${usdcNative(k.balanceNativeAtomic, 4)}` : k.lastObserved ? `not read (last ${usdcNative(k.lastObserved.balanceNativeAtomic, 4)})` : "not read",
+    threshold: usdcNative(k.warnBelowNativeAtomic, 2), status: k.balanceNativeAtomic === null ? "unread" : k.low ? "low" : "ok", note: k.note }));
+  // a key that cannot be read now but was low at its last successful reading still counts as low (review 2026-10-09)
+  const lowRoles = f.keys.flatMap((k) => (k.balanceNativeAtomic !== null ? (k.low ? [k.role] : []) : k.lastObserved?.low ? [`${k.role} (last reading)`] : []));
+  return { available: true, checkedAt: f.checkedAt, low: f.low || lowRoles.length > 0, lowRoles, rows, note: f.note };
 }
 /** the one sentence a visitor sees when a key is low */
 export const fundsWarning = (s: FundsSummary, network: string): string | null => (s.low ? `Project funds are low on ${network} (${s.lowRoles.join(", ")}): live runs or faucet claims may be refused until the operator tops them up. Recorded runs, checks and passports stay available.` : null);

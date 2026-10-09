@@ -32,9 +32,41 @@ describe("fundsPass", () => {
     await fundsPass(client(B({ [A["demo-runner"]]: 4n * 10n ** 17n })), A, (m) => log.push(m), WARN, "2026-10-09T10:05:00.000Z");
     expect(log).toHaveLength(1); // still low: no repeat
     await fundsPass(client(B({ [A["demo-runner"]]: 3n * 10n ** 18n, [A["deployer-admin"]]: new Error("timeout") })), A, (m) => log.push(m), WARN, "2026-10-09T10:10:00.000Z");
-    expect(log.slice(1)).toEqual([`OK demo-runner ${A["demo-runner"]} is back above its threshold: 3.0000 USDC`, `UNREAD deployer-admin ${A["deployer-admin"]}: the balance could not be read`]);
+    expect(log.slice(1)).toEqual([`OK demo-runner ${A["demo-runner"]} is back above its threshold: 3.0000 USDC`, `UNREAD deployer-admin ${A["deployer-admin"]}: the balance could not be read (last reading 7.0000 USDC)`]); // the last successful reading travels with the line
     expect(fundsSnapshot().low).toBe(false); expect(fundsSnapshot().keys[3].balanceNativeAtomic).toBeNull();
     await fundsPass(client(B({ [A["deployer-admin"]]: new Error("timeout") })), A, (m) => log.push(m), WARN);
     expect(log).toHaveLength(3); // still unreadable: no repeat
+  });
+});
+
+describe("fundsPass keeps the last successfully observed alert state apart from read availability (review 2026-10-09)", () => {
+  const low = () => B({ [A["order-creator"]]: 15n * 10n ** 17n }), down = () => B({ [A["order-creator"]]: new Error("rpc down") }), healthy = () => B({ [A["order-creator"]]: 5n * 10n ** 18n });
+  it("LOW → UNREAD → healthy reports the recovery", async () => {
+    const log: string[] = [];
+    await fundsPass(client(low()), A, (m) => log.push(m), WARN);
+    await fundsPass(client(down()), A, (m) => log.push(m), WARN);
+    expect(fundsSnapshot().low).toBe(true); // the last observed state was low: an RPC failure does not clear the warning
+    expect(fundsSnapshot().keys[1]).toMatchObject({ balanceNativeAtomic: null, low: false, lastObserved: { low: true, balanceNativeAtomic: "1500000000000000000" } });
+    await fundsPass(client(healthy()), A, (m) => log.push(m), WARN);
+    expect(log.map((m) => m.split(" ")[0])).toEqual(["LOW", "UNREAD", "OK"]);
+    expect(log[2]).toBe(`OK order-creator ${A["order-creator"]} is back above its threshold: 5.0000 USDC`);
+    expect(fundsSnapshot().low).toBe(false);
+  });
+  it("LOW → UNREAD → still LOW never repeats the low alert", async () => {
+    const log: string[] = [];
+    await fundsPass(client(low()), A, (m) => log.push(m), WARN);
+    await fundsPass(client(down()), A, (m) => log.push(m), WARN);
+    await fundsPass(client(B({ [A["order-creator"]]: 12n * 10n ** 17n })), A, (m) => log.push(m), WARN);
+    await fundsPass(client(down()), A, (m) => log.push(m), WARN);
+    await fundsPass(client(low()), A, (m) => log.push(m), WARN);
+    expect(log.map((m) => m.split(" ")[0])).toEqual(["LOW", "UNREAD", "UNREAD"]); // one low alert; each loss of readability said once
+    expect(fundsSnapshot().low).toBe(true);
+  });
+  it("a key that was never read successfully is not low, and its first healthy reading says nothing", async () => {
+    const log: string[] = [];
+    await fundsPass(client(down()), A, (m) => log.push(m), WARN);
+    expect(fundsSnapshot().low).toBe(false); expect(fundsSnapshot().keys[1].lastObserved).toBeNull();
+    await fundsPass(client(healthy()), A, (m) => log.push(m), WARN);
+    expect(log.map((m) => m.split(" ")[0])).toEqual(["UNREAD"]);
   });
 });

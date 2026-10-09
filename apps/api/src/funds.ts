@@ -3,7 +3,10 @@
 // show it. Reads only: nothing is claimed, moved or signed here; topping a key up stays a manual, operator-side action.
 export type FundsRole = "demo-runner" | "order-creator" | "merchant-payto" | "deployer-admin";
 export const FUNDS_ROLES: FundsRole[] = ["demo-runner", "order-creator", "merchant-payto", "deployer-admin"];
-export type FundsKey = { role: FundsRole; address: string; balanceNativeAtomic: string | null; warnBelowNativeAtomic: string; low: boolean; note: string };
+/** the last SUCCESSFUL reading of a key: kept through RPC failures, so a warning survives an unreadable pass and a recovery is still reported */
+export type FundsObserved = { low: boolean; balanceNativeAtomic: string; at: string };
+/** `low`: below the threshold at THIS reading (false when unreadable); `lastObserved`: the last successful reading, whatever this pass could read */
+export type FundsKey = { role: FundsRole; address: string; balanceNativeAtomic: string | null; warnBelowNativeAtomic: string; low: boolean; note: string; lastObserved: FundsObserved | null };
 export type FundsSnapshot = { checkedAt: string | null; intervalMs: number; low: boolean; keys: FundsKey[]; note: string };
 export type FundsReader = { getBalance(a: { address: `0x${string}` }): Promise<bigint> };
 
@@ -34,26 +37,41 @@ export async function readFunds(client: FundsReader, accounts: Partial<Record<Fu
     const address = accounts[role]; if (!address) continue;
     let balance: bigint | null = null;
     try { balance = await client.getBalance({ address: address as `0x${string}` }); } catch { balance = null; }
-    keys.push({ role, address, balanceNativeAtomic: balance === null ? null : balance.toString(), warnBelowNativeAtomic: warn[role].toString(), low: balance !== null && balance < warn[role], note: NOTES[role] });
+    const low = balance !== null && balance < warn[role];
+    keys.push({ role, address, balanceNativeAtomic: balance === null ? null : balance.toString(), warnBelowNativeAtomic: warn[role].toString(), low, note: NOTES[role], lastObserved: balance === null ? null : { low, balanceNativeAtomic: balance.toString(), at } });
   }
   return { checkedAt: at, intervalMs: FUNDS_CHECK_INTERVAL_MS, low: keys.some((k) => k.low), keys, note: NOTE };
 }
 
 let latest: FundsSnapshot = { checkedAt: null, intervalMs: FUNDS_CHECK_INTERVAL_MS, low: false, keys: [], note: `${NOTE}; not read yet` };
+/** alert state and read availability are tracked separately (review 2026-10-09): an unreadable pass changes `readable`, never `observed` */
+const observed = new Map<FundsRole, FundsObserved>();
+const readable = new Map<FundsRole, boolean>();
 export const fundsSnapshot = (): FundsSnapshot => latest;
 /** test seam */
-export function resetFunds() { latest = { checkedAt: null, intervalMs: FUNDS_CHECK_INTERVAL_MS, low: false, keys: [], note: `${NOTE}; not read yet` }; }
+export function resetFunds() { latest = { checkedAt: null, intervalMs: FUNDS_CHECK_INTERVAL_MS, low: false, keys: [], note: `${NOTE}; not read yet` }; observed.clear(); readable.clear(); }
 
-/** one worker pass: read, remember, and log every key that became low, recovered, or could not be read — on change, not every pass */
+/** one worker pass: read, remember, and log on change only. The alert (LOW / OK) compares against the last SUCCESSFUL reading of the key, so
+ *  LOW → unreadable → healthy reports OK, and LOW → unreadable → still low does not repeat LOW; UNREAD is said once per loss of readability.
+ *  The snapshot stays low while a key whose last successful reading was low cannot be read. */
 export async function fundsPass(client: FundsReader, accounts: Partial<Record<FundsRole, string | null | undefined>>, log: (m: string) => void, warn: Record<FundsRole, bigint> = WARN_BELOW, at?: string): Promise<FundsSnapshot> {
-  const prev = latest;
   const next = await readFunds(client, accounts, warn, at);
   for (const k of next.keys) {
-    const before = prev.keys.find((p) => p.role === k.role) ?? null;
-    if (k.balanceNativeAtomic === null) { if (!before || before.balanceNativeAtomic !== null) log(`UNREAD ${k.role} ${k.address}: the balance could not be read`); continue; }
-    if (k.low && !(before?.low ?? false)) log(`LOW ${k.role} ${k.address} holds ${usdc(k.balanceNativeAtomic)} USDC, below the ${usdc(k.warnBelowNativeAtomic)} USDC threshold — ${k.note}; top it up`);
-    else if (!k.low && (before?.low ?? false)) log(`OK ${k.role} ${k.address} is back above its threshold: ${usdc(k.balanceNativeAtomic)} USDC`);
+    const wasReadable = readable.get(k.role) ?? true;
+    const prior = observed.get(k.role) ?? null;
+    if (k.balanceNativeAtomic === null) {
+      if (wasReadable) log(`UNREAD ${k.role} ${k.address}: the balance could not be read${prior ? ` (last reading ${usdc(prior.balanceNativeAtomic)} USDC${prior.low ? ", below its threshold" : ""})` : ""}`);
+      readable.set(k.role, false);
+      k.lastObserved = prior;
+      continue;
+    }
+    readable.set(k.role, true);
+    if (k.low && !(prior?.low ?? false)) log(`LOW ${k.role} ${k.address} holds ${usdc(k.balanceNativeAtomic)} USDC, below the ${usdc(k.warnBelowNativeAtomic)} USDC threshold — ${k.note}; top it up`);
+    else if (!k.low && (prior?.low ?? false)) log(`OK ${k.role} ${k.address} is back above its threshold: ${usdc(k.balanceNativeAtomic)} USDC`);
+    const now: FundsObserved = { low: k.low, balanceNativeAtomic: k.balanceNativeAtomic, at: next.checkedAt ?? new Date().toISOString() };
+    observed.set(k.role, now); k.lastObserved = now;
   }
+  next.low = next.keys.some((k) => k.low || (k.balanceNativeAtomic === null && k.lastObserved?.low === true));
   latest = next;
   return next;
 }
