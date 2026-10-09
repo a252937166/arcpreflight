@@ -30,7 +30,8 @@ export function FaucetCard({ net, wallet, balance, required, step, needs = "chec
         </div>
         <button className="btn" disabled={state.busy || !!state.claim} onClick={claim}>{state.busy ? <><Spinner /> sending…</> : state.claim ? "Claimed ✓" : "Claim testnet USDC"}</button>
       </div>
-      {state.claim && <div className="banner info" role="status">{`Sent ${usdcNative(state.claim.amountNativeAtomic, 2)} to your wallet · tx `}<Hex value={state.claim.txHash} link={explorerTx(net, state.claim.txHash)} /> · the balance refreshes in a moment <Chip tone="ok">testnet</Chip></div>}
+      {/* 202 (2026-10-09): the claim's one transaction was signed, recorded and handed to the node, but its acceptance or receipt is not confirmed */}
+      {state.claim && <div className={`banner${state.claim.pending ? "" : " info"}`} role="status">{state.claim.pending ? `Sent, not yet confirmed: ${usdcNative(state.claim.amountNativeAtomic, 2)} to your wallet · tx ` : `Sent ${usdcNative(state.claim.amountNativeAtomic, 2)} to your wallet · tx `}<Hex value={state.claim.txHash} link={explorerTx(net, state.claim.txHash)} />{state.claim.pending ? " · the node has not confirmed it yet — follow the hash; this claim is one transaction and is never repeated " : " · the balance refreshes in a moment "}<Chip tone="ok">testnet</Chip></div>}
       {state.err && <div className="banner bad" role="alert">{state.err.text}</div>}
     </div>
   );

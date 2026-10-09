@@ -43,7 +43,8 @@ export type NetworkInfo = {
 export type FundsKey = { role: string; address: string; balanceNativeAtomic: string | null; warnBelowNativeAtomic: string; low: boolean; note: string; /** the last successful reading, kept through RPC failures */ lastObserved?: { low: boolean; balanceNativeAtomic: string; at: string } | null };
 export type FundsInfo = { checkedAt: string | null; intervalMs: number; low: boolean; keys: FundsKey[]; note: string };
 export type FaucetInfo = { enabled: false; note?: string } | { enabled: true; amountNativeAtomic: string; perDay: number; usedToday: number; perAddressPer24h: number; sender: string | null; note?: string };
-export type FaucetClaim = { ok: true; txHash: string; amountNativeAtomic: string; address: string };
+/** `pending` (202): the claim's one transaction was signed, recorded and handed to the node but is not confirmed yet ("sent, not yet confirmed"); `txHash` is its identity */
+export type FaucetClaim = { ok: true; txHash: string; amountNativeAtomic: string; address: string; pending?: boolean; note?: string };
 /** One money line of the cost statement (docs/PASSPORT.md §4): atomic strings, exact decimal rendering, receipt facts. */
 export type BuyerRole = "project-runner" | "visitor-wallet" | "buyer";
 export type MoneyLine = { nativeAtomic: string; usdc: string; gasUsed?: string; effectiveGasPriceNativeAtomic?: string; tx?: string | null; address?: string | null };
@@ -95,6 +96,12 @@ export type RunSummary = { runId: string; fixture: Fixture; state: string; label
 /** POST /v1/demo/orders → 201 (docs/LIFECYCLE.md §8) */
 export type OrderCreated = { orderId: string; tx: string; block: string; merchant: string; proxy: "MAIN" | "CHANGED"; payer: string; amountNativeAtomic: string; reference: string | null; baselineDigest: string | null; state: "CONFIRMED"; owner?: string };
 export type OrderState = "PLANNED" | "SENT" | "CONFIRMED" | "UNKNOWN_CREATION" | "FAILED";
+/** POST /v1/demo/orders → 202 ORDER_CREATION_PENDING (2026-10-09): the order's identity is recorded but its creation is not confirmed. It is
+ *  reconciled from the chain (the same signed creation is re-sent while its window is open, never a second order); poll GET …/{id}, or recover. */
+export type OrderPending = { pending: true; orderId: string; state: OrderState; tx: string | null; nextAction: string; reason?: string; error?: "ORDER_CREATION_PENDING"; code?: "ORDER_CREATION_PENDING";
+  merchant: string; proxy: "MAIN" | "CHANGED"; payer: string; amountNativeAtomic: string; reference: string | null; owner?: string | null };
+/** POST /v1/demo/orders → 502 ORDER_CREATION_FAILED names the order it concerns; the dialog folds it with the body it sent (the row stays for the record) */
+export type OrderCreationFailure = { failed: true; orderId: string; state: OrderState; tx: string | null; reason: string; merchant: string; proxy: "MAIN" | "CHANGED"; payer: string; amountNativeAtomic: string; reference: string | null };
 export type LinkedCheck = { requestId: string; state: string; createdAt: string; reportDigest: string | null; paymentState: string | null; serviceFeeTx: string | null; valueNativeAtomic: string };
 export type LinkedAttempt = { attemptId: string; state: string; txHash: string | null; businessStatus: string | null; createdAt: string; updatedAt: string };
 /** GET /v1/demo/orders[/{id}]: the owner's order with its live paid state, linked checks and attempts, and the next action */
@@ -167,7 +174,9 @@ export const api = {
   openapi: () => req<any>("/openapi.json"),
   /** the visitor's own order (v3.3 §2): payer, MAIN or CHANGED proxy, amount in 18-decimal native units, optional reference; the order-creator key pays its gas.
    *  400 INVALID_INPUT carries `field` and `reason`; the identity is durable before the creation transaction is sent. */
-  createOrder: (body: { payer: string; proxy?: "MAIN" | "CHANGED"; amountNativeAtomic?: string; reference?: string | null }, token: string) => req<OrderCreated>("/v1/demo/orders", { method: "POST", body: JSON.stringify(body), token }),
+  createOrder: (body: { payer: string; proxy?: "MAIN" | "CHANGED"; amountNativeAtomic?: string; reference?: string | null }, token: string) => req<OrderCreated | OrderPending>("/v1/demo/orders", { method: "POST", body: JSON.stringify(body), token }),
+  /** owner only, one per order every 3 s: one bounded reconciliation that may hand the node the IDENTICAL signed creation again; never a second order */
+  recoverOrder: (orderId: string, token: string) => req<OrderView>(`/v1/demo/orders/${orderId}/recover`, { method: "POST", token }),
   /** the owner's orders with their live paid state, linked checks and attempts (reads only) */
   orders: (token: string) => req<{ orders: OrderView[] }>("/v1/demo/orders", { token }),
   order: (orderId: string, token: string) => req<OrderView>(`/v1/demo/orders/${orderId}`, { token }),

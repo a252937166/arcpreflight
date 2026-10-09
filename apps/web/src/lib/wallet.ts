@@ -3,6 +3,12 @@
 // One module-level store feeds every useWallet() caller (nav chip, Demo and Developer pages), so they can never disagree.
 // P3 (hands-on feedback): a connected wallet on another chain is asked ONCE per event to switch to the API's chain; the
 // remembered wallet reconnects when it announces itself (OKX and others announce asynchronously), not only at init.
+// Real-wallet session (2026-10-09): MetaMask was missing from the picker in fresh and duplicated tabs while OKX answered, and the
+// legacy fallback reconnected OKX's window.ethereum under the remembered MetaMask label. Discovery is therefore: one announce listener
+// for the page's lifetime (registered at module load, never removed); `eip6963:requestProvider` re-sent whenever Connect is clicked,
+// the picker opens or "Search again" is pressed, then a short wait for late announcements; a legacy window.ethereum entry only when no
+// EIP-6963 wallet announced, labelled from its OWN flags (OKX first) and remembered as `legacy:<kind>`; a silent reconnect that uses
+// only the exact remembered wallet — re-requesting over ≈2 s — and otherwise says "<wallet> was not detected in this tab".
 import { useCallback, useEffect, useState } from "react";
 import { getAddress, type Hex } from "viem";
 import type { NetworkInfo } from "./api";
@@ -18,17 +24,43 @@ export type WalletState = {
   picker: boolean;
   /** an automatic chain switch is in flight (the wallet is showing its prompt) */
   switching: boolean;
+  /** discovery was re-requested and the page is waiting for late announcements (the picker reads "looking for wallets…") */
+  searching: boolean;
+  /** the remembered wallet did not announce itself in this tab: nothing else is connected in its place; the chip says so */
+  missing: { rdns: string; name: string } | null;
 };
 
 const REMEMBER = "arcpreflight.wallet";
 /** the injected private-key test provider is looked for only in builds made with VITE_TEST_WALLET=1 (docs/LIFECYCLE.md §9 "public builds") */
 const TEST_WALLET_BUILD = import.meta.env.VITE_TEST_WALLET === "1";
-/** how long to wait for the remembered wallet's EIP-6963 announcement before trusting an authorized window.ethereum */
-export const LEGACY_FALLBACK_MS = 1500;
+/** how long a remembered EIP-6963 wallet may take to announce itself in this tab (discovery is re-requested meanwhile) before the
+ *  chip says it was not detected; nothing else is ever connected in its place */
+export const RECONNECT_SEARCH_MS = 2000;
+/** re-requests during that search (a fresh or duplicated tab may answer only a later request) */
+const RECONNECT_REQUESTS_AT_MS = [400, 1000];
+/** how long Connect / the picker / "Search again" waits for late announcements before deciding what exists */
+let discoveryWaitMs = 600;
 const TEST_INFO: ProviderInfo = { uuid: "arcpreflight-test-wallet", name: "Test wallet (local)", icon: "", rdns: "xyz.arcpreflight.testwallet" };
-const INJECTED_INFO: ProviderInfo = { uuid: "window-ethereum", name: "Injected wallet", icon: "", rdns: "injected" };
 const FRIENDLY: Record<string, string> = { "io.metamask": "MetaMask", "io.metamask.flask": "MetaMask Flask", "com.okex.wallet": "OKX Wallet", "io.rabby": "Rabby", "com.coinbase.wallet": "Coinbase Wallet", "com.brave.wallet": "Brave Wallet", "app.phantom": "Phantom", "io.zerion.wallet": "Zerion", "com.trustwallet.app": "Trust Wallet" };
+/** a legacy window.ethereum is named from its own flags, OKX first — OKX's provider may also say isMetaMask */
+const LEGACY_KINDS: { kind: string; name: string; test: (p: any) => boolean }[] = [
+  { kind: "okx", name: "OKX Wallet", test: (p) => !!(p?.isOkxWallet || p?.isOKExWallet) },
+  { kind: "rabby", name: "Rabby", test: (p) => !!p?.isRabby },
+  { kind: "coinbase", name: "Coinbase Wallet", test: (p) => !!p?.isCoinbaseWallet },
+  { kind: "brave", name: "Brave Wallet", test: (p) => !!p?.isBraveWallet },
+  { kind: "metamask", name: "MetaMask (injected)", test: (p) => !!p?.isMetaMask },
+];
+export function legacyKind(p: unknown): { kind: string; name: string } { const k = LEGACY_KINDS.find((x) => x.test(p)); return k ? { kind: k.kind, name: k.name } : { kind: "injected", name: "Injected wallet" }; }
+/** the legacy entry's identity: remembered as `legacy:<kind>`, never as an EIP-6963 rdns */
+export function legacyInfo(p: unknown): ProviderInfo { const k = legacyKind(p); return { uuid: `window-ethereum:${k.kind}`, name: k.name, icon: "", rdns: `legacy:${k.kind}` }; }
 export const friendlyName = (info: ProviderInfo) => FRIENDLY[info.rdns] ?? info.name;
+/** the name of a remembered wallet that is not present (for the "not detected in this tab" notice) */
+export function rememberedName(rdns: string): string {
+  if (FRIENDLY[rdns]) return FRIENDLY[rdns];
+  if (rdns === TEST_INFO.rdns) return TEST_INFO.name;
+  if (rdns.startsWith("legacy:")) { const kind = rdns.slice(7); return LEGACY_KINDS.find((k) => k.kind === kind)?.name ?? "Injected wallet"; }
+  return rdns;
+}
 
 const w = (): any => (typeof window === "undefined" ? null : window);
 const store = {
@@ -36,37 +68,67 @@ const store = {
   bound: { provider: null as Eip1193 | null, off: () => {} },
   /** the API's network as the nav last reported it: the chain an auto-switch targets */
   target: null as NetworkInfo | null,
-  reconnecting: null as Promise<void> | null, fallbackTimer: null as ReturnType<typeof setTimeout> | null,
+  reconnecting: null as Promise<void> | null, timers: [] as ReturnType<typeof setTimeout>[],
+  /** the window the announce listener is attached to (one listener per page lifetime) */
+  listenerOn: null as any,
 };
-function initial(): WalletState { return { provider: null, info: null, account: null, chainId: null, connecting: false, error: null, isTest: false, candidates: [], picker: false, switching: false }; }
+function initial(): WalletState { return { provider: null, info: null, account: null, chainId: null, connecting: false, error: null, isTest: false, candidates: [], picker: false, switching: false, searching: false, missing: null }; }
 function set(patch: Partial<WalletState>) { store.state = { ...store.state, ...patch }; for (const l of store.listeners) l(store.state); }
 
-/** Test provider first, then every EIP-6963 announcement (sorted by name), then legacy window.ethereum when it is not one of them. */
+/** Test provider first (dev builds), then every EIP-6963 announcement (sorted by name); a legacy window.ethereum only when NO EIP-6963
+ *  wallet announced — named from its own flags, so an OKX-owned window.ethereum reads "OKX Wallet", never the remembered wallet. */
 export function candidates(): ProviderDetail[] {
   const win = w(); const out: ProviderDetail[] = [];
-  if (TEST_WALLET_BUILD) { const test: Eip1193 | undefined = win?.__arcpreflightTestProvider; if (test) out.push({ info: TEST_INFO, provider: test }); }
+  const test: Eip1193 | undefined = TEST_WALLET_BUILD ? win?.__arcpreflightTestProvider : undefined;
+  if (test) out.push({ info: TEST_INFO, provider: test });
   const announced = [...store.discovered.values()].sort((a, b) => friendlyName(a.info).localeCompare(friendlyName(b.info)));
   out.push(...announced);
   const legacy: Eip1193 | undefined = win?.ethereum;
-  if (legacy && !out.some((c) => c.provider === legacy)) out.push({ info: INJECTED_INFO, provider: legacy });
+  if (legacy && store.discovered.size === 0 && legacy !== test) out.push({ info: legacyInfo(legacy), provider: legacy });
   return out;
 }
-/** EIP-6963: listen first, then ask every installed wallet to announce itself. Safe to call repeatedly. */
+/** every announcement (also late ones) lands here: added or updated by uuid; the picker re-renders; the remembered wallet reconnects */
+function onAnnounce(e: any) {
+  const d = e?.detail; if (!d?.info?.uuid || !d.provider) return;
+  store.discovered.set(d.info.uuid, { info: { ...d.info }, provider: d.provider });
+  const patch: Partial<WalletState> = { candidates: candidates() };
+  if (store.state.missing?.rdns === d.info.rdns) patch.missing = null;
+  set(patch);
+  // the remembered wallet announced late (after the first render, or after a re-request): reconnect now, still through eth_accounts only
+  if (!store.state.account && !store.state.connecting && remembered() === d.info.rdns) void silentReconnect();
+}
+/** One announce listener per page lifetime, attached as early as possible (module load) and never removed. Idempotent. */
+function ensureListener() {
+  const win = w(); if (!win || typeof win.addEventListener !== "function" || store.listenerOn === win) return;
+  win.addEventListener("eip6963:announceProvider", onAnnounce);
+  store.listenerOn = win;
+}
+ensureListener();
+/** Ask every installed wallet to announce itself (EIP-6963). Sent again on Connect, picker open and "Search again": a wallet whose page
+ *  script started late (a fresh or duplicated tab, a sleeping extension worker) answers a later request. */
+export function requestProviders() {
+  ensureListener();
+  const win = w(); if (!win || typeof win.dispatchEvent !== "function") return;
+  try { win.dispatchEvent(new Event("eip6963:requestProvider")); } catch { /* no Event support: the legacy entry still applies */ }
+}
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** EIP-6963: listen (already done at module load), then ask; for a remembered wallet that has not announced, ask again over ≈2 s and
+ *  then say it was not detected — without connecting anything else. Safe to call repeatedly. */
 export function startDiscovery() {
   const win = w(); if (!win || store.started || typeof win.addEventListener !== "function") return;
   store.started = true;
-  win.addEventListener("eip6963:announceProvider", (e: any) => {
-    const d = e?.detail; if (!d?.info?.uuid || !d.provider) return;
-    store.discovered.set(d.info.uuid, { info: { ...d.info }, provider: d.provider });
-    set({ candidates: candidates() });
-    // the remembered wallet announced late (after the first render): reconnect now, still through eth_accounts only
-    if (!store.state.account && !store.state.connecting && remembered() === d.info.rdns) void silentReconnect();
-  });
-  try { win.dispatchEvent(new Event("eip6963:requestProvider")); } catch { /* no CustomEvent support: legacy fallback still applies */ }
+  requestProviders();
   set({ candidates: candidates() });
-  // nothing announced the remembered wallet in time: an authorized window.ethereum is the next best evidence of "this site's wallet"
-  if (remembered() && !store.state.account) store.fallbackTimer = setTimeout(() => { store.fallbackTimer = null; void silentReconnect({ legacy: true }); }, LEGACY_FALLBACK_MS);
+  const rdns = remembered();
+  if (!rdns || store.state.account) return;
+  for (const at of RECONNECT_REQUESTS_AT_MS) store.timers.push(setTimeout(() => { if (!store.state.account && !present(rdns)) requestProviders(); }, at));
+  store.timers.push(setTimeout(() => {
+    if (store.state.account || store.state.connecting || remembered() !== rdns) return;
+    if (!present(rdns)) set({ missing: { rdns, name: rememberedName(rdns) } });
+  }, RECONNECT_SEARCH_MS));
 }
+/** the remembered wallet is a candidate right now (exact identity only) */
+const present = (rdns: string) => candidates().some((c) => c.info.rdns === rdns);
 const remember = (rdns: string | null) => { try { if (rdns) localStorage.setItem(REMEMBER, rdns); else localStorage.removeItem(REMEMBER); } catch { /* storage unavailable */ } };
 const remembered = (): string | null => { try { return localStorage.getItem(REMEMBER); } catch { return null; } };
 
@@ -90,45 +152,67 @@ async function read(c: ProviderDetail, prompt: boolean): Promise<void> {
   await finish(c, accs, prompt);
 }
 
-/** Reconnect without a prompt when the remembered wallet still exposes an authorized account (eth_accounts only).
- *  With `legacy`, a window.ethereum (or the test provider, which keeps precedence) that exposes an authorized account stands in
- *  for a remembered wallet that never announced itself. Concurrent calls share one attempt. */
-export function silentReconnect(opts: { legacy?: boolean } = {}): Promise<void> {
+/** Reconnect without a prompt when the remembered wallet — that exact wallet, by its remembered identity — is present and still exposes
+ *  an authorized account (eth_accounts only). Another provider (an OKX-owned window.ethereum, the test provider) never stands in for it.
+ *  Concurrent calls share one attempt. */
+export function silentReconnect(): Promise<void> {
   if (store.reconnecting) return store.reconnecting;
   const attempt = (async () => {
     if (store.state.account || store.state.connecting) return;
     const rdns = remembered(); if (!rdns) return;
-    const list = candidates(); const win = w();
-    const c = list.find((x) => x.info.rdns === rdns)
-      ?? (opts.legacy ? (TEST_WALLET_BUILD ? list.find((x) => x.provider === win?.__arcpreflightTestProvider) : undefined) ?? list.find((x) => x.provider === win?.ethereum) : undefined);
-    if (!c) return;
+    const c = candidates().find((x) => x.info.rdns === rdns);
+    if (!c) return; // not present (yet): the announce listener and the ≈2 s re-requests retry; the chip says so if it never appears
     try {
       const accs: string[] = await c.provider.request({ method: "eth_accounts" });
       if (!accs?.length || store.state.account) return; // not authorized any more (or another path connected meanwhile): stay as we are, never prompt
-      await finish(c.info.rdns === rdns ? c : { ...c, info: { ...c.info, rdns } }, accs, false);
+      await finish(c, accs, false);
       void ensureChain();
     } catch { /* not authorized any more: stay disconnected */ }
   })();
   store.reconnecting = attempt.finally(() => { store.reconnecting = null; });
   return store.reconnecting;
 }
-/** Connect: a named candidate, the only candidate, or — with several — open the picker. A connected wallet on another chain is asked once to switch. */
+const NO_WALLET = "No EIP-1193 wallet found in this tab. Install MetaMask, OKX Wallet, Rabby, Coinbase Wallet or Brave Wallet — or, if one is installed, open the extension once and press Search again.";
+/** Re-request discovery and wait for late announcements (the picker reads "looking for wallets…" meanwhile). */
+export async function searchAgain(): Promise<ProviderDetail[]> {
+  set({ searching: true, error: null });
+  requestProviders();
+  await sleep(discoveryWaitMs);
+  const list = candidates();
+  set({ searching: false, candidates: list });
+  const rdns = remembered();
+  if (rdns && !store.state.account && list.some((c) => c.info.rdns === rdns)) await silentReconnect();
+  return list;
+}
+/** Connect: a named candidate; otherwise re-request discovery, wait briefly for late announcements, then the only candidate — or, with
+ *  several, the picker. A connected wallet on another chain is asked once to switch. */
 export async function connect(uuid?: string) {
-  const list = candidates(); set({ candidates: list, error: null });
-  if (!list.length) { set({ error: "No EIP-1193 wallet found. Install MetaMask, OKX Wallet, Rabby, Coinbase Wallet or Brave Wallet, then reload this page." }); return; }
-  const chosen = uuid ? list.find((c) => c.info.uuid === uuid) : list.length === 1 ? list[0] : null;
-  if (!chosen) { set({ picker: true }); return; }
-  set({ connecting: true, picker: false });
-  try { await read(chosen, true); remember(chosen.info.rdns); await ensureChain(); }
+  if (uuid) {
+    const chosen = candidates().find((c) => c.info.uuid === uuid);
+    if (!chosen) { set({ error: "That wallet is no longer available in this tab — press Search again.", picker: true }); return; }
+    return connectTo(chosen);
+  }
+  set({ picker: true, error: null });
+  const list = await searchAgain();
+  if (!store.state.picker) return; // closed while searching
+  if (!list.length) { set({ picker: false, error: NO_WALLET }); return; }
+  if (list.length === 1) return connectTo(list[0]);
+  set({ picker: true });
+}
+async function connectTo(chosen: ProviderDetail) {
+  set({ connecting: true, picker: false, error: null });
+  try { await read(chosen, true); remember(chosen.info.rdns); set({ missing: null }); await ensureChain(); }
   catch (e: any) { set({ connecting: false, error: e?.message ?? String(e) }); }
 }
-export const closePicker = () => set({ picker: false });
+export const closePicker = () => set({ picker: false, searching: false });
+/** the "not detected in this tab" notice can be dismissed; the remembered choice stays */
+export const dismissMissing = () => set({ missing: null });
 /** Disconnect: revoke the site's account permission where the wallet supports it (MetaMask and others), then forget the choice. */
 export async function disconnect() {
   const p = store.state.provider;
   if (p) { try { await p.request({ method: "wallet_revokePermissions", params: [{ eth_accounts: {} }] }); } catch { /* wallets without wallet_revokePermissions: a local disconnect is all we can do */ } }
   store.bound.off(); remember(null);
-  set({ provider: null, info: null, account: null, chainId: null, connecting: false, error: null, isTest: false, picker: false, switching: false });
+  set({ provider: null, info: null, account: null, chainId: null, connecting: false, error: null, isTest: false, picker: false, switching: false, searching: false, missing: null });
 }
 export const chainParams = (n: NetworkInfo) => ({
   chainId: `0x${n.chainId.toString(16)}`, chainName: n.network === "mainnet" ? "Arc" : "Arc Testnet",
@@ -170,9 +254,16 @@ export async function refresh() {
   const p = store.state.provider; if (!p) return;
   try { const [accs, cid] = await Promise.all([p.request({ method: "eth_accounts" }) as Promise<string[]>, p.request({ method: "eth_chainId" }) as Promise<string>]); set({ account: accs?.[0] ? getAddress(accs[0]) : null, chainId: Number(cid) }); } catch { /* ignore */ }
 }
-/** Test seam: forget discovery and state (the module is a singleton). */
-export function resetWalletStore() { store.bound.off(); store.state = initial(); store.discovered.clear(); store.started = false; store.target = null; store.reconnecting = null; if (store.fallbackTimer) { clearTimeout(store.fallbackTimer); store.fallbackTimer = null; } }
-export const walletStore = { getState: () => store.state, subscribe: (l: (s: WalletState) => void) => { store.listeners.add(l); return () => { store.listeners.delete(l); }; }, candidates, startDiscovery, silentReconnect, connect, closePicker, disconnect, switchChain, setTargetNetwork, ensureChain, refresh, resetWalletStore };
+/** Test seam: forget discovery and state (the module is a singleton); the listener moves to the current window on the next use. */
+export function resetWalletStore() {
+  store.bound.off(); store.state = initial(); store.discovered.clear(); store.started = false; store.target = null; store.reconnecting = null;
+  for (const t of store.timers) clearTimeout(t); store.timers = [];
+  try { store.listenerOn?.removeEventListener?.("eip6963:announceProvider", onAnnounce); } catch { /* ignore */ }
+  store.listenerOn = null; ensureListener();
+}
+/** Test seam: how long Connect / "Search again" waits for late announcements */
+export function setDiscoveryWait(ms: number) { discoveryWaitMs = ms; }
+export const walletStore = { getState: () => store.state, subscribe: (l: (s: WalletState) => void) => { store.listeners.add(l); return () => { store.listeners.delete(l); }; }, candidates, startDiscovery, requestProviders, searchAgain, silentReconnect, connect, closePicker, dismissMissing, disconnect, switchChain, setTargetNetwork, ensureChain, refresh, resetWalletStore, setDiscoveryWait };
 
 export const toHexQuantity = (v: bigint) => `0x${v.toString(16)}`;
 export async function nativeBalance(p: Eip1193, addr: string): Promise<bigint> { return BigInt(await p.request({ method: "eth_getBalance", params: [addr, "latest"] })); }
@@ -191,5 +282,6 @@ export function useWallet() {
   useEffect(() => { const off = walletStore.subscribe(setS); startDiscovery(); void silentReconnect(); setS(store.state); return off; }, []);
   const connectCb = useCallback((uuid?: string) => connect(typeof uuid === "string" ? uuid : undefined), []);
   const switchCb = useCallback((n: NetworkInfo) => switchChain(n), []);
-  return { ...s, connect: connectCb, choose: connectCb, closePicker, disconnect, switchChain: switchCb, ensureChain, refresh };
+  const searchCb = useCallback(() => { void searchAgain(); }, []);
+  return { ...s, connect: connectCb, choose: connectCb, closePicker, disconnect, switchChain: switchCb, ensureChain, refresh, searchAgain: searchCb, dismissMissing };
 }

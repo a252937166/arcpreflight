@@ -5,6 +5,9 @@ import { ApiError } from "./api";
 export type Described = { text: string; code: string | null; raw: unknown };
 
 const reason = (b: any) => (typeof b?.reason === "string" && b.reason ? b.reason : null);
+const shortId = (id: unknown) => (typeof id === "string" && id.length > 14 ? `${id.slice(0, 10)}…` : typeof id === "string" ? id : "(unnamed)");
+/** the order request's answer was lost on the way (network error): the server may have recorded the order and sent its creation */
+export const ORDER_RESPONSE_LOST_TEXT = "The answer to the order request was lost (network error). The order may have been recorded and its creation sent — My workflow is re-read now; do not create another order until it shows there.";
 const SENTENCES: Record<string, (b: any) => string> = {
   PAYMENT_FAILED: (b) => `The check fee was not settled: ${b?.payment?.reason ?? reason(b) ?? "the settlement failed"}. Nothing was charged and no report was delivered.`,
   QUOTE_EXPIRED: () => "The quote expired before signing; request a new quote.",
@@ -40,7 +43,11 @@ const SENTENCES: Record<string, (b: any) => string> = {
   INVALID_INPUT: (b) => `The request was rejected as invalid${reason(b) ? `: ${reason(b)}` : ""}.`,
   INVALID_JSON: () => "The request body was not valid JSON.",
   PAYLOAD_TOO_LARGE: () => "The request body is too large.",
-  DEPENDENCY_ERROR: (b) => `A dependency failed (RPC or database)${reason(b) ? `: ${reason(b)}` : ""}. Nothing was changed by this request.`,
+  // once the server names an order identity, nothing here may claim that nothing changed (2026-10-09)
+  DEPENDENCY_ERROR: (b) => b?.orderId ? `A dependency failed (RPC or database)${reason(b) ? `: ${reason(b)}` : ""}. Order ${shortId(b.orderId)} was recorded; its creation is reconciled from the chain — check My workflow.` : `A dependency failed (RPC or database)${reason(b) ? `: ${reason(b)}` : ""}. Nothing was changed by this request.`,
+  // v3.3 order creation after the identity is recorded (2026-10-09): the answer names the order; never "nothing was changed"
+  ORDER_CREATION_PENDING: (b) => `Order ${shortId(b?.orderId)} is recorded, but its creation is not confirmed yet${reason(b) ? ` (${reason(b)})` : ""}. It is reconciled from the chain — the same signed transaction is re-sent, never a second order. Wait for it or use Recover.`,
+  ORDER_CREATION_FAILED: (b) => `Order ${shortId(b?.orderId)} was recorded but not created: ${reason(b) ?? "the creation did not go through"}. The row stays for the record; create a new order.`,
   NON_JSON: (b) => `The server answered with something that is not JSON${b?.text ? ` (${String(b.text).slice(0, 80)})` : ""}.`,
   // testnet faucet (P3) — every refusal says that nothing was sent
   FAUCET_DISABLED: () => "The faucet exists on Arc testnet only; nothing was sent.",

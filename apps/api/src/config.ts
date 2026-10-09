@@ -31,6 +31,9 @@ export const cfg = {
   caip2: ARC[net].caip2,
   usdc: ARC[net].usdc,
   rpc: process.env.ARC_RPC_URL ?? ARC[net].rpc,
+  /** the RPC published to visitors (GET /v1/network → wallet "add network"): the network's public endpoint unless PUBLIC_RPC_URL says
+   *  otherwise — never the operator's own ARC_RPC_URL, which may be a private or keyed endpoint */
+  publicRpc: process.env.PUBLIC_RPC_URL ?? ARC[net].rpc,
   port: Number(process.env.PORT ?? 4040),
   dbPath: process.env.DB_PATH ?? resolve(ROOT, `data/arcpreflight-${net}.sqlite`),
   profile: process.env.PROFILE ?? "SUBMISSION_RESTRICTED",

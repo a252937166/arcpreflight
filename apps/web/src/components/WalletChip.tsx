@@ -3,7 +3,8 @@
 // accessible), the balance on the API's chain, grouped actions (explorer, testnet faucet), a dedicated faucet status area that tells
 // "transaction sent" apart from "funds confirmed" (the receipt is read through the wallet's provider before "confirmed" is said), and
 // Disconnect set apart at the bottom. Read-only here: the chip never signs anything; signing happens only on the Developer page with
-// the user's explicit action.
+// the user's explicit action. Disconnected: the picker re-asks installed wallets and shows "looking for wallets…" while late ones may
+// still answer, offers "Search again", and a remembered wallet that did not answer in this tab is named — nothing else stands in for it.
 import { useEffect, useRef, useState } from "react";
 import { explorerAddr, explorerTx, type NetworkInfo } from "../lib/api";
 import { useWallet, friendlyName } from "../lib/wallet";
@@ -60,17 +61,32 @@ export function WalletChip({ net }: { net: NetworkInfo | null }) {
   if (!w.account) {
     return (
       <div className="wallet-wrap" ref={box}>
-        <button className="wallet-btn" onClick={() => w.connect()} disabled={w.connecting} aria-haspopup="menu" aria-expanded={w.picker} title="Connect an EIP-1193 wallet (MetaMask, OKX Wallet, Rabby, Coinbase Wallet…) — read-only here; nothing is signed from the header">
-          <span className="dot" />{w.connecting ? "connecting…" : "Connect wallet"}
+        <button className="wallet-btn" onClick={() => w.connect()} disabled={w.connecting} aria-haspopup="menu" aria-expanded={w.picker} title="Connect an EIP-1193 wallet (MetaMask, OKX Wallet, Rabby, Coinbase Wallet…) — read-only here; nothing is signed by connecting">
+          <span className={`dot ${w.missing ? "warn" : ""}`} />{w.connecting ? "connecting…" : "Connect wallet"}
         </button>
         {w.picker && (
-          <div className="wallet-menu" role="menu" aria-label="choose a wallet">
+          <div className="wallet-menu" role="menu" aria-label="choose a wallet" data-testid="wallet-picker">
             <span className="label">choose a wallet</span>
+            {w.searching && <span className="wp-hint" role="status" data-testid="wallet-searching"><Spinner /> looking for wallets…</span>}
             {w.candidates.map((c) => <button key={c.info.uuid} className="wallet-item" role="menuitem" onClick={() => w.choose(c.info.uuid)}>{c.info.icon ? <img src={c.info.icon} alt="" /> : <span className="dot" />}{friendlyName(c.info)}</button>)}
+            {!w.searching && w.candidates.length === 0 && <span className="wp-hint">no wallet answered in this tab yet</span>}
+            <button className="wallet-item" role="menuitem" disabled={w.searching} onClick={() => w.searchAgain()}>Search again</button>
             <button className="wallet-item" role="menuitem" onClick={w.closePicker}>cancel</button>
           </div>
         )}
-        {w.error && !w.picker && <div className="wallet-menu" role="status"><span className="addr">{w.error}</span></div>}
+        {w.error && !w.picker && (
+          <div className="wallet-menu" role="status" data-testid="wallet-error"><span className="addr">{w.error}</span>
+            <button className="wallet-item" role="menuitem" onClick={() => w.searchAgain()}>Search again</button>
+          </div>
+        )}
+        {w.missing && !w.picker && !w.error && (
+          <div className="wallet-menu" role="status" data-testid="wallet-missing">
+            <span className="addr">{w.missing.name} was not detected in this tab — open the extension once or reload the tab. Nothing else was connected in its place.</span>
+            <button className="wallet-item" role="menuitem" disabled={w.searching} onClick={() => w.searchAgain()}>{w.searching ? <><Spinner /> searching…</> : "Search again"}</button>
+            <button className="wallet-item" role="menuitem" onClick={() => w.connect()}>Choose another wallet</button>
+            <button className="wallet-item" role="menuitem" onClick={() => w.dismissMissing()}>dismiss</button>
+          </div>
+        )}
       </div>
     );
   }

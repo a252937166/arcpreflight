@@ -9,7 +9,7 @@ import type { Hex as HexT } from "viem";
 import { intentDigest, policyDigest, type IntentCore } from "@arcpreflight/schema";
 import { decide } from "@arcpreflight/policy";
 import { useNet } from "../App";
-import { api, apiPath, explorerAddr, explorerTx, type AttemptView, type BaselineRecord, type CheckRow, type OrderCreated, type OrderView, type PassportBundle } from "../lib/api";
+import { api, apiPath, explorerAddr, explorerTx, type AttemptView, type BaselineRecord, type CheckRow, type OrderView, type PassportBundle } from "../lib/api";
 import { approvedBaseline, developerIntent, developerPolicy, prepareOrderQuote, quoteReady, WALLET_VALIDATION_WINDOW_SECONDS, type PreparedQuote, WALLET_REPORT_AGE_SECONDS } from "../lib/preflight";
 import { useWallet } from "../lib/wallet";
 import { purchaseReport, signFeeAuthorization, type Delivered } from "../lib/walletRun";
@@ -17,7 +17,7 @@ import { describeBody, describeError, type Described } from "../lib/errors";
 import { storedSession, withSession, type Session } from "../lib/session";
 import { rememberedChecks } from "../lib/checks";
 import { saveJson } from "../lib/download";
-import { baselineDigestFor, fixtureForProxy, nativeAtomicToUsdcText, orderLimits, orderViewFromCreated, toDeveloperOrder, ORDER_GATED_TEXT, type OrderBody, type Proxy } from "../lib/orders";
+import { baselineDigestFor, creationStopped, creationUnconfirmed, fixtureForProxy, nativeAtomicToUsdcText, orderLimits, orderViewFromCreated, paymentLabel, toDeveloperOrder, ORDER_GATED_TEXT, type OrderBody, type Proxy } from "../lib/orders";
 import { executeAttempt, executionInFlight, insideWindow, isOpen, isTerminal, isUncertain, reconcileUncertainAttempt, rememberedAttempts, sendValidatedAttempt, stateTone, type ExecutePhase, type Refusal } from "../lib/attempts";
 import { clearWorkflow, loadWorkflow, loadWorkflows, saveWorkflow } from "../lib/workflow";
 import { LIFECYCLE_LABELS, type LifecycleId, type LifecycleStage, type StageStatus } from "../lib/outcome";
@@ -28,7 +28,7 @@ import { ReportView } from "../components/Report";
 import { FaucetCard } from "../components/FaucetCard";
 import { Lifecycle } from "../components/Lifecycle";
 import { StepSection } from "../components/StepSection";
-import { OrderDialog } from "../components/OrderDialog";
+import { OrderDialog, type OrderAnswer } from "../components/OrderDialog";
 import { OrderCard } from "../components/OrderCard";
 import { AttemptPanel } from "../components/AttemptPanel";
 import { VerifyInBrowser } from "../components/VerifyInBrowser";
@@ -52,6 +52,8 @@ const IDLE: Exec = { phase: "idle", txHash: null, refusal: null, err: null };
 const STEP_OF: Record<LifecycleId, number> = { order: 1, approve: 2, check: 3, execute: 4, recover: 5, passport: 6, verify: 7 };
 const EXECUTING: ExecutePhase[] = ["validating", "prompting", "reporting", "polling"];
 const TEST_WALLET_BUILD = import.meta.env.VITE_TEST_WALLET === "1";
+/** an order whose creation is not confirmed is re-read this often (GET reconciles from the chain and never sends), for at most this long */
+const ORDER_POLL_MS = 3_000; const ORDER_POLL_LIMIT_MS = 20 * 60_000;
 const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
 export default function Developer() {
@@ -96,6 +98,11 @@ export default function Developer() {
   useEffect(() => { if (order || check?.delivered || attempt) refreshBal(); }, [order, check?.delivered, attempt, refreshBal]);
 
   // ---- derived facts
+  // 2026-10-09: an order is usable only once its creation is CONFIRMED — approval, quote, purchase and execution stay closed before that;
+  // PLANNED/SENT wait for the creation receipt (Recover), FAILED/UNKNOWN_CREATION stop (a new order is a new row)
+  const orderConfirmed = !!order && order.state === "CONFIRMED";
+  const orderPending = creationUnconfirmed(order);
+  const orderStopped = creationStopped(order);
   const devOrder = useMemo(() => (order ? toDeveloperOrder(order, orderMeta.baselineDigest) : null), [order, orderMeta.baselineDigest]);
   const policy = useMemo(() => (account && devOrder ? developerPolicy(account, devOrder) : null), [account, devOrder]);
   const pDigest = useMemo(() => (policy ? policyDigest(policy) : null), [policy]);
@@ -107,7 +114,7 @@ export default function Developer() {
   const budgetBuy = useMemo(() => budgetCheck(bal.native, { feeTokenAtomic: feeToken, amountNativeAtomic: order?.amountNativeAtomic ?? limits.defaultNativeAtomic, plan: null }), [bal.native, feeToken, order?.amountNativeAtomic, limits.defaultNativeAtomic]);
   // step 4 comes after the report was bought: its fee is already paid, so the execution needs the order amount and the gas reserve
   const budgetExec = useMemo(() => budgetCheck(bal.native, { feeTokenAtomic: feeToken, amountNativeAtomic: order?.amountNativeAtomic ?? 0n, plan: attempt?.state === "VALIDATED" ? attempt?.plan ?? null : null, feePaid: !!delivered }), [bal.native, feeToken, order?.amountNativeAtomic, attempt?.plan, attempt?.state, delivered]);
-  const canBuy = !delivered && quoteOk && !!account && onArc && !busy && budgetBuy.enough !== false;
+  const canBuy = orderConfirmed && !delivered && quoteOk && !!account && onArc && !busy && budgetBuy.enough !== false;
   const decision = useMemo(() => (intent && policy && pDigest && delivered
     ? decide({ intent, policy, policyDigest: pDigest, baseline: baseline?.baseline ?? null, baselineDigest: (baseline?.baselineDigest as HexT | undefined) ?? null, baselineRevoked: baseline?.revoked ?? false, report: delivered.report as any, reportDigest: delivered.digest as HexT, now: new Date(now), simulation: delivered.simulation })
     : null), [intent, policy, pDigest, delivered, baseline, now]);
@@ -126,11 +133,11 @@ export default function Developer() {
   // order is still unpaid and may be executed again — with a fresh report; only a confirmed, mismatched or reverted attempt moves the workflow on to the passport
   const attemptSettled = !!attempt && (attempt.state === "CONFIRMED" || attempt.state === "MISMATCH" || attempt.state === "REVERTED");
   const expired = !!delivered && !attemptOpen && !attemptSettled && !executing && freshLeft === 0;
-  const executable = decision?.decision === "NO_POLICY_VIOLATION" && !expired;
+  const executable = orderConfirmed && decision?.decision === "NO_POLICY_VIOLATION" && !expired;
   const checkStopped = (!!decision && decision.decision !== "NO_POLICY_VIOLATION" && !expired && !attempt) || (attempt?.state === "REFUSED" && !expired);
   // a VALIDATED attempt inside its window is still step 4's business (the prompt may be opened again, or abandoned); one that is broadcast or whose
   // window closed is recovery's (step 5)
-  const stage = !order ? 1 : !approved ? 2 : (!delivered && !attempt) || expired ? 3 : checkStopped ? (passport ? (verification ? 8 : 7) : 6) : !attempt || executing ? 4 : attemptOpen ? (attempt.state === "VALIDATED" && (insideWindow(attempt, now) || ambiguous) ? 4 : 5) : !attemptSettled ? 4 : passport ? (verification ? 8 : 7) : 6;
+  const stage = !orderConfirmed ? 1 : !approved ? 2 : (!delivered && !attempt) || expired ? 3 : checkStopped ? (passport ? (verification ? 8 : 7) : 6) : !attempt || executing ? 4 : attemptOpen ? (attempt.state === "VALIDATED" && (insideWindow(attempt, now) || ambiguous) ? 4 : 5) : !attemptSettled ? 4 : passport ? (verification ? 8 : 7) : 6;
   const isStepOpen = (n: number) => openSteps[n] ?? n === stage;
   const toggle = (n: number) => setOpenSteps((o) => ({ ...o, [n]: !isStepOpen(n) }));
   const jump = (id: LifecycleId) => { const n = STEP_OF[id]; setOpenSteps((o) => ({ ...o, [n]: true })); if (typeof document !== "undefined") document.getElementById(`step-${n}`)?.scrollIntoView?.({ behavior: "smooth", block: "start" }); };
@@ -140,8 +147,9 @@ export default function Developer() {
   const verifyStatus: StageStatus = verification ? verificationStageStatus(verification) : sstat(7, false);
   const verifyNote = verification === "passed" ? "verified in this browser: passed" : verification === "failed" ? "verification FAILED in this browser" : verification === "partial" ? "partially verified (unverified findings)" : null;
   const stages: LifecycleStage[] = [
-    { id: "order", label: LIFECYCLE_LABELS.order, status: sstat(1, !!order), note: order ? `${nativeAtomicToUsdcText(order.amountNativeAtomic)} USDC · ${order.paid === true ? "paid" : "unpaid"}` : null },
-    { id: "approve", label: LIFECYCLE_LABELS.approve, status: sstat(2, approved), note: approved ? "policy approved" : null },
+    { id: "order", label: LIFECYCLE_LABELS.order, status: !order ? sstat(1, false) : orderConfirmed ? "done" : orderPending ? "active" : "stop",
+      note: !order ? null : orderConfirmed ? `${nativeAtomicToUsdcText(order.amountNativeAtomic)} USDC · ${paymentLabel(order).text}` : orderPending ? "waiting for the creation receipt" : "creation not established — create a new order" },
+    { id: "approve", label: LIFECYCLE_LABELS.approve, status: sstat(2, approved && orderConfirmed), note: approved && orderConfirmed ? "policy approved" : null },
     // once an attempt exists its RECORDED decision is the fact; the live re-evaluation ages with the report (maxReportAgeSeconds) and would mislead
     { id: "check", label: LIFECYCLE_LABELS.check, status: expired ? sstat(3, false) : attempt ? (attempt.decision === "BLOCKED" ? "stop" : attempt.decision === "REVIEW_REQUIRED" || attempt.state === "REFUSED" ? "review" : "done") : delivered ? (decision?.decision === "BLOCKED" ? "stop" : decision?.decision === "REVIEW_REQUIRED" ? "review" : "done") : sstat(3, false), note: expired ? "report expired — re-run the check" : attempt ? attempt.decision.toLowerCase().replace(/_/g, " ") : decision ? decision.decision.toLowerCase().replace(/_/g, " ") : null },
     { id: "execute", label: LIFECYCLE_LABELS.execute, status: execStatus, note: checkStopped ? "nothing executed" : ambiguous ? (exec.phase === "unknown-submission" ? "wallet answer unexplained — reconciling" : "wallet was asked to sign — submission uncertain") : attempt ? attempt.state.toLowerCase().replace(/_/g, " ") : exec.phase === "refused" ? "refused" : null },
@@ -221,6 +229,13 @@ export default function Developer() {
     if (!order || !account || hydrating.current || owner.current !== account.toLowerCase() || !same(order.payer, account)) return;
     saveWorkflow({ payer: account, orderId: order.orderId, proxy: orderMeta.proxy, baselineDigest: orderMeta.baselineDigest, approved, requestId: check?.requestId ?? null, intent: check?.intent ?? null, attemptId: attempt?.attemptId ?? null, handoff: null });
   }, [order?.orderId, orderMeta, approved, check?.requestId, check?.intent, attempt?.attemptId, account]); // eslint-disable-line react-hooks/exhaustive-deps
+  // a creation that is not confirmed is re-read until it is CONFIRMED, FAILED or UNKNOWN_CREATION (bounded; refresh and Recover stay available)
+  useEffect(() => {
+    if (!order || !creationUnconfirmed(order)) return;
+    const id = order.orderId; const since = Date.now();
+    const timer = setInterval(() => { if (Date.now() - since > ORDER_POLL_LIMIT_MS) { clearInterval(timer); return; } void refreshOrder(id); }, ORDER_POLL_MS);
+    return () => clearInterval(timer);
+  }, [order?.orderId, order?.state]); // eslint-disable-line react-hooks/exhaustive-deps
   // the clock drives quote expiry, report freshness and the validation window
   useEffect(() => {
     if (!check?.quote && !delivered && !attemptOpen) return;
@@ -244,13 +259,19 @@ export default function Developer() {
   const rowAction = async (id: string, fn: () => Promise<void>) => { setMine((m) => ({ ...m, rowBusy: id, rowErr: null })); try { await fn(); setMine((m) => ({ ...m, rowBusy: null })); } catch (e) { setMine((m) => ({ ...m, rowBusy: null, rowErr: describeError(e) })); } };
   const resetAll = () => { clearWorkflow(account); resetVisible(); };
   const createOrder = (body: OrderBody) => withSession((t) => api.createOrder(body, t));
-  const onCreated = (o: OrderCreated) => {
-    setDialog(false); setOrder(orderViewFromCreated(o)); setOrderMeta({ baselineDigest: o.baselineDigest ?? baselineDigestFor(net, o.proxy), proxy: o.proxy });
+  /** 201 (confirmed), 202 (identity recorded, creation not confirmed) or a 502 that names the order: the card shows that order — never "nothing was changed" */
+  const onCreated = (o: OrderAnswer) => {
+    const view = orderViewFromCreated(o);
+    setDialog(false); setOrder(view); setOrderMeta({ baselineDigest: ("baselineDigest" in o ? o.baselineDigest : null) ?? baselineDigestFor(net, view.proxy), proxy: view.proxy });
     setApproved(false); setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null); setOpenSteps({}); setErr(null);
     setSession(storedSession());
-    void refreshOrder(o.orderId); void loadMine();
+    void refreshOrder(view.orderId); void loadMine();
   };
-  const approve = () => setApproved(true);
+  /** owner-only bounded reconciliation of an unconfirmed creation (may hand the node the same signed transaction again; never a second order) */
+  const adoptOrder = (o: OrderView) => { setOrder((cur) => (cur && same(cur.orderId, o.orderId) ? o : cur)); setMine((m) => ({ ...m, orders: m.orders.map((x) => (same(x.orderId, o.orderId) ? o : x)) })); };
+  const recoverOrder = (id: string) => run("recover-order", async () => adoptOrder(await withSession((t) => api.recoverOrder(id, t))));
+  const recoverOrderRow = (id: string) => rowAction(id, async () => adoptOrder(await withSession((t) => api.recoverOrder(id, t))));
+  const approve = () => { if (orderConfirmed) setApproved(true); };
   const getQuote = () => run("quote", async () => {
     if (!devOrder || !policy || !account || !net) return;
     const id = ++quoteSeq.current; const draft = developerIntent(net.chainId, account, devOrder, policy, unitMistake);
@@ -350,10 +371,13 @@ export default function Developer() {
   const myOrders = mine.orders.filter((o) => same(o.payer, account)), otherOrders = mine.orders.filter((o) => !same(o.payer, account));
   const otherSaved = loadWorkflows().filter((s) => !same(s.payer, account));
   const passportSource = attempt?.passportAvailable ? "attempt" : check?.delivered ? "check" : null;
-  const execDisabledWhy = gated ? "execution is gated on this instance" : !executable ? (expired ? "the report expired — re-run the check (a new quote and fee)" : decision ? `the decision is ${decision.decision}` : "run the preflight check first") : !onArc ? `switch your wallet to ${netLabel}` : budgetExec.enough === false ? budgetExec.sentence! : attemptOpen ? "an attempt is already open: continue, abandon or recover it" : executing ? "in progress" : busy ? "busy" : "";
+  const execDisabledWhy = gated ? "execution is gated on this instance" : !orderConfirmed ? "the order's creation is not confirmed" : !executable ? (expired ? "the report expired — re-run the check (a new quote and fee)" : decision ? `the decision is ${decision.decision}` : "run the preflight check first") : !onArc ? `switch your wallet to ${netLabel}` : budgetExec.enough === false ? budgetExec.sentence! : attemptOpen ? "an attempt is already open: continue, abandon or recover it" : executing ? "in progress" : busy ? "busy" : "";
   const faucetRequired = stage >= 4 ? budgetExec.required : budgetBuy.required;
   const faucetStep = stage >= 4 ? "executing the payment" : stage === 3 ? "buying the report" : "the first paid step (report + order + gas)";
   const faucetNeeds = budgetComponents({ feePaid: stage >= 4 && !!delivered }).long;
+  // the dialog refuses another order while this wallet's latest order is still unconfirmed (the view on screen is the freshest copy of it)
+  const latestMine = (() => { const byId = new Map(myOrders.map((o) => [o.orderId.toLowerCase(), o])); if (order && same(order.payer, account)) byId.set(order.orderId.toLowerCase(), order); return [...byId.values()].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0] ?? null; })();
+  const unconfirmedLatest = latestMine && creationUnconfirmed(latestMine) ? { orderId: latestMine.orderId } : null;
 
   return (
     <section className="section">
@@ -395,7 +419,7 @@ export default function Developer() {
         <div className="wsteps">
           {/* 1 · order */}
           <StepSection n={1} id="step-1" title="Create order" status={stages[0].status} open={isStepOpen(1)} onToggle={() => toggle(1)}
-            summary={order && <>order <Hex value={order.orderId} n={5} /> · {nativeAtomicToUsdcText(order.amountNativeAtomic)} USDC{order.tx && <> · tx <Hex value={order.tx} n={4} link={explorerTx(net, order.tx)} /></>} · <Chip tone={order.paid === true ? "ok" : "neutral"}>{order.paid === true ? "paid" : "unpaid"}</Chip></>}>
+            summary={order && <>order <Hex value={order.orderId} n={5} /> · {nativeAtomicToUsdcText(order.amountNativeAtomic)} USDC{order.tx && <> · tx <Hex value={order.tx} n={4} link={explorerTx(net, order.tx)} /></>} · <Chip tone={paymentLabel(order).tone}>{paymentLabel(order).text}</Chip>{!orderConfirmed && <> · <Chip tone={orderPending ? "warn" : "bad"}>{orderPending ? "creation not confirmed" : order.state.toLowerCase().replace(/_/g, " ")}</Chip></>}</>}>
             {!order ? (<>
               <p className="small muted">A <b>demonstration order</b> on the project's DemoMerchant — nothing is delivered. Payable only by your wallet, {nativeAtomicToUsdcText(limits.minNativeAtomic)}–{nativeAtomicToUsdcText(limits.maxNativeAtomic)} USDC, optional reference.</p>
               <p className="small muted">{adminInProcess
@@ -403,13 +427,16 @@ export default function Developer() {
                 : <>Created by the merchant's <code>order-creator</code> role — a key that can only create orders, never upgrade, pause or withdraw.</>}</p>
               <details className="why"><summary className="tiny">why an order first</summary><p className="small muted">You get a pinned report, the payment outcome read from the chain and a verifiable passport. The order's identity is recorded before its creation transaction is sent; the operator pays that gas.</p></details>
               <div className="row"><button className="btn primary" disabled={!account || !onArc || !fixturesDeployed || !!busy || gated} title={gated ? ORDER_GATED_TEXT : undefined} onClick={() => setDialog(true)}>Create order…</button>{gated ? <span className="tiny dim" data-testid="order-gated">{ORDER_GATED_TEXT}</span> : myOrders.length > 0 && <span className="tiny dim">or pick one of your {myOrders.length} orders in step 5</span>}</div>
-            </>) : <OrderCard order={order} net={net} feeTokenAtomic={net?.priceTokenAtomic ?? null} onRefresh={() => void refreshOrder()} busy={!!busy} />}
+            </>) : (<>
+              <OrderCard order={order} net={net} feeTokenAtomic={net?.priceTokenAtomic ?? null} onRefresh={() => void refreshOrder()} onRecover={orderPending ? () => void recoverOrder(order.orderId) : undefined} busy={!!busy} />
+              {orderStopped && <div className="row" style={{ gap: 10, alignItems: "center" }}><button className="btn primary" disabled={!account || !onArc || !fixturesDeployed || !!busy || gated} title={gated ? ORDER_GATED_TEXT : undefined} onClick={() => setDialog(true)}>Create a new order…</button><span className="tiny dim">this order stays listed in My workflow</span></div>}
+            </>)}
           </StepSection>
 
           {/* 2 · review & approve */}
           <StepSection n={2} id="step-2" title="Review & approve" status={stages[1].status} open={isStepOpen(2)} onToggle={() => toggle(2)}
             summary={order && <>approval {orderMeta.baselineDigest ? <Hex value={orderMeta.baselineDigest} n={5} /> : <Chip tone="warn">none</Chip>} · policy {pDigest ? <Hex value={pDigest} n={5} /> : "—"} · window {WALLET_VALIDATION_WINDOW_SECONDS} s{approved && <Chip tone="ok">approved</Chip>}</>}>
-            {!order ? <p className="dim small">create an order first</p> : (<>
+            {!order || !orderConfirmed ? <p className="dim small" data-testid="approve-closed">{!order ? "create an order first" : orderPending ? "the order's creation is not confirmed yet — approval opens once its receipt confirms it" : "this order's creation was not established — create a new order in step 1"}</p> : (<>
               <div className="two" style={{ gap: 24 }}>
                 <div className="kv w150">
                   <span className="k">referenced approval</span><span>{orderMeta.baselineDigest ? <Hex value={orderMeta.baselineDigest} n={8} /> : <Chip tone="warn">no baseline on this proxy</Chip>}{baseline && <span className="tiny dim"> · approved by {baseline.baseline.approvedBy} · {baseline.revoked ? <Chip tone="bad">revoked</Chip> : <Chip tone="ok">not revoked</Chip>}</span>}</span>
@@ -426,7 +453,7 @@ export default function Developer() {
                 </div>
               </div>
               <div className="row" style={{ gap: 10, alignItems: "center" }}>
-                <button className="btn primary" disabled={approved} onClick={approve}>{approved ? "Approved ✓" : "Approve & continue"}</button>
+                <button className="btn primary" disabled={approved || !orderConfirmed} onClick={approve}>{approved ? "Approved ✓" : "Approve & continue"}</button>
                 <span className="tiny dim">no server call — records your conscious approval of what will be checked and executed</span>
                 <details style={{ marginLeft: "auto" }}><summary className="tiny">policy JSON</summary><pre className="json">{JSON.stringify(policy, null, 2)}</pre></details>
               </div>
@@ -436,13 +463,13 @@ export default function Developer() {
           {/* 3 · preflight check */}
           <StepSection n={3} id="step-3" title="Preflight check" status={stages[2].status} open={isStepOpen(3)} onToggle={() => toggle(3)}
             summary={(delivered || attempt) && <>{attempt ? <DecisionBadge decision={attempt.decision} size="sm" /> : decision ? <DecisionBadge decision={decision.decision} size="sm" /> : null}{delivered?.serviceFeeTx && <> · fee <Hex value={delivered.serviceFeeTx} n={4} link={explorerTx(net, delivered.serviceFeeTx)} /></>}{check && <> · request <code>{check.requestId.slice(0, 8)}</code></>}</>}>
-            {!approved ? <p className="dim small">approve the policy first</p> : (<>
+            {!approved || !orderConfirmed ? <p className="dim small">{order && !orderConfirmed ? "the order's creation is not confirmed — nothing can be checked yet" : "approve the policy first"}</p> : (<>
               <div className="row between" style={{ gap: 10 }}>
                 <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={unitMistake} disabled={!!busy} onChange={(e) => { setUnitMistake(e.target.checked); setCheck(null); setAttempt(null); setExec(IDLE); }} /> encode the value in 6-decimal units — the classic Arc mistake → BLOCKED</label>
                 <span className="tiny dim">quote free · report {net ? usdcToken(net.priceTokenAtomic) : "0.01 USDC"} with one EIP-3009 signature from your wallet · a 402 in the console is the x402 price quote, not an error</span>
               </div>
               <div className="row">
-                <button className="btn" disabled={!devOrder || !!busy || !onArc} onClick={getQuote}>{busy === "quote" ? <Spinner /> : "Get quote (HTTP 402)"}</button>
+                <button className="btn" disabled={!devOrder || !orderConfirmed || !!busy || !onArc} onClick={getQuote}>{busy === "quote" ? <Spinner /> : "Get quote (HTTP 402)"}</button>
                 <button className="btn primary" disabled={!canBuy} title={budgetBuy.enough === false ? budgetBuy.sentence! : undefined} onClick={buy}>{busy === "buy" ? <><Spinner /> settling…</> : "Sign TransferWithAuthorization & buy"}</button>
                 {budgetBuy.enough === false && !delivered && <span className="tiny" style={{ color: "var(--amber)" }} role="status" data-testid="budget-buy">{budgetBuy.sentence}</span>}
               </div>
@@ -531,11 +558,11 @@ export default function Developer() {
                 <tbody>{myOrders.map((o) => (
                   <tr key={o.orderId} className={order?.orderId === o.orderId ? "on" : ""}>
                     <td className="when" title={ago(o.createdAt)}>{utc(o.createdAt)}</td>
-                    <td><Hex value={o.orderId} n={5} />{o.tx && <> · <Hex value={o.tx} n={4} link={explorerTx(net, o.tx)} /></>}<div className="tiny dim">{o.proxy ?? "?"} · {o.source}{o.reference ? ` · “${o.reference}”` : ""}</div></td>
+                    <td><Hex value={o.orderId} n={5} />{o.tx && <> · <Hex value={o.tx} n={4} link={explorerTx(net, o.tx)} /></>}{o.state !== "CONFIRMED" && <> <Chip tone={creationUnconfirmed(o) ? "warn" : "bad"}>{creationUnconfirmed(o) ? "creation not confirmed" : o.state.toLowerCase().replace(/_/g, " ")}</Chip></>}<div className="tiny dim">{o.proxy ?? "?"} · {o.source}{o.reference ? ` · “${o.reference}”` : ""}</div></td>
                     <td className="small">{nativeAtomicToUsdcText(o.amountNativeAtomic)} USDC</td>
-                    <td><Chip tone={o.paid === true ? "ok" : o.paid === false ? "neutral" : "warn"}>{o.paid === true ? "paid" : o.paid === false ? "unpaid" : "not read"}</Chip>{o.attempts.length > 0 && <div className="tiny dim">{o.attempts.length} attempt{o.attempts.length === 1 ? "" : "s"}</div>}</td>
+                    <td><Chip tone={paymentLabel(o).tone}>{paymentLabel(o).text}</Chip>{o.attempts.length > 0 && <div className="tiny dim">{o.attempts.length} attempt{o.attempts.length === 1 ? "" : "s"}</div>}</td>
                     <td className="small muted" style={{ maxWidth: 260 }}>{o.nextAction}</td>
-                    <td className="actions">{order?.orderId !== o.orderId && <button className="btn sm ghost" onClick={() => pickOrder(o)}>use</button>}</td>
+                    <td className="actions">{creationUnconfirmed(o) && <button className="btn sm" disabled={mine.rowBusy === o.orderId} onClick={() => recoverOrderRow(o.orderId)}>Recover order</button>}{order?.orderId !== o.orderId && <button className="btn sm ghost" onClick={() => pickOrder(o)}>use</button>}</td>
                   </tr>
                 ))}</tbody>
               </table></div>
@@ -573,7 +600,7 @@ export default function Developer() {
                           <td><Hex value={o.payer} n={4} link={explorerAddr(net, o.payer)} /></td>
                           <td><Hex value={o.orderId} n={5} />{o.tx && <> · <Hex value={o.tx} n={4} link={explorerTx(net, o.tx)} /></>}<div className="tiny dim">{o.proxy ?? "?"} · {o.source}{o.reference ? ` · “${o.reference}”` : ""}</div></td>
                           <td className="small">{nativeAtomicToUsdcText(o.amountNativeAtomic)} USDC</td>
-                          <td><Chip tone={o.paid === true ? "ok" : o.paid === false ? "neutral" : "warn"}>{o.paid === true ? "paid" : o.paid === false ? "unpaid" : "not read"}</Chip></td>
+                          <td><Chip tone={paymentLabel(o).tone}>{paymentLabel(o).text}</Chip></td>
                         </tr>
                       ))}</tbody>
                     </table></div>
@@ -632,7 +659,7 @@ export default function Developer() {
           </StepSection>
         </div>
 
-        {dialog && <OrderDialog payer={account} net={net} limits={limits} create={createOrder} onCreated={onCreated} onClose={() => setDialog(false)} />}
+        {dialog && <OrderDialog payer={account} net={net} limits={limits} create={createOrder} onCreated={onCreated} onClose={() => setDialog(false)} unconfirmed={unconfirmedLatest} onLost={() => void loadMine()} />}
 
         <details>
           <summary className="small">Integrate (curl) — the same lifecycle over HTTP</summary>

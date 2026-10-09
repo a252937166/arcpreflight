@@ -9,7 +9,7 @@ import type { StoredExecution, ReconcileClosedState } from "./reconcile.js";
 import type { OrderReconciliation, PlannedOrder } from "./orders.js";
 
 export type StoredRunRow = { run_key: string; fixture: string; attempt_id: string | null; created_at: string; updated_at: string };
-export type StoredOrderRow = { order_id: string; merchant: string; payer: string; amount_atomic: string; state: string; tx_hash: string | null; block: string | null; from_addr: string | null; gas_used: string | null; effective_gas_price: string | null; note: string | null; created_at: string; updated_at: string };
+export type StoredOrderRow = { order_id: string; merchant: string; payer: string; amount_atomic: string; state: string; tx_hash: string | null; block: string | null; from_addr: string | null; gas_used: string | null; effective_gas_price: string | null; note: string | null; created_at: string; updated_at: string; raw_tx?: string | null; tx_nonce?: number | null };
 
 export type Sealer = { seal: (obj: unknown) => Promise<string>; open: (s: string) => Promise<any> };
 const now = () => new Date().toISOString();
@@ -52,6 +52,8 @@ export class SqliteExecutionStore implements ExecutionStore {
     // design v3.3 §2: the order's identity is durable before its creation transaction is sent (PLANNED → SENT → CONFIRMED)
     db.exec(`CREATE TABLE IF NOT EXISTS orders (order_id TEXT PRIMARY KEY, merchant TEXT NOT NULL, payer TEXT NOT NULL, amount_atomic TEXT NOT NULL, state TEXT NOT NULL, tx_hash TEXT, block TEXT,
       from_addr TEXT, gas_used TEXT, effective_gas_price TEXT, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+    // the signed creation transaction, recorded before its broadcast so a refused send is re-sent with the IDENTICAL bytes (never re-signed)
+    for (const col of ["raw_tx TEXT", "tx_nonce INTEGER"]) { try { db.exec(`ALTER TABLE orders ADD COLUMN ${col}`); } catch { /* exists */ } }
   }
   /** Progressive evidence for one run: `onArtifact` and `onStep` callbacks for `runFixture`; the attempt id is learned from the execution artefact. */
   beginRun(runKey: string, fixture: string): { onArtifact: (name: string, value: unknown) => void; onStep: (s: { step: string; atMs: number }) => void } {
@@ -74,17 +76,20 @@ export class SqliteExecutionStore implements ExecutionStore {
   orderStore(): OrderStore {
     return {
       planned: (o) => { this.db.prepare("INSERT INTO orders (order_id, merchant, payer, amount_atomic, state, created_at, updated_at) VALUES (?,?,?,?,?,?,?)").run(o.orderId.toLowerCase(), o.merchant.toLowerCase(), o.payer.toLowerCase(), o.amountNativeAtomic, "PLANNED", now(), now()); },
-      sent: (o) => { this.db.prepare("UPDATE orders SET state = 'SENT', tx_hash = ?, updated_at = ? WHERE order_id = ? AND state = 'PLANNED'").run(o.tx.toLowerCase(), now(), o.orderId.toLowerCase()); },
-      confirmed: (o) => { this.db.prepare("UPDATE orders SET state = 'CONFIRMED', tx_hash = COALESCE(?, tx_hash), block = ?, from_addr = ?, gas_used = ?, effective_gas_price = ?, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')").run(o.tx?.toLowerCase() ?? null, o.block, o.from?.toLowerCase() ?? null, o.gasUsed, o.effectiveGasPriceNativeAtomic, now(), o.orderId.toLowerCase()); },
+      sent: (o) => { this.db.prepare("UPDATE orders SET state = 'SENT', tx_hash = ?, raw_tx = ?, tx_nonce = ?, from_addr = COALESCE(?, from_addr), updated_at = ? WHERE order_id = ? AND state = 'PLANNED'").run(o.tx.toLowerCase(), o.raw ?? null, o.nonce ?? null, o.from?.toLowerCase() ?? null, now(), o.orderId.toLowerCase()); },
+      // reached only before any broadcast (signing or recording failed): the signed bytes, if any, are dropped so nothing re-sends them
+      notSent: (o) => { this.db.prepare("UPDATE orders SET state = 'FAILED', note = ?, raw_tx = NULL, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')").run(o.reason, now(), o.orderId.toLowerCase()); },
+      confirmed: (o) => { this.db.prepare("UPDATE orders SET state = 'CONFIRMED', tx_hash = COALESCE(?, tx_hash), block = ?, from_addr = COALESCE(?, from_addr), gas_used = ?, effective_gas_price = ?, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')").run(o.tx?.toLowerCase() ?? null, o.block, o.from?.toLowerCase() ?? null, o.gasUsed, o.effectiveGasPriceNativeAtomic, now(), o.orderId.toLowerCase()); },
     };
   }
   listOpenOrders(): PlannedOrder[] {
-    return (this.db.prepare("SELECT * FROM orders WHERE state IN ('PLANNED','SENT') ORDER BY created_at").all() as unknown as StoredOrderRow[]).map((r) => ({ orderId: r.order_id as Hex, merchant: r.merchant as Hex, txHash: (r.tx_hash as Hex | null) ?? null, createdAt: r.created_at }));
+    return (this.db.prepare("SELECT * FROM orders WHERE state IN ('PLANNED','SENT') ORDER BY created_at").all() as unknown as StoredOrderRow[]).map((r) => ({ orderId: r.order_id as Hex, merchant: r.merchant as Hex, txHash: (r.tx_hash as Hex | null) ?? null, createdAt: r.created_at,
+      raw: (r.raw_tx as Hex | null | undefined) ?? null, nonce: r.tx_nonce ?? null, from: (r.from_addr as Hex | null) ?? null }));
   }
   listOrders(limit = 50): StoredOrderRow[] { return this.db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT ?").all(limit) as unknown as StoredOrderRow[]; }
   /** applies what `reconcilePlannedOrder` established; a pending result changes nothing */
   applyOrderReconciliation(orderId: Hex, r: OrderReconciliation) {
-    if (r.kind === "confirmed") this.db.prepare("UPDATE orders SET state = 'CONFIRMED', tx_hash = COALESCE(?, tx_hash), block = COALESCE(?, block), from_addr = ?, gas_used = ?, effective_gas_price = ?, note = ?, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')").run(r.tx?.toLowerCase() ?? null, r.block, r.from?.toLowerCase() ?? null, r.gasUsed, r.effectiveGasPriceNativeAtomic, r.note, now(), orderId.toLowerCase());
+    if (r.kind === "confirmed") this.db.prepare("UPDATE orders SET state = 'CONFIRMED', tx_hash = COALESCE(?, tx_hash), block = COALESCE(?, block), from_addr = COALESCE(?, from_addr), gas_used = ?, effective_gas_price = ?, note = ?, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')").run(r.tx?.toLowerCase() ?? null, r.block, r.from?.toLowerCase() ?? null, r.gasUsed, r.effectiveGasPriceNativeAtomic, r.note, now(), orderId.toLowerCase());
     else if (r.kind === "failed") this.db.prepare("UPDATE orders SET state = 'FAILED', note = ?, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')").run(r.note, now(), orderId.toLowerCase());
     else if (r.kind === "unknown") this.db.prepare("UPDATE orders SET state = 'UNKNOWN_CREATION', note = ?, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')").run(r.note, now(), orderId.toLowerCase());
   }

@@ -7,12 +7,12 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { createPublicClient, createWalletClient, http, getAddress, type Hex, type PublicClient, type WalletClient, type Transport, type Chain, type Account } from "viem";
+import { createPublicClient, createWalletClient, http, getAddress, keccak256, type Hex, type PublicClient, type WalletClient, type Transport, type Chain, type Account } from "viem";
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { arc, arcTestnet } from "viem/chains";
-import { runFixture, createOrder, postconditionDigest, reconcileExecution, reconcileRpcFromClient, type Fixture, type Step, type ExecutionStore, type ExecutionOutcome, type StoredExecution, type ArtifactName } from "@arcpreflight/runner";
+import { runFixture, createOrder, postconditionDigest, reconcileExecution, reconcileRpcFromClient, sendIdentical, isDefinitiveSendError, OrderCreationPending, OrderCreationNotSent, type RawSender, type Fixture, type Step, type ExecutionStore, type ExecutionOutcome, type StoredExecution, type ArtifactName } from "@arcpreflight/runner";
 import { ExecutionReceipt, executionDigest } from "@arcpreflight/schema";
-import { planOrder, orderSent, orderConfirmed, orderFailed, runnerOrderStore, getOrderRow, listOrderRows, shapeOrder, refreshPaid, reconcileOrders, ORDER_LIMITS, type OrderInput, type OrderRow } from "./orders.js";
+import { planOrder, orderSent, orderNotSent, orderConfirmed, orderFailed, runnerOrderStore, getOrderRow, listOrderRows, shapeOrder, refreshPaid, reconcileOrders, ORDER_LIMITS, type OrderInput, type OrderRow, type OrderState } from "./orders.js";
 import { cfg } from "./config.js";
 import { curatedSubjects } from "./subjects.js";
 import { capabilities, PASSPORT_VERSIONS } from "./capabilities.js";
@@ -32,6 +32,8 @@ export const FIXTURES: Record<Fixture, { title: string; headline: string; expect
 
 const chain: Chain = cfg.net === "mainnet" ? arc : arcTestnet;
 const publicClient: PublicClient = createPublicClient({ chain, transport: http(cfg.rpc, { timeout: 20_000 }) });
+/** chain reads for order reconciliation (receipt, order state, the creation nonce and its consumer) */
+const orderRpc = reconcileRpcFromClient(publicClient as any);
 function keyFromFile(role: string): Hex | null {
   const f = resolve(process.env.KEYS_DIR ?? resolve(cfg.root, "keys"), `${role}.json`);
   return existsSync(f) ? JSON.parse(readFileSync(f, "utf8")).privateKey : null;
@@ -115,7 +117,7 @@ export async function networkInfo(db: Db) {
   const day = now().slice(0, 10);
   const used = row(db, "SELECT COUNT(*) AS c FROM demo_runs WHERE substr(created_at,1,10) = ? AND labels_json LIKE '%LIVE_REQUEST%'", day)?.c ?? 0;
   const unresolved = row(db, "SELECT COUNT(*) AS c FROM business_executions WHERE state = 'BROADCAST_ATTEMPTED'")?.c ?? 0;
-  return { network: cfg.net, chainId: cfg.chainId, caip2: cfg.caip2, rpc: cfg.rpc, explorer: cfg.net === "mainnet" ? "https://explorer.arc.io" : "https://testnet.arcscan.app", head: headCache.head,
+  return { network: cfg.net, chainId: cfg.chainId, caip2: cfg.caip2, rpc: cfg.publicRpc, explorer: cfg.net === "mainnet" ? "https://explorer.arc.io" : "https://testnet.arcscan.app", head: headCache.head,
     usdc: cfg.usdc, profile: cfg.profile, release: cfg.releaseSha, priceTokenAtomic: cfg.priceTokenAtomic, supportedTargets: cfg.supportedTargets,
     quoteTtlSeconds: cfg.quoteTtlSeconds, reportTtlSeconds: cfg.reportTtlSeconds,
     accounts: { deployerAdmin: dep?.deployer ?? null, orderCreator: orderSignerRole === "order-creator" ? orderSignerAcct?.address ?? null : dep?.orderCreator ?? null, orderSignerRole, adminKeyInProcess: orderSignerRole === "deployer-admin", demoRunner: runnerAcct?.address ?? null, merchantPayTo: cfg.merchant?.address ?? null },
@@ -152,7 +154,10 @@ export function faucetInfo(db: Db) {
   const used = row(db, "SELECT COUNT(*) AS c FROM faucet_claims WHERE substr(created_at,1,10) = ?", day)?.c ?? 0;
   return { enabled: true as const, amountNativeAtomic: cfg.faucet.amountNativeAtomic.toString(), perDay: cfg.faucet.perDay, usedToday: used, perAddressPer24h: 1, sender: orderSignerAcct?.address ?? null, note: "project testnet funds; one claim per wallet and per client every 24 h; nothing on mainnet" };
 }
-export type FaucetResult = { ok: true; txHash: Hex; amountNativeAtomic: string; address: Hex } | { ok: false; status: number; error: string; reason: string };
+/** `pending`: the claim's one transaction was signed, recorded and handed to the node, but its acceptance or receipt is not confirmed
+ *  ("sent, not yet confirmed"): the hash is the claim's identity; it is never re-signed and the claim is not repeated. */
+export type FaucetResult = { ok: true; txHash: Hex; amountNativeAtomic: string; address: Hex; pending?: boolean; note?: string } | { ok: false; status: number; error: string; reason: string; txHash?: Hex | null };
+const FAUCET_RECEIPT_TIMEOUT_MS = 30_000;
 export async function claimFaucet(db: Db, address: Hex, client: string): Promise<FaucetResult> {
   if (!faucetEnabled() || !orderWallet) return { ok: false, status: 404, error: "FAUCET_DISABLED", reason: "the faucet exists on Arc testnet only" };
   db.exec(FAUCET_TABLE);
@@ -167,15 +172,36 @@ export async function claimFaucet(db: Db, address: Hex, client: string): Promise
     run(db, "INSERT INTO faucet_claims (id, address, client_key, amount_atomic, created_at) VALUES (?,?,?,?,?)", id, address.toLowerCase(), client, amount.toString(), now()); // the reservation is kept even if the send fails: no retry storm
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
+  const done = (txHash: Hex, note?: string): FaucetResult => ({ ok: true, txHash, amountNativeAtomic: amount.toString(), address, ...(note ? { pending: true, note } : {}) });
   try {
     const bal = await publicClient.getBalance({ address: orderWallet.account.address });
     if (bal < amount + cfg.faucet.floorNativeAtomic) return { ok: false, status: 503, error: "FAUCET_EMPTY", reason: "the faucet key is below its floor; it is topped up by hand" };
-    const txHash = await adminLock(async () => orderWallet!.sendTransaction({ to: address, value: amount, ...(await feeParams()) } as any));
-    const rc = await publicClient.waitForTransactionReceipt({ hash: txHash });
-    run(db, "UPDATE faucet_claims SET tx_hash = ? WHERE id = ?", txHash, id);
-    if (rc.status !== "success") return { ok: false, status: 503, error: "FAUCET_FAILED", reason: `the faucet transaction reverted (${txHash})` };
-    return { ok: true, txHash, amountNativeAtomic: amount.toString(), address };
-  } catch (e: any) { return { ok: false, status: 503, error: "FAUCET_FAILED", reason: String(e?.shortMessage ?? e?.message ?? e).slice(0, 160) }; }
+    // one claim = one signed transaction: signed locally with an explicit nonce under the order creator's single-sender lock, its hash
+    // recorded on the claim BEFORE the broadcast, and only the identical bytes handed to the node again (a pool node may refuse one call)
+    const sent = await adminLock(async () => {
+      const from = orderWallet!.account.address; const fees = await feeParams();
+      const gas = (BigInt(await publicClient.estimateGas({ account: from, to: address, value: amount } as any)) * 12n + 9n) / 10n;
+      const nonce = await publicClient.getTransactionCount({ address: from, blockTag: "pending" });
+      const raw = (await orderWallet!.signTransaction({ account: orderWallet!.account, chain, to: address, value: amount, nonce, gas, maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas, type: "eip1559" } as any)) as Hex;
+      const hash = keccak256(raw);
+      run(db, "UPDATE faucet_claims SET tx_hash = ? WHERE id = ?", hash, id);
+      return { hash, ...(await sendIdentical(orderWallet as unknown as RawSender, raw, () => true)) };
+    });
+    if (!sent.accepted) {
+      if (sent.attempts === 1 && isDefinitiveSendError(sent.sendError)) { // refused outright: nothing entered the pool, nothing can land
+        run(db, "UPDATE faucet_claims SET tx_hash = NULL WHERE id = ?", id);
+        return { ok: false, status: 503, error: "FAUCET_FAILED", reason: `the node refused the faucet transaction (${sent.sendError}); nothing was sent, and this claim still counts` };
+      }
+      return done(sent.hash, `sent, not yet confirmed: the node did not confirm taking the transaction (${sent.sendError ?? "no answer"}); follow the hash on the explorer — this claim is one transaction and is never re-signed`);
+    }
+    let rc: any;
+    try { rc = await publicClient.waitForTransactionReceipt({ hash: sent.hash, timeout: FAUCET_RECEIPT_TIMEOUT_MS }); }
+    catch { return done(sent.hash, "sent, not yet confirmed: no receipt within the wait; follow the hash on the explorer"); }
+    if (rc.status !== "success") return { ok: false, status: 503, error: "FAUCET_FAILED", reason: `the faucet transaction reverted (${sent.hash})`, txHash: sent.hash };
+    return done(sent.hash);
+  } catch (e: any) { // failed before the broadcast (balance, fees, estimate, nonce, signing or recording): nothing was sent
+    return { ok: false, status: 503, error: "FAUCET_FAILED", reason: `${String(e?.shortMessage ?? e?.message ?? e).slice(0, 160)}; nothing was sent, and this claim still counts` };
+  }
 }
 
 /** Durable store for the runner's signed business transaction (spec D07). The raw bytes are encrypted at rest like the payment outbox. */
@@ -423,8 +449,14 @@ export function latestSample(db: Db, fixture: Fixture): string | null {
 /** Developer path (design v3.3 §2): create an order for a visitor's wallet on the MAIN or CHANGED proxy with the visitor's amount
  *  and reference. The order's identity is durable (PLANNED) before the creation transaction is sent; SENT right after the send;
  *  CONFIRMED after the receipt. A failure in between leaves a row that order reconciliation resolves from the chain. */
-export type CreatedOrder = { ok: true; orderId: Hex; tx: Hex; block: string; merchant: Hex; proxy: "MAIN" | "CHANGED"; payer: Hex; amountNativeAtomic: string; reference: string | null; baselineDigest: Hex | null; state: "CONFIRMED"; owner: string | null };
-export async function createOrderFor(db: Db, input: OrderInput & { owner: string | null; client: string }): Promise<CreatedOrder | StartResult> {
+export type CreatedOrder = { ok: true; pending?: false; orderId: Hex; tx: Hex; block: string; merchant: Hex; proxy: "MAIN" | "CHANGED"; payer: Hex; amountNativeAtomic: string; reference: string | null; baselineDigest: Hex | null; state: "CONFIRMED"; owner: string | null };
+/** The identity is recorded but the creation is not confirmed (answered 202 ORDER_CREATION_PENDING): never "nothing was changed".
+ *  The order is resolved from the chain by reconciliation (the same signed creation is re-sent while its window is open). */
+export type PendingOrder = { ok: true; pending: true; status: 202; orderId: Hex; state: OrderState; tx: Hex | null; nextAction: string; reason: string; merchant: Hex; proxy: "MAIN" | "CHANGED"; payer: Hex; amountNativeAtomic: string; reference: string | null; owner: string | null };
+/** `orderId`/`state`/`tx` are present once an identity was recorded (a failure after planning names the order it concerns). */
+export type OrderFailure = { ok: false; status: number; error: string; reason: string; orderId?: Hex; state?: OrderState; tx?: Hex | null };
+const DEVELOPER_ORDER_RECEIPT_TIMEOUT_MS = 30_000;
+export async function createOrderFor(db: Db, input: OrderInput & { owner: string | null; client: string }): Promise<CreatedOrder | PendingOrder | OrderFailure> {
   const dep = deployments(); const which = input.proxy;
   if (!dep || !orderWallet || !dep.proxies?.[which]) return { ok: false, status: 503, error: "DEMO_UNAVAILABLE", reason: "fixtures not deployed on this network" };
   // Persist admissions (count, cooldown and the gas reservation) before queuing the management transaction. A failed RPC/receipt
@@ -451,36 +483,72 @@ export async function createOrderFor(db: Db, input: OrderInput & { owner: string
       try { planOrder(db, { orderId: o.orderId, owner: input.owner, clientKey: client, source: "developer", payer: o.payer, merchant: o.merchant, proxy: which, amountNativeAtomic: o.amountNativeAtomic, reference: input.reference }); run(db, "UPDATE demo_order_admissions SET order_id = ? WHERE id = ?", o.orderId.toLowerCase(), admissionId); db.exec("COMMIT"); }
       catch (e) { db.exec("ROLLBACK"); throw e; }
     },
-    sent: (o: { orderId: Hex; tx: Hex }) => orderSent(db, o.orderId, o.tx),
+    sent: (o: { orderId: Hex; tx: Hex; raw?: Hex; nonce?: number; from?: Hex | null }) => orderSent(db, o.orderId, o.tx, { raw: o.raw, nonce: o.nonce, from: o.from }),
+    notSent: (o: { orderId: Hex; reason: string }) => orderNotSent(db, o.orderId, o.reason),
     confirmed: (o: any) => orderConfirmed(db, { orderId: o.orderId, tx: o.tx, block: o.block, from: o.from, gasUsed: o.gasUsed, effectiveGasPriceNativeAtomic: o.effectiveGasPriceNativeAtomic }),
   };
+  const common = { merchant, proxy: which, payer: input.payer, amountNativeAtomic: input.amountNativeAtomic.toString(), reference: input.reference, owner: input.owner };
   let o;
-  try { o = await adminLock(() => createOrder({ publicClient, admin: orderWallet!, merchant, feeParams, maxOrderGasCostNativeAtomic: demoBudget.gasCeilingPerOrderAtomic }, input.payer, input.amountNativeAtomic, store)); }
+  // createOrder holds the order creator's single-sender lock around nonce → sign → record → send (not around the receipt wait); the
+  // receipt wait is bounded well below proxy timeouts — a slow receipt answers 202 with the identity and the page polls the order
+  try { o = await createOrder({ publicClient, admin: orderWallet!, merchant, feeParams, maxOrderGasCostNativeAtomic: demoBudget.gasCeilingPerOrderAtomic, adminLock, orderReceiptTimeoutMs: DEVELOPER_ORDER_RECEIPT_TIMEOUT_MS }, input.payer, input.amountNativeAtomic, store); }
   catch (e: any) {
+    const msg = String(e?.message ?? e);
     // refused before anything was persisted or sent (the per-transaction gas cap): no order row exists for it; say so plainly
-    if (/^createOrder refused:/.test(String(e?.message ?? e))) return { ok: false, status: 503, error: "GAS_CAP_EXCEEDED", reason: String(e.message).slice(0, 300) };
-    const planned = row(db, "SELECT order_id FROM orders WHERE client_key = ? AND source = 'developer' AND state IN ('PLANNED','SENT') ORDER BY created_at DESC LIMIT 1", client);
-    if (planned && /createOrder failed/.test(String(e?.message ?? e))) orderFailed(db, planned.order_id as Hex, "FAILED", "the creation transaction reverted");
-    throw e; // anything else (RPC error, receipt timeout) stays PLANNED/SENT for order reconciliation: the chain decides, nothing is replaced here
+    if (/^createOrder refused:/.test(msg)) return { ok: false, status: 503, error: "GAS_CAP_EXCEEDED", reason: msg.slice(0, 300) };
+    const linked = (row(db, "SELECT order_id FROM demo_order_admissions WHERE id = ?", admissionId)?.order_id ?? null) as Hex | null;
+    if (!linked) return { ok: false, status: 503, error: "DEPENDENCY_ERROR", reason: `the order was not created (${msg.slice(0, 200)}); no order identity was recorded and nothing was sent` };
+    // from here on the identity exists: the answer names it, and never says "nothing was changed"
+    if (e instanceof OrderCreationNotSent) orderNotSent(db, linked, e.reason);
+    else if (/^createOrder failed/.test(msg)) orderFailed(db, linked, "FAILED", "the creation transaction reverted");
+    const r = getOrderRow(db, linked)!;
+    const ident = { orderId: r.order_id as Hex, state: r.state, tx: (r.tx_hash as Hex | null) ?? null };
+    if (r.state === "FAILED" || r.state === "UNKNOWN_CREATION")
+      return { ok: false, status: 502, error: "ORDER_CREATION_FAILED", reason: e instanceof OrderCreationNotSent ? e.reason : r.note ?? "the creation transaction reverted", ...ident };
+    if (r.state === "CONFIRMED") return { ok: true, ...common, orderId: ident.orderId, tx: ident.tx as Hex, block: r.block ?? "", baselineDigest: baselineDigestFor(db, merchant), state: "CONFIRMED" };
+    // PLANNED or SENT: the chain decides (reconciliation re-sends the same signed creation while the window is open); nothing is replaced here
+    const reason = e instanceof OrderCreationPending ? e.reason : `the creation outcome is not established (${msg.slice(0, 160)})`;
+    return { ok: true, pending: true, status: 202, ...common, ...ident, nextAction: shapeOrder(db, r, input.owner).nextAction, reason };
   }
-  return { ok: true, ...o, merchant, proxy: which, payer: input.payer, amountNativeAtomic: input.amountNativeAtomic.toString(), reference: input.reference, baselineDigest: baselineDigestFor(db, merchant), state: "CONFIRMED", owner: input.owner };
+  return { ok: true, ...o, ...common, baselineDigest: baselineDigestFor(db, merchant), state: "CONFIRMED" };
 }
 /** Owner-scoped order views (read routes: chain reads refresh the paid flag; nothing is sent). */
 export async function listOrders(db: Db, owner: string, limit = 50) {
   const list = listOrderRows(db, owner, limit);
-  await refreshPaid(db, publicClient, list).catch(() => {});
+  await refreshPaid(db, orderRpc, list).catch(() => {});
   return { orders: list.map((o) => shapeOrder(db, o, owner)) };
 }
 export async function getOrder(db: Db, owner: string, orderId: string) {
   const o = getOrderRow(db, orderId);
   if (!o || o.owner !== owner) return null; // no existence leak across owners
-  if (o.state === "PLANNED" || o.state === "SENT") await reconcileOrders(db, publicClient, { orderId }).catch(() => {});
+  if (o.state === "PLANNED" || o.state === "SENT") await reconcileOrders(db, orderRpc, { orderId }).catch(() => {}); // a read: never sends
   const fresh = getOrderRow(db, orderId)!;
-  await refreshPaid(db, publicClient, [fresh]).catch(() => {});
+  await refreshPaid(db, orderRpc, [fresh]).catch(() => {});
   return shapeOrder(db, fresh, owner);
 }
-/** Start-up pass and worker: unconfirmed order creations are resolved from the chain (reads only). */
-export const reconcileOrderCreations = (db: Db, log: (m: string) => void = () => {}) => reconcileOrders(db, publicClient, { log });
+/** The order creator's sender for re-sending an already signed creation: the identical bytes, under the single-sender lock. */
+const orderResender: RawSender = { sendRawTransaction: (a) => adminLock(() => orderWallet!.sendRawTransaction(a)) };
+/** Start-up pass and worker: unconfirmed order creations are resolved from the chain; a recorded creation the node does not hold is
+ *  handed the IDENTICAL signed bytes again while its window is open (never re-signed, never a second order). */
+export const reconcileOrderCreations = (db: Db, log: (m: string) => void = () => {}) =>
+  reconcileOrders(db, orderRpc, { log, allowSend: !!orderWallet, sender: orderWallet ? orderResender : null });
+const RECOVER_MIN_INTERVAL_MS = 3_000;
+const lastRecover = new Map<string, number>();
+/** POST /v1/demo/orders/{id}/recover (owner only, at most one per order every 3 s): one bounded reconciliation of this order, with
+ *  the identical-bytes re-send allowed; returns the shaped order. A confirmed or closed order is only re-read. */
+export async function recoverOrder(db: Db, owner: string, orderId: string): Promise<{ ok: true; order: ReturnType<typeof shapeOrder> } | { ok: false; status: number; error: string; reason: string }> {
+  const o = getOrderRow(db, orderId);
+  if (!o || o.owner !== owner) return { ok: false, status: 404, error: "NOT_FOUND", reason: "unknown order" }; // no existence leak across owners
+  const t = Date.now(); const last = lastRecover.get(o.order_id) ?? 0;
+  if (t - last < RECOVER_MIN_INTERVAL_MS) return { ok: false, status: 429, error: "RATE_LIMITED", reason: "one recovery per order every 3 seconds" };
+  lastRecover.set(o.order_id, t);
+  if (lastRecover.size > 1000) for (const [k, at] of lastRecover) if (t - at > RECOVER_MIN_INTERVAL_MS) lastRecover.delete(k);
+  if (o.state === "PLANNED" || o.state === "SENT")
+    await reconcileOrders(db, orderRpc, { orderId: o.order_id, allowSend: !!orderWallet, sender: orderWallet ? orderResender : null, log: (m) => console.log(now(), "ORDER", m) }).catch(() => {});
+  const fresh = getOrderRow(db, orderId)!;
+  await refreshPaid(db, orderRpc, [fresh]).catch(() => {});
+  return { ok: true, order: shapeOrder(db, fresh, owner) };
+}
 /** The process-wide chain client, for modules that reconcile with reads only. */
 export const chainClient: PublicClient = publicClient;
 

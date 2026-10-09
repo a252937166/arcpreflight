@@ -82,7 +82,9 @@ export function openDb(path: string) {
     // review round 2: the fee relay receipt facts, so a wallet attempt's cost statement is complete on the operator side too
     "ALTER TABLE wallet_attempts ADD COLUMN fee_receipt_json TEXT",
     // review round 3: the wallet-prompt marker that keeps submission uncertainty across a page refresh
-    "ALTER TABLE wallet_attempts ADD COLUMN prompt_json TEXT"]) {
+    "ALTER TABLE wallet_attempts ADD COLUMN prompt_json TEXT",
+    // 2026-10-09: the order creation is signed locally and recorded (bytes, nonce) before its broadcast; a refused send is re-sent identically
+    "ALTER TABLE orders ADD COLUMN raw_tx TEXT", "ALTER TABLE orders ADD COLUMN tx_nonce INTEGER"]) {
     try { db.exec(sql); } catch (e: any) { if (!/duplicate column/i.test(String(e?.message ?? e))) throw e; }
   }
   // v3.3: orders created by earlier releases were written only after their receipt; carry them over as CONFIRMED (the pre-v3.3 table stays)

@@ -117,7 +117,12 @@ if (scenarios.includes("wallet")) {
   assert(balance >= needed, `wallet balance ${balance} too low for fee + amount + gas (needed ${needed})`);
   const session = await post("/v1/session", {}); assert.equal(session.status, 201, JSON.stringify(session.body)); const token = session.body.token as string;
   // 1. the order: identity durable before the send; amount and reference are the visitor's
-  const order = await post("/v1/demo/orders", { payer: wallet.address, proxy: "MAIN", amountNativeAtomic: amount.toString(), reference }, token);
+  let order = await post("/v1/demo/orders", { payer: wallet.address, proxy: "MAIN", amountNativeAtomic: amount.toString(), reference }, token);
+  if (order.status === 202 && order.body?.orderId) { // the creation was recorded but not confirmed within the server's wait: follow THAT order, never create another
+    log(`order creation pending (${order.body.state}${order.body.tx ? `, tx ${order.body.tx}` : ""}): following order ${order.body.orderId.slice(0, 12)}…`);
+    const id = order.body.orderId as string;
+    for (let i = 0; i < 60 && order.body?.state !== "CONFIRMED"; i++) { await sleep(3000); const g = await get(`/v1/demo/orders/${id}`, token); if (g.status === 200) order = { status: 201, body: { ...g.body, baselineDigest: g.body.baselineDigest ?? order.body.baselineDigest ?? network.fixtures?.find((f: any) => f.proxy === "MAIN")?.baselineDigest } }; if (["FAILED", "UNKNOWN_CREATION"].includes(order.body?.state)) break; }
+  }
   assert.equal(order.status, 201, JSON.stringify(order.body)); assert.equal(order.body.state, "CONFIRMED"); assert.equal(order.body.reference, reference);
   log(`order ${order.body.orderId.slice(0, 12)}… created in ${order.body.tx} (block ${order.body.block}) on ${order.body.merchant}`);
   const listed = await get("/v1/demo/orders", token); assert.equal(listed.status, 200); assert(listed.body.orders.some((o: any) => o.orderId === order.body.orderId.toLowerCase()), "the owner's order list must contain the new order");

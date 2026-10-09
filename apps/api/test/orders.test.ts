@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getAddress, isAddress } from "viem";
+import { getAddress, isAddress, keccak256 } from "viem";
 import { openDb, type Db } from "../src/db.js";
-import { parseOrderInput, planOrder, orderSent, orderConfirmed, reconcileOrders, refreshPaid, shapeOrder, getOrderRow, listOrderRows, runnerOrderStore, ORDER_LIMITS, type OrderRpc } from "../src/orders.js";
+import { parseOrderInput, planOrder, orderSent, orderNotSent, orderFailed, orderConfirmed, reconcileOrders, refreshPaid, shapeOrder, getOrderRow, listOrderRows, runnerOrderStore, ORDER_LIMITS, type OrderRpc } from "../src/orders.js";
 
 // Order identity before the send (design v3.3 §2, AP33-05): the table and its reconciliation with a fake chain. No key material, no network.
 const PAYER = "0x3333333333333333333333333333333333333333"; const MERCHANT = "0x2222222222222222222222222222222222222222";
@@ -91,5 +91,61 @@ describe("order rows: PLANNED → SENT → CONFIRMED, and reconciliation from th
     expect(shaped.checks).toHaveLength(1); expect(shaped.checks[0]).toMatchObject({ paymentState: "COMPLETED", reportDigest: "0x" + "33".repeat(32) });
     expect(shaped.nextAction).toContain("execute with your wallet");
     expect(shapeOrder(db, getOrderRow(db, ID)!, "visitor:b").checks).toHaveLength(0); // another owner's checks are never listed
+  });
+});
+
+// 2026-10-09 13:57:49Z: a creation refused by the node left no hash. The creation is now signed locally and recorded before its broadcast.
+describe("order creation identity (2026-10-09): recorded signed creation, identical re-send only where allowed, unconfirmed never complete", () => {
+  const RAW = (`0x02${"de".repeat(90)}`) as `0x${string}`; const RTX = keccak256(RAW);
+  const SIGNER = "0x4444444444444444444444444444444444444444" as `0x${string}`; const OTHER = ("0x" + "ef".repeat(32)) as `0x${string}`;
+  const chain = (c: { latest?: number; consumer?: `0x${string}` | null } = {}) => {
+    const sent: string[] = [];
+    const r: OrderRpc = {
+      ...rpc({}),
+      getTransactionCount: async ({ blockNumber }) => blockNumber === undefined ? (c.latest ?? 7) : (c.latest ?? 7) > 7 && blockNumber >= 150n ? 8 : 7,
+      getTransaction: async () => { throw new Error("not found"); },
+      getBlockNumber: async () => 200n,
+      getBlock: async ({ blockNumber }) => ({ transactions: blockNumber === 150n && c.consumer ? [{ hash: c.consumer, from: SIGNER, nonce: 7 }] : [] }),
+    };
+    const sender = { sendRawTransaction: async ({ serializedTransaction }: { serializedTransaction: `0x${string}` }) => { sent.push(serializedTransaction); return keccak256(serializedTransaction); } };
+    return { r, sender, sent };
+  };
+  const sentSigned = () => { plan(); orderSent(db, ID, RTX, { raw: RAW, nonce: 7, from: SIGNER }); };
+  it("records the signed creation at SENT; notSent closes it FAILED and drops the bytes; the owner's view never carries them", () => {
+    sentSigned();
+    expect(getOrderRow(db, ID)).toMatchObject({ state: "SENT", tx_hash: RTX, raw_tx: RAW, tx_nonce: 7, from_addr: SIGNER });
+    expect(JSON.stringify(shapeOrder(db, getOrderRow(db, ID)!, "visitor:a"))).not.toContain(RAW.slice(2, 60));
+    orderNotSent(db, ID, "the creation transaction was not signed or not recorded (disk full); nothing was sent");
+    expect(getOrderRow(db, ID)).toMatchObject({ state: "FAILED", raw_tx: null, note: expect.stringContaining("nothing was sent") });
+  });
+  it("a read never sends; the worker or a recover (allowSend + the serialized sender) hands the node the identical bytes inside the window", async () => {
+    sentSigned();
+    const c = chain();
+    expect(await reconcileOrders(db, c.r)).toEqual({ resolved: 0, pending: 1 });
+    expect(c.sent).toEqual([]);
+    expect(await reconcileOrders(db, c.r, { allowSend: true, sender: c.sender })).toEqual({ resolved: 0, pending: 1 });
+    expect(c.sent).toEqual([RAW]);
+    expect(getOrderRow(db, ID)).toMatchObject({ state: "SENT", tx_hash: RTX, note: expect.stringContaining("identical signed creation") }); // what was seen stays on the row
+    expect(await reconcileOrders(db, c.r, { allowSend: true, sender: c.sender, now: new Date(Date.now() + 11 * 60_000) })).toEqual({ resolved: 1, pending: 0 });
+    expect(c.sent).toEqual([RAW]); expect(getOrderRow(db, ID)!.state).toBe("UNKNOWN_CREATION");
+  });
+  it("a creation nonce consumed by another transaction closes the order FAILED; nothing is re-signed or re-sent", async () => {
+    sentSigned();
+    const c = chain({ latest: 8, consumer: OTHER });
+    expect(await reconcileOrders(db, c.r, { allowSend: true, sender: c.sender })).toEqual({ resolved: 1, pending: 0 });
+    expect(getOrderRow(db, ID)).toMatchObject({ state: "FAILED", note: `the creation nonce was consumed by another transaction (${OTHER}); this order was never created — nothing is re-signed; a new order is a new row` });
+    expect(c.sent).toEqual([]);
+  });
+  it("an unconfirmed order's view never reads as paid or unpaid, and its next action never invites approval", () => {
+    plan();
+    db.prepare("UPDATE orders SET paid = 0 WHERE order_id = ?").run(ID); // even a stray flag on an unconfirmed row is not shown
+    const planned = shapeOrder(db, getOrderRow(db, ID)!, "visitor:a");
+    expect(planned).toMatchObject({ state: "PLANNED", paid: null, nextAction: expect.stringContaining("creation not confirmed") });
+    orderSent(db, ID, RTX, { raw: RAW, nonce: 7, from: SIGNER });
+    const sent = shapeOrder(db, getOrderRow(db, ID)!, "visitor:a");
+    expect(sent).toMatchObject({ state: "SENT", paid: null, nextAction: expect.stringContaining("not yet confirmed") });
+    for (const v of [planned, sent]) { expect(v.nextAction).toContain("approval stays closed"); expect(v.nextAction).not.toMatch(/run the preflight|execute with/); }
+    orderFailed(db, ID, "UNKNOWN_CREATION", "no receipt and no order on chain after the window");
+    expect(shapeOrder(db, getOrderRow(db, ID)!, "visitor:a")).toMatchObject({ state: "UNKNOWN_CREATION", paid: null, nextAction: expect.stringContaining("create a new order") });
   });
 });

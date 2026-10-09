@@ -156,6 +156,35 @@ describe("the connected-wallet panel", () => {
   });
 });
 
+describe("the disconnected chip (real-wallet session: discovery in fresh and duplicated tabs)", () => {
+  const disconnected = (over: Record<string, unknown>) => { Object.assign(h.wallet, { account: null, provider: null, info: null, chainId: null, picker: false, searching: false, missing: null, error: null, candidates: [], searchAgain: vi.fn(), dismissMissing: vi.fn() }, over); };
+  it("the picker reads 'looking for wallets…' while late wallets may still answer, lists what answered, and offers Search again", async () => {
+    disconnected({ picker: true, searching: true, candidates: [{ info: { uuid: "u-okx", name: "OKX Wallet", icon: "", rdns: "com.okex.wallet" }, provider: {} }] });
+    let tree = chip(); const picker = nodes(tree).find((n) => n.props?.["data-testid"] === "wallet-picker");
+    expect(nodes(picker).some((n) => n.props?.["data-testid"] === "wallet-searching")).toBe(true); expect(text(picker)).toContain("looking for wallets…");
+    expect(text(picker)).toContain("OKX Wallet");
+    const again = button(tree, "Search again"); expect(again.props.disabled).toBe(true); // not while a search runs
+    disconnected({ picker: true, searching: false, candidates: [] }); tree = chip();
+    expect(text(tree)).toContain("no wallet answered in this tab yet");
+    button(tree, "Search again").props.onClick(); expect(h.wallet.searchAgain).toHaveBeenCalledTimes(1);
+  });
+  it("a remembered wallet that did not answer in this tab is named, with Search again, another wallet, or dismiss — nothing else is shown as connected", async () => {
+    disconnected({ missing: { rdns: "io.metamask", name: "MetaMask" } });
+    const tree = chip(); const notice = nodes(tree).find((n) => n.props?.["data-testid"] === "wallet-missing");
+    expect(text(notice)).toContain("MetaMask was not detected in this tab — open the extension once or reload the tab. Nothing else was connected in its place.");
+    expect(content(tree)).toContain("Connect wallet"); expect(content(tree)).not.toContain(CHIP);
+    button(tree, "Search again").props.onClick(); expect(h.wallet.searchAgain).toHaveBeenCalledTimes(1);
+    button(tree, "Choose another wallet").props.onClick(); expect(h.wallet.connect).toHaveBeenCalledTimes(1);
+    button(tree, "dismiss").props.onClick(); expect(h.wallet.dismissMissing).toHaveBeenCalledTimes(1);
+    expect(nodes(tree).find((n) => n.type === "button" && n.props.className === "wallet-btn")?.props.children[0].props.className).toBe("dot warn");
+  });
+  it("no wallet found: the readable error with Search again", async () => {
+    disconnected({ error: "No EIP-1193 wallet found in this tab. Install MetaMask … press Search again." });
+    const tree = chip(); const box = nodes(tree).find((n) => n.props?.["data-testid"] === "wallet-error");
+    expect(text(box)).toContain("No EIP-1193 wallet found in this tab"); button(tree, "Search again").props.onClick(); expect(h.wallet.searchAgain).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("awaitFaucetReceipt", () => {
   it("confirmed with its block, reverted, or unconfirmed after the window; a provider that throws is treated as 'not seen yet'", async () => {
     const answers: any[] = [new Error("rpc down"), null, { status: "0x0", blockNumber: "0x5" }];

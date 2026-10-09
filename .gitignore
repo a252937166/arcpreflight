@@ -12,3 +12,5 @@ broadcast/
 evidence/private/
 data/
 .playwright-cli/
+# local session artifacts (screenshots, snapshots) — kept local, not published
+artifacts/

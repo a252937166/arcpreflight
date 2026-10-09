@@ -6,11 +6,12 @@ import { join } from "node:path";
 
 const mocks = vi.hoisted(() => ({
   balance: vi.fn(), fixture: vi.fn(), order: vi.fn(), receipt: vi.fn(), tx: vi.fn(), nonce: vi.fn(), read: vi.fn(), send: vi.fn(), head: vi.fn(), block: vi.fn(), sendNative: vi.fn(),
+  sign: vi.fn(), walletSend: vi.fn(), estimate: vi.fn(),
   payer: "0x3333333333333333333333333333333333333333",
   merchant: "0x2222222222222222222222222222222222222222",
 }));
 vi.mock("../src/config.js", () => ({ cfg: {
-  root: "/offline/demo-regression", net: "testnet", chainId: 5042002, caip2: "eip155:5042002", rpc: "http://offline.invalid",
+  root: "/offline/demo-regression", net: "testnet", chainId: 5042002, caip2: "eip155:5042002", rpc: "http://offline.invalid", publicRpc: "https://rpc.public.invalid",
   principals: new Map([["offline", "demo-runner"]]), port: 4040, releaseSha: "test", profile: "SUBMISSION_RESTRICTED", publicExecution: true,
   usdc: mocks.merchant, supportedTargets: [mocks.merchant], priceTokenAtomic: "10000", merchant: { address: mocks.merchant },
   faucet: { enabled: true, amountNativeAtomic: 200000000000000000n, perDay: 30, floorNativeAtomic: 1000000000000000000n },
@@ -27,13 +28,14 @@ vi.mock("node:fs", async () => {
 });
 vi.mock("viem/accounts", () => ({ privateKeyToAccount: () => ({ address: mocks.payer }) }));
 vi.mock("viem", async () => ({ ...await vi.importActual<typeof import("viem")>("viem"),
-  createPublicClient: () => ({ getBalance: mocks.balance, getTransactionReceipt: mocks.receipt, getTransaction: mocks.tx, getTransactionCount: mocks.nonce, readContract: mocks.read, sendRawTransaction: mocks.send, getBlockNumber: mocks.head, getBlock: mocks.block, waitForTransactionReceipt: mocks.receipt, estimateFeesPerGas: async () => ({ maxFeePerGas: 21_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n }) }), createWalletClient: () => ({ account: { address: mocks.payer }, sendTransaction: mocks.sendNative }),
+  createPublicClient: () => ({ getBalance: mocks.balance, getTransactionReceipt: mocks.receipt, getTransaction: mocks.tx, getTransactionCount: mocks.nonce, readContract: mocks.read, sendRawTransaction: mocks.send, getBlockNumber: mocks.head, getBlock: mocks.block, waitForTransactionReceipt: mocks.receipt, estimateGas: mocks.estimate, estimateFeesPerGas: async () => ({ maxFeePerGas: 21_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n }) }), createWalletClient: () => ({ account: { address: mocks.payer }, sendTransaction: mocks.sendNative, signTransaction: mocks.sign, sendRawTransaction: mocks.walletSend }),
 }));
 // the shared reconciler is real (its own tests live in packages/runner); only the run loop and order creation are mocked here
 vi.mock("@arcpreflight/runner", async () => ({ ...(await vi.importActual<any>("@arcpreflight/runner")), runFixture: mocks.fixture, createOrder: mocks.order }));
 vi.mock("../src/payments.js", () => ({ sealJson: async (o: unknown) => JSON.stringify(o), openJson: async (s: string) => JSON.parse(s) }));
 vi.mock("../src/report.js", () => ({ client: {} })); // the passport module's export-time captures are not exercised here
-import { ORDER_PAID_TOPIC } from "@arcpreflight/runner";
+import { ORDER_PAID_TOPIC, OrderCreationPending, OrderCreationNotSent } from "@arcpreflight/runner";
+import { keccak256 } from "viem";
 import { createOrderFor, demoBudget, demoState, startRun, reconcileExecutions, observeExecutions, recoverRun, getRun, listRuns, networkInfo } from "../src/demo.js";
 import { buildRunPassport } from "../src/passport.js";
 import { syntheticRun } from "../../../packages/passport/test/fixture.js";
@@ -56,6 +58,8 @@ beforeEach(() => {
   mocks.receipt.mockReset().mockRejectedValue(new Error("not found")); mocks.tx.mockReset().mockResolvedValue(null); mocks.nonce.mockReset().mockResolvedValue(0);
   mocks.read.mockReset().mockResolvedValue([mocks.payer, 50_000_000_000_000_000n, false, 0n, 0n]); mocks.send.mockReset().mockResolvedValue("0x" + "cc".repeat(32));
   mocks.head.mockReset().mockResolvedValue(1000n); mocks.block.mockReset().mockResolvedValue({ transactions: [] });
+  mocks.sign.mockReset().mockResolvedValue(`0x02${"fa".repeat(60)}`); mocks.estimate.mockReset().mockResolvedValue(21_000n); mocks.sendNative.mockReset();
+  mocks.walletSend.mockReset().mockImplementation(async ({ serializedTransaction }: { serializedTransaction: `0x${string}` }) => keccak256(serializedTransaction));
   demoBudget.dailyBusinessCapAtomic = 10n ** 18n; demoBudget.dailyFeeCapAtomic = 4n * 10n ** 17n; demoBudget.dailyGasCapAtomic = 5n * 10n ** 17n;
 });
 afterEach(async () => {
@@ -124,8 +128,8 @@ describe("persistent demo admissions", () => {
   });
 
   it("keeps developer-order cooldown when the RPC fails after admission", async () => {
-    mocks.order.mockRejectedValueOnce(new Error("receipt timeout"));
-    await expect(createOrderFor(db, ORDER_IN("client-a"))).rejects.toThrow("receipt timeout");
+    mocks.order.mockRejectedValueOnce(new Error("rpc unavailable")); // before the identity was planned: nothing was created
+    expect(await createOrderFor(db, ORDER_IN("client-a"))).toMatchObject({ ok: false, status: 503, error: "DEPENDENCY_ERROR", reason: expect.stringContaining("no order identity was recorded and nothing was sent") });
     expect(await createOrderFor(db, ORDER_IN("client-a"))).toMatchObject({ ok: false, error: "DEMO_COOLDOWN" });
     expect(db.prepare("SELECT COUNT(*) AS c FROM demo_order_admissions").get()).toMatchObject({ c: 1 });
   });
@@ -133,7 +137,7 @@ describe("persistent demo admissions", () => {
   it("rolls back both order writes if admission linking fails, retaining only one reservation", async () => {
     db.exec("CREATE TABLE demo_order_admissions (id TEXT PRIMARY KEY, order_id TEXT UNIQUE, client_key TEXT NOT NULL, created_at TEXT NOT NULL)");
     db.exec("CREATE TRIGGER reject_link BEFORE UPDATE OF order_id ON demo_order_admissions BEGIN SELECT RAISE(ABORT, 'injected linkage failure'); END");
-    await expect(createOrderFor(db, ORDER_IN("client-a"))).rejects.toThrow("injected linkage failure");
+    expect(await createOrderFor(db, ORDER_IN("client-a"))).toMatchObject({ ok: false, status: 503, error: "DEPENDENCY_ERROR", reason: expect.stringMatching(/injected linkage failure.*no order identity was recorded/) });
     expect(db.prepare("SELECT COUNT(*) AS c FROM orders").get()).toMatchObject({ c: 0 }); // the PLANNED row and its admission link are one transaction
     expect(db.prepare("SELECT COUNT(*) AS c FROM demo_order_admissions").get()).toMatchObject({ c: 1 });
     expect(db.prepare("SELECT order_id FROM demo_order_admissions").get()).toMatchObject({ order_id: null });
@@ -199,7 +203,9 @@ describe("order identity before the send (design v3.3 §2, AP33-05)", () => {
       await store.planned({ orderId: "0x" + "ab".repeat(32), payer, amountNativeAtomic: amount.toString(), merchant: mocks.merchant }); await store.sent({ orderId: "0x" + "ab".repeat(32), tx: "0x" + "bc".repeat(32) });
       throw new Error("process stopped: receipt timeout");
     });
-    await expect(createOrderFor(db, ORDER_IN("client-a"))).rejects.toThrow("receipt timeout");
+    // the identity exists: the answer is the pending order (202 ORDER_CREATION_PENDING), never a plain error that reads "nothing was changed"
+    expect(await createOrderFor(db, ORDER_IN("client-a"))).toMatchObject({ ok: true, pending: true, status: 202, orderId: "0x" + "ab".repeat(32), state: "SENT", tx: "0x" + "bc".repeat(32),
+      nextAction: expect.stringContaining("not yet confirmed"), reason: expect.stringContaining("process stopped: receipt timeout") });
     expect(db.prepare("SELECT state, tx_hash FROM orders").get()).toMatchObject({ state: "SENT", tx_hash: "0x" + "bc".repeat(32) });
     expect(db.prepare("SELECT COUNT(*) AS c FROM orders").get()).toMatchObject({ c: 1 });
   });
@@ -421,21 +427,101 @@ describe("run history rows", () => {
 });
 
 describe("testnet faucet (budgeted, testnet only)", () => {
+  const RAW_F = (`0x02${"fa".repeat(60)}`) as `0x${string}`; const HASH_F = keccak256(RAW_F);
+  const addr = (d: string) => ("0x" + d.repeat(40)) as `0x${string}`;
+  const claimRow = (a: string) => db.prepare("SELECT tx_hash FROM faucet_claims WHERE address = ?").get(a.toLowerCase());
+  beforeEach(() => { mocks.receipt.mockResolvedValue({ status: "success", blockNumber: 5n }); mocks.balance.mockResolvedValue(5n * 10n ** 18n); mocks.nonce.mockResolvedValue(9); });
   it("sends one claim per wallet and per client every 24 h from the order-creator key, keeps the reservation when the send fails, and reports its status", async () => {
     const { claimFaucet, faucetInfo } = await import("../src/demo.js");
-    mocks.sendNative.mockReset().mockResolvedValue("0x" + "fa".repeat(32)); mocks.receipt.mockResolvedValue({ status: "success", blockNumber: 5n }); mocks.balance.mockResolvedValue(5n * 10n ** 18n);
-    const a = "0x4444444444444444444444444444444444444444" as `0x${string}`;
+    const a = addr("4");
     expect(faucetInfo(db)).toMatchObject({ enabled: true, amountNativeAtomic: "200000000000000000", usedToday: 0 });
-    expect(await claimFaucet(db, a, "ip-1")).toMatchObject({ ok: true, txHash: "0x" + "fa".repeat(32), amountNativeAtomic: "200000000000000000" });
-    expect(mocks.sendNative).toHaveBeenCalledWith(expect.objectContaining({ to: a, value: 200000000000000000n }));
+    expect(await claimFaucet(db, a, "ip-1")).toEqual({ ok: true, txHash: HASH_F, amountNativeAtomic: "200000000000000000", address: a });
+    expect(mocks.sign).toHaveBeenCalledWith(expect.objectContaining({ to: a, value: 200000000000000000n, nonce: 9, gas: 25_200n })); // signed locally: explicit nonce, estimate × 1.2
+    expect(mocks.walletSend).toHaveBeenCalledWith({ serializedTransaction: RAW_F });
+    expect(mocks.sendNative).not.toHaveBeenCalled(); // never sign-and-send in one call: the hash is on the claim before the broadcast
+    expect(claimRow(a)).toMatchObject({ tx_hash: HASH_F });
     expect(await claimFaucet(db, a, "ip-2")).toMatchObject({ ok: false, status: 429, error: "FAUCET_COOLDOWN" }); // same wallet
-    expect(await claimFaucet(db, "0x5555555555555555555555555555555555555555", "ip-1")).toMatchObject({ ok: false, status: 429, error: "FAUCET_COOLDOWN" }); // same client
-    mocks.sendNative.mockRejectedValueOnce(new Error("socket hang up"));
-    expect(await claimFaucet(db, "0x6666666666666666666666666666666666666666", "ip-3")).toMatchObject({ ok: false, status: 503, error: "FAUCET_FAILED" });
-    expect(await claimFaucet(db, "0x6666666666666666666666666666666666666666", "ip-3")).toMatchObject({ ok: false, status: 429 }); // the failed claim still counts: no retry storm
+    expect(await claimFaucet(db, addr("5"), "ip-1")).toMatchObject({ ok: false, status: 429, error: "FAUCET_COOLDOWN" }); // same client
+    mocks.estimate.mockRejectedValueOnce(new Error("rpc unavailable")); // fails before anything is signed
+    expect(await claimFaucet(db, addr("6"), "ip-3")).toMatchObject({ ok: false, status: 503, error: "FAUCET_FAILED", reason: expect.stringContaining("nothing was sent") });
+    expect(await claimFaucet(db, addr("6"), "ip-3")).toMatchObject({ ok: false, status: 429 }); // the failed claim still counts: no retry storm
     expect(faucetInfo(db)).toMatchObject({ usedToday: 2 });
     mocks.balance.mockResolvedValueOnce(10n ** 17n); // the faucet key is below its floor
-    expect(await claimFaucet(db, "0x7777777777777777777777777777777777777777", "ip-4")).toMatchObject({ ok: false, status: 503, error: "FAUCET_EMPTY" });
+    expect(await claimFaucet(db, addr("7"), "ip-4")).toMatchObject({ ok: false, status: 503, error: "FAUCET_EMPTY" });
+  });
+  it("a refused send gets the identical bytes again; an unacknowledged one is 'sent, not yet confirmed' with its recorded hash; an outright refusal says nothing was sent (2026-10-09)", async () => {
+    const { claimFaucet } = await import("../src/demo.js");
+    const REFUSED = 'The method "eth_sendRawTransaction" does not exist / is not available.';
+    mocks.walletSend.mockRejectedValueOnce(new Error(REFUSED)); // refused once, then taken
+    expect(await claimFaucet(db, addr("8"), "ip-5")).toEqual({ ok: true, txHash: HASH_F, amountNativeAtomic: "200000000000000000", address: addr("8") });
+    expect(mocks.walletSend.mock.calls.map((c: any[]) => c[0].serializedTransaction)).toEqual([RAW_F, RAW_F]); expect(mocks.sign).toHaveBeenCalledTimes(1);
+    mocks.walletSend.mockReset().mockRejectedValue(new Error("socket hang up")); mocks.sign.mockClear();
+    expect(await claimFaucet(db, addr("9"), "ip-6")).toMatchObject({ ok: true, pending: true, txHash: HASH_F, note: expect.stringMatching(/^sent, not yet confirmed/) });
+    expect(mocks.walletSend).toHaveBeenCalledTimes(3); expect(mocks.sign).toHaveBeenCalledTimes(1); // one claim, one signature
+    expect(claimRow(addr("9"))).toMatchObject({ tx_hash: HASH_F });
+    expect(await claimFaucet(db, addr("9"), "ip-6")).toMatchObject({ ok: false, status: 429 }); // never a second transfer for the same wallet
+    mocks.walletSend.mockReset().mockRejectedValue(new Error("insufficient funds for gas * price + value"));
+    expect(await claimFaucet(db, addr("a"), "ip-7")).toMatchObject({ ok: false, status: 503, error: "FAUCET_FAILED", reason: expect.stringContaining("nothing was sent") });
+    expect(mocks.walletSend).toHaveBeenCalledTimes(1); expect(claimRow(addr("a"))).toMatchObject({ tx_hash: null });
+    mocks.walletSend.mockReset().mockImplementation(async ({ serializedTransaction }: { serializedTransaction: `0x${string}` }) => keccak256(serializedTransaction));
+    mocks.receipt.mockRejectedValueOnce(new Error("Timed out while waiting for transaction"));
+    expect(await claimFaucet(db, addr("b"), "ip-8")).toMatchObject({ ok: true, pending: true, txHash: HASH_F, note: expect.stringContaining("no receipt within the wait") });
+  });
+});
+
+describe("order creation outcomes once the identity is recorded, recovery and the published RPC (2026-10-09)", () => {
+  const ZERO = "0x0000000000000000000000000000000000000000";
+  const ident = (d: string) => ({ orderId: ("0x" + d.repeat(32)) as `0x${string}`, raw: (`0x02${d.repeat(80)}`) as `0x${string}` });
+  /** the store sequence of the real createOrder up to the broadcast, then `then` decides how it ends */
+  const recordedThen = (id: { orderId: `0x${string}`; raw: `0x${string}` }, then: () => never, nonce = 5) => mocks.order.mockImplementation(async (_o: any, payer: string, amount: bigint, store: any) => {
+    await store.planned({ orderId: id.orderId, payer, amountNativeAtomic: amount.toString(), merchant: mocks.merchant });
+    await store.sent({ orderId: id.orderId, tx: keccak256(id.raw), raw: id.raw, nonce, from: mocks.payer });
+    return then();
+  });
+  it("an unacknowledged creation is the pending order with its recorded identity; the row keeps the signed bytes, the answer never carries them", async () => {
+    const id = ident("a1");
+    recordedThen(id, () => { throw new OrderCreationPending(id.orderId, keccak256(id.raw), 'the node did not confirm taking the creation transaction (The method "eth_sendRawTransaction" does not exist / is not available.)'); });
+    const r = await createOrderFor(db, ORDER_IN("client-p"));
+    expect(r).toMatchObject({ ok: true, pending: true, status: 202, orderId: id.orderId, state: "SENT", tx: keccak256(id.raw), nextAction: expect.stringContaining("approval stays closed"), reason: expect.stringContaining("eth_sendRawTransaction") });
+    expect(JSON.stringify(r)).not.toContain(id.raw.slice(2, 60));
+    expect(db.prepare("SELECT state, tx_hash, raw_tx, tx_nonce FROM orders WHERE order_id = ?").get(id.orderId)).toMatchObject({ state: "SENT", tx_hash: keccak256(id.raw), raw_tx: id.raw, tx_nonce: 5 });
+    expect(mocks.order.mock.calls[0][0]).toMatchObject({ adminLock: expect.any(Function), orderReceiptTimeoutMs: 30_000 }); // the single-sender lock around nonce → send; a bounded receipt wait
+  });
+  it("a creation that was never sent, or that reverted, is ORDER_CREATION_FAILED naming the order", async () => {
+    const n = ident("b2");
+    mocks.order.mockImplementation(async (_o: any, payer: string, amount: bigint, store: any) => {
+      await store.planned({ orderId: n.orderId, payer, amountNativeAtomic: amount.toString(), merchant: mocks.merchant });
+      const reason = "the creation transaction was not signed or not recorded (signer unavailable); nothing was sent";
+      await store.notSent({ orderId: n.orderId, reason }); throw new OrderCreationNotSent(n.orderId, reason);
+    });
+    expect(await createOrderFor(db, ORDER_IN("client-n"))).toMatchObject({ ok: false, status: 502, error: "ORDER_CREATION_FAILED", orderId: n.orderId, state: "FAILED", tx: null, reason: expect.stringContaining("nothing was sent") });
+    const v = ident("c3");
+    recordedThen(v, () => { throw new Error(`createOrder failed: ${keccak256(v.raw)}`); });
+    expect(await createOrderFor(db, ORDER_IN("client-v"))).toMatchObject({ ok: false, status: 502, error: "ORDER_CREATION_FAILED", orderId: v.orderId, state: "FAILED", tx: keccak256(v.raw), reason: expect.stringContaining("reverted") });
+  });
+  it("recover: owner only, one per order every 3 s, hands the node the identical signed creation; a read never sends; the worker may", async () => {
+    const id = ident("d4");
+    recordedThen(id, () => { throw new OrderCreationPending(id.orderId, keccak256(id.raw), "the node did not confirm taking the creation transaction"); });
+    await createOrderFor(db, ORDER_IN("client-r"));
+    mocks.read.mockResolvedValue([ZERO, 0n, false, 0n, 0n]); mocks.nonce.mockResolvedValue(5); mocks.tx.mockResolvedValue(null); // not on chain, nonce 5 still free, not in the pool
+    const { recoverOrder, getOrder, reconcileOrderCreations } = await import("../src/demo.js");
+    expect(await getOrder(db, "visitor:client-r", id.orderId)).toMatchObject({ state: "SENT", paid: null });
+    expect(mocks.walletSend).not.toHaveBeenCalled(); // GET observes only
+    expect(await recoverOrder(db, "visitor:someone-else", id.orderId)).toMatchObject({ ok: false, status: 404 });
+    const rec = await recoverOrder(db, "visitor:client-r", id.orderId);
+    expect(rec).toMatchObject({ ok: true, order: { orderId: id.orderId, state: "SENT", tx: keccak256(id.raw), paid: null, note: expect.stringContaining("identical signed creation") } });
+    expect(mocks.walletSend).toHaveBeenCalledWith({ serializedTransaction: id.raw }); expect(mocks.sign).not.toHaveBeenCalled(); // nothing re-signed
+    expect(JSON.stringify(rec)).not.toContain(id.raw.slice(2, 60));
+    expect(await recoverOrder(db, "visitor:client-r", id.orderId)).toMatchObject({ ok: false, status: 429, error: "RATE_LIMITED" });
+    mocks.walletSend.mockClear(); await reconcileOrderCreations(db);
+    expect(mocks.walletSend).toHaveBeenCalledTimes(1);
+    mocks.read.mockResolvedValue([mocks.payer, 50_000_000_000_000_000n, false, 0n, 0n]); mocks.walletSend.mockClear(); // now on chain
+    await reconcileOrderCreations(db);
+    expect(mocks.walletSend).not.toHaveBeenCalled(); expect(db.prepare("SELECT state FROM orders WHERE order_id = ?").get(id.orderId)).toMatchObject({ state: "CONFIRMED" });
+  });
+  it("network info publishes the network's public RPC, never the operator's own endpoint", async () => {
+    const info = await networkInfo(db);
+    expect(info.rpc).toBe("https://rpc.public.invalid"); expect(info.rpc).not.toBe("http://offline.invalid");
   });
 });
 

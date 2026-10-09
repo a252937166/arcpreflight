@@ -12,7 +12,7 @@ const principalOf = (req: IncomingMessage) => configuredPrincipalOf(req) ?? sess
 import { buildObjectReport, buildIntentReport, client } from "./report.js";
 import { makeQuote, paymentRequirementsFor, paymentMatchesQuote, settleForRequest, reconcilePending, settlementStatus, resumeSettlements, beginSettlementResume, reconcileOpenPayments, type PaymentInput } from "./payments.js";
 import { fundsPass, FUNDS_CHECK_INTERVAL_MS } from "./funds.js";
-import { networkInfo, startRun, getRun, listRuns, createOrderFor, listOrders, getOrder, reconcileOrderCreations, chainClient, evidenceIndex, evidenceFile, clientKey, reconcileExecutions, observeExecutions, recoverRun, claimFaucet, faucetInfo, FIXTURES, projectAccounts } from "./demo.js";
+import { networkInfo, startRun, getRun, listRuns, createOrderFor, listOrders, getOrder, recoverOrder, reconcileOrderCreations, chainClient, evidenceIndex, evidenceFile, clientKey, reconcileExecutions, observeExecutions, recoverRun, claimFaucet, faucetInfo, FIXTURES, projectAccounts } from "./demo.js";
 import { parseOrderInput } from "./orders.js";
 import { createWalletAttempt, markSent, markPrompted, abandonAttempt, observeAttempt, recoverAttempt, listAttempts, buildWalletPassport, reconcileWalletAttempts, backfillFeeReceipts, walletRpcFromClient } from "./wallet.js";
 import { curatedSubjects, isCuratedSubject } from "./subjects.js";
@@ -119,7 +119,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       const body = await readJson(req);
       if (!isAddress(String(body.address ?? ""))) return json(res, 400, { error: "INVALID_INPUT", reason: "address must be a 20-byte address" });
       const r = await claimFaucet(db, getAddress(body.address) as Hex, clientKey(clientIp(req), req.headers["user-agent"]));
-      return r.ok ? json(res, 200, r) : json(res, r.status, { error: r.error, reason: r.reason });
+      // 202: the claim's one transaction is signed, recorded and handed to the node, but not confirmed ("sent, not yet confirmed", with its hash)
+      return r.ok ? json(res, r.pending ? 202 : 200, r) : json(res, r.status, { error: r.error, reason: r.reason, ...(r.txHash ? { txHash: r.txHash } : {}) });
     }
     if (req.method === "POST" && path === "/v1/demo/orders") { // v3.3: the visitor's order (payer, proxy, amount, reference), identity durable before the send
       const principal = principalOf(req);
@@ -131,7 +132,16 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       const parsed = parseOrderInput(body, isAddress, getAddress);
       if (!parsed.ok) return json(res, 400, { error: "INVALID_INPUT", field: parsed.field, reason: parsed.reason });
       const r = await createOrderFor(db, { ...parsed.value, owner: principal, client: clientKey(clientIp(req), req.headers["user-agent"]) });
-      return r.ok ? json(res, 201, r) : json(res, r.status, { error: r.error, reason: r.reason });
+      // a failure after the identity was recorded names the order (orderId, state, tx): the visitor's view must never read "nothing was changed"
+      if (!r.ok) return json(res, r.status, { error: r.error, reason: r.reason, ...(r.orderId ? { orderId: r.orderId, state: r.state, tx: r.tx ?? null } : {}) });
+      if (r.pending) { const { ok: _ok, status: _status, ...body } = r; return json(res, 202, { error: "ORDER_CREATION_PENDING", code: "ORDER_CREATION_PENDING", ...body }); }
+      return json(res, 201, r);
+    }
+    if (req.method === "POST" && (m = /^\/v1\/demo\/orders\/(0x[0-9a-fA-F]{64})\/recover$/.exec(path))) { // owner only; at most one per order every 3 s
+      const principal = principalOf(req);
+      if (!principal) return json(res, 401, { error: "UNAUTHENTICATED" });
+      const r = await recoverOrder(db, principal, m[1].toLowerCase());
+      return r.ok ? json(res, 200, r.order) : json(res, r.status, { error: r.error, reason: r.reason });
     }
     if (req.method === "GET" && path === "/v1/demo/orders") { // the owner's orders with their live paid state, linked checks and attempts
       const principal = principalOf(req);
@@ -380,7 +390,7 @@ function openapi() {
     openapi: "3.0.3", info: { title: "ArcPreflight API", version: cfg.releaseSha, description: `profile=${cfg.profile}; network=${cfg.caip2}. Self-service is open: POST /v1/session issues an anonymous bearer token. The complete lifecycle is available to every session: own orders, paid checks, wallet execution with after-the-fact plan comparison, recovery, private passports (docs/LIFECYCLE.md).` },
     paths: {
       "/health/live": { get: { summary: "process liveness" } }, "/health/ready": { get: { summary: "dependency readiness (bounded probes)" } },
-      "/v1/network": { get: { summary: "network, fixture deployments, approved baselines, demo budget" } },
+      "/v1/network": { get: { summary: "network (with its public RPC: PUBLIC_RPC_URL or the network's public endpoint, never the operator's own), fixture deployments, approved baselines, demo budget" } },
       "/v1/subjects/{address}": { get: { summary: "public object observation of the curated samples listed in /v1/network observableSubjects (OBJECT_OBSERVATION, never decision-eligible); other addresses get 422 UNSUPPORTED_SUBJECT" } },
       "/v1/public-reports": { get: { summary: "list public sample reports" } },
       "/v1/public-reports/{reportDigest}": { get: { summary: "public sample report with raw evidence" } },
@@ -389,9 +399,10 @@ function openapi() {
       "/v1/demo/runs/{runId}/passport": { get: { summary: "Payment Passport bundle (format 1.0, docs/PASSPORT.md) of a finished run: portable read-only evidence with no secrets; 409 PASSPORT_NOT_READY while the run is in progress" } },
       "/v1/demo/runs/{runId}/recover": { post: { summary: "authorized recovery of THAT attempt only (body: the admission's clientRunRequestId); reconciles from the original context and may rebroadcast identical bytes; never signs a replacement, creates an order or buys a check" } },
       "/v1/session": { post: { summary: "open self-service: create an anonymous session token for this browser (bearer for /v1/preflight, /v1/requests*, /v1/demo/orders, /v1/baselines); at most 10 new sessions per client per day" } },
-      "/v1/faucet": { get: { summary: "testnet faucet status (enabled on Arc testnet only)" }, post: { summary: "testnet only: send a small amount of testnet USDC from the project's order-creator key to a visitor's wallet (body: address); one claim per wallet and per client every 24 h, daily cap; 404 on mainnet" } },
-      "/v1/demo/orders": { post: { summary: "create a DemoMerchant order for the caller's wallet on the MAIN or CHANGED fixture proxy (body: payer, proxy, amountNativeAtomic 1e15–1e18 in steps of 1e12, reference ≤ 64 chars); the order identity is durable before the creation transaction is sent. 503 EXECUTION_GATED while public execution is closed on this instance (checked before the body; the operator's x-admin-token passes)", security: [{ bearer: [] }] }, get: { summary: "the owner's orders with live paid state, linked checks and wallet attempts, and the next action", security: [{ bearer: [] }] } },
+      "/v1/faucet": { get: { summary: "testnet faucet status (enabled on Arc testnet only)" }, post: { summary: "testnet only: send a small amount of testnet USDC from the project's order-creator key to a visitor's wallet (body: address); one claim per wallet and per client every 24 h, daily cap; 404 on mainnet. The claim is one locally signed transaction whose hash is recorded before its broadcast; 200 when its receipt confirmed it, 202 with the hash when it was sent but not yet confirmed (never re-signed)" } },
+      "/v1/demo/orders": { post: { summary: "create a DemoMerchant order for the caller's wallet on the MAIN or CHANGED fixture proxy (body: payer, proxy, amountNativeAtomic 1e15–1e18 in steps of 1e12, reference ≤ 64 chars); the order identity is durable before the creation transaction is sent, and the creation is signed locally and recorded before its broadcast. 201 with the confirmed order; 202 ORDER_CREATION_PENDING with { orderId, state, tx, pending: true, nextAction } once the identity is recorded but the creation is not confirmed (it is reconciled from the chain, never replaced); 502 ORDER_CREATION_FAILED with the identity when the creation was not sent or reverted; errors before the identity exists say that no order was created. 503 EXECUTION_GATED while public execution is closed on this instance (checked before the body; the operator's x-admin-token passes)", security: [{ bearer: [] }] }, get: { summary: "the owner's orders with live paid state, linked checks and wallet attempts, and the next action", security: [{ bearer: [] }] } },
       "/v1/demo/orders/{orderId}": { get: { summary: "one of the owner's orders (unconfirmed creations are reconciled from the chain on read; nothing is sent)", security: [{ bearer: [] }] } },
+      "/v1/demo/orders/{orderId}/recover": { post: { summary: "owner only, at most one per order every 3 s (429 RATE_LIMITED): one bounded reconciliation of an unconfirmed creation — reads the receipt, the order and the creation nonce, and may hand the node the IDENTICAL signed creation again while its window is open; never signs a replacement or creates a second order; returns the order", security: [{ bearer: [] }] } },
       "/v1/wallet/attempts": { post: { summary: "validate a wallet execution (body: requestId of the delivered check, orderId, policy): decision + final validation for the wallet payer at a fresh pinned block; the attempt is persisted VALIDATED with its plan before any prompt; 409 VALIDATION_FAILED with reasons otherwise. 503 EXECUTION_GATED while public execution is closed on this instance (checked before the body; the operator's x-admin-token passes)", security: [{ bearer: [] }] }, get: { summary: "the owner's wallet attempts", security: [{ bearer: [] }] } },
       "/v1/wallet/attempts/{attemptId}": { get: { summary: "observe one attempt (chain reads only): state, plan comparison, outcome, recovery summary, cost statement, next action", security: [{ bearer: [] }] } },
       "/v1/wallet/attempts/{attemptId}/sent": { post: { summary: "report the hash the wallet returned (body: txHash); fields are compared with the plan once visible; a mismatch in to/data/value/chainId/type is recorded MISMATCH", security: [{ bearer: [] }] } },

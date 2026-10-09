@@ -2,7 +2,7 @@
 // units; the limits come from `GET /v1/network → orders` and are mirrored here so a visitor sees the same refusal the server
 // would give, before anything leaves. Nothing here talks to the API: the Developer page does, with this module's body.
 import { isAddress } from "viem";
-import type { FixtureInfo, NetworkInfo, OrderCreated, OrderView } from "./api";
+import type { FixtureInfo, NetworkInfo, OrderCreated, OrderCreationFailure, OrderPending, OrderView } from "./api";
 import type { DeveloperOrder } from "./preflight";
 
 export type Proxy = "MAIN" | "CHANGED";
@@ -100,21 +100,50 @@ export function toDeveloperOrder(o: OrderCreated | OrderView, baselineDigest: st
   return { orderId: o.orderId as `0x${string}`, tx: (o.tx ?? "0x") as `0x${string}`, block: o.block ?? "0", merchant: o.merchant as `0x${string}`, amountNativeAtomic: o.amountNativeAtomic, baselineDigest: digest as `0x${string}` | null, proxy: o.proxy ?? null, reference: o.reference ?? null };
 }
 
-/** The creation response, shaped like a listed order so the card renders one shape (the GET refreshes it with the live paid state). */
-export function orderViewFromCreated(o: OrderCreated): OrderView {
+/** 202 ORDER_CREATION_PENDING: the identity is recorded, the creation is not confirmed */
+export const isPendingOrder = (o: unknown): o is OrderPending => !!o && typeof o === "object" && (o as any).pending === true;
+/** 502 ORDER_CREATION_FAILED folded with the body the dialog sent */
+export const isFailedCreation = (o: unknown): o is OrderCreationFailure => !!o && typeof o === "object" && (o as any).failed === true;
+/** PLANNED / SENT: the creation is neither confirmed nor closed — the order is not usable yet (no approval, quote, purchase or execution) */
+export const creationUnconfirmed = (o: Pick<OrderView, "state"> | null | undefined) => !!o && (o.state === "PLANNED" || o.state === "SENT");
+/** FAILED / UNKNOWN_CREATION: the creation could not be established; a new order is a new row, this one stays for the record */
+export const creationStopped = (o: Pick<OrderView, "state"> | null | undefined) => !!o && (o.state === "FAILED" || o.state === "UNKNOWN_CREATION");
+export const UNCONFIRMED_BLOCK_TEXT = "an earlier order creation is still unconfirmed — recover it first";
+/** The payment state as every summary says it: "unknown" whenever it is not established — an order whose creation is not confirmed, or a
+ *  confirmed one not read yet. Never "unpaid" for an order that may not exist. */
+export function paymentLabel(o: Pick<OrderView, "state" | "paid"> | null | undefined): { text: "paid" | "unpaid" | "unknown"; tone: "ok" | "neutral" | "warn" } {
+  if (!o || o.state !== "CONFIRMED" || o.paid === null || o.paid === undefined) return { text: "unknown", tone: "warn" };
+  return o.paid ? { text: "paid", tone: "ok" } : { text: "unpaid", tone: "neutral" };
+}
+/** what the order card says about a creation that is not confirmed: sent (a hash was recorded) or only identified */
+export function creationStatusText(o: Pick<OrderView, "state" | "tx">): string | null {
+  if (creationUnconfirmed(o)) return o.tx ? "Order creation sent — not yet confirmed" : "identity recorded; creation not confirmed";
+  if (creationStopped(o)) return "creation not established — create a new order (this row stays for the record)";
+  return null;
+}
+/** The creation response (201, 202 pending, or a 502 failure folded with its body), shaped like a listed order so the card renders one shape
+ *  (the GET refreshes it with the live state). Only a confirmed creation reads as unpaid: it was just created and nothing could have paid it. */
+export function orderViewFromCreated(o: OrderCreated | OrderPending | OrderCreationFailure): OrderView {
   const at = new Date().toISOString();
-  return { orderId: o.orderId.toLowerCase(), owner: o.owner ?? null, source: "developer", runId: null, payer: o.payer, merchant: o.merchant, proxy: o.proxy, amountNativeAtomic: o.amountNativeAtomic, reference: o.reference ?? null,
-    state: o.state, tx: o.tx, block: o.block, creation: { from: null, gasUsed: null, effectiveGasPriceNativeAtomic: null }, paid: false, paidCheckedAt: null, note: null, checks: [], attempts: [], nextAction: "run the preflight check for this order", createdAt: at, updatedAt: at };
+  const base = { orderId: o.orderId.toLowerCase(), owner: (o as OrderCreated).owner ?? null, source: "developer" as const, runId: null, payer: o.payer, merchant: o.merchant, proxy: o.proxy, amountNativeAtomic: o.amountNativeAtomic, reference: o.reference ?? null,
+    creation: { from: null, gasUsed: null, effectiveGasPriceNativeAtomic: null }, paidCheckedAt: null, checks: [], attempts: [], createdAt: at, updatedAt: at };
+  if (isFailedCreation(o)) return { ...base, state: o.state, tx: o.tx, block: null, paid: null, note: o.reason, nextAction: "this creation could not be established; create a new order (this row stays for the record)" };
+  if (isPendingOrder(o)) return { ...base, state: o.state, tx: o.tx, block: null, paid: null, note: o.reason ?? null, nextAction: o.nextAction };
+  return { ...base, state: o.state, tx: o.tx, block: o.block, paid: false, note: null, nextAction: "run the preflight check for this order" };
 }
 
 /** "costs so far" of an order, from facts only: the operator's creation gas (receipt), the check fees that settled, the principal once paid. */
-export function orderCostsSoFar(o: OrderView, feeTokenAtomic: string | null): { label: string; who: "buyer" | "operator"; usdc: string | null; detail?: string }[] {
-  const out: { label: string; who: "buyer" | "operator"; usdc: string | null; detail?: string }[] = [];
+/** `missing`: what to say when `usdc` is null (default: no receipt) */
+export type CostLine = { label: string; who: "buyer" | "operator"; usdc: string | null; detail?: string; missing?: string };
+export function orderCostsSoFar(o: OrderView, feeTokenAtomic: string | null): CostLine[] {
+  const out: CostLine[] = [];
   const gas = o.creation?.gasUsed && o.creation?.effectiveGasPriceNativeAtomic ? BigInt(o.creation.gasUsed) * BigInt(o.creation.effectiveGasPriceNativeAtomic) : null;
   out.push({ label: "order creation gas", who: "operator", usdc: gas === null ? null : nativeAtomicToUsdcText(gas), detail: gas === null ? "receipt not recorded" : `${o.creation.gasUsed} gas` });
   const settled = o.checks.filter((c) => c.paymentState === "COMPLETED").length;
   out.push({ label: `check fee${settled === 1 ? "" : "s"} (${settled} settled)`, who: "buyer", usdc: settled && feeTokenAtomic ? tokenAtomicToUsdcText(BigInt(feeTokenAtomic) * BigInt(settled)) : settled ? null : "0" });
-  out.push({ label: "business principal", who: "buyer", usdc: o.paid === true ? nativeAtomicToUsdcText(o.amountNativeAtomic) : "0", detail: o.paid === true ? "paid" : o.paid === false ? "unpaid" : "payment state not read yet" });
+  const pay = paymentLabel(o);
+  if (pay.text === "unknown") out.push({ label: "business principal", who: "buyer", usdc: null, detail: o.state !== "CONFIRMED" ? "the order's creation is not confirmed" : "payment state not read yet", missing: "unknown" });
+  else out.push({ label: "business principal", who: "buyer", usdc: pay.text === "paid" ? nativeAtomicToUsdcText(o.amountNativeAtomic) : "0", detail: pay.text });
   return out;
 }
 /** Gate D: an order is a project-paid transaction, gated with execution until the mainnet acceptance is recorded (Developer and Demo say the same) */

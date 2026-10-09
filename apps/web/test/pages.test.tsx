@@ -1154,3 +1154,170 @@ describe("round 3 · the order dialog when the wallet leaves mid-review (item 5)
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ payer: OTHER_LOWER })); expect(onCreated).toHaveBeenCalledWith(CREATED);
   });
 });
+
+// 2026-10-09 real-wallet session (issues 1 and 2): the node refused eth_sendRawTransaction for an order creation and the page said "Nothing was
+// changed"; "use" on the failed order marked step 1 complete, showed "unpaid" and allowed approval and quotes. An order is usable only once its
+// creation is CONFIRMED, and an answer that names an order never reads "nothing was changed".
+describe("2026-10-09 · an order whose creation is not confirmed never looks complete", () => {
+  const ORDER_TX = `0x${"5e".repeat(32)}`; const B = `0x${"cd".repeat(32)}`;
+  const NEXT = "creation sent, not yet confirmed — waiting for its receipt; recover re-sends the same signed transaction (never a second order); approval stays closed until the order is confirmed";
+  const PENDING: any = { error: "ORDER_CREATION_PENDING", code: "ORDER_CREATION_PENDING", pending: true, orderId: order.orderId, state: "SENT", tx: ORDER_TX, nextAction: NEXT,
+    reason: 'the node did not confirm taking the creation transaction (The method "eth_sendRawTransaction" does not exist / is not available.)', merchant: MERCHANT, proxy: "MAIN", payer: ACCOUNT, amountNativeAtomic: order.amountNativeAtomic, reference: null, owner: "visitor:1" };
+  const SENT_VIEW: any = { ...ORDER_VIEW, state: "SENT", tx: ORDER_TX, block: null, paid: null, creation: { from: null, gasUsed: null, effectiveGasPriceNativeAtomic: null }, nextAction: NEXT, note: null };
+  const FAILED_VIEW: any = { ...SENT_VIEW, state: "FAILED", createdAt: "2026-10-03T11:50:00.000Z", nextAction: "this creation could not be established; create a new order (this row stays for the record)",
+    note: `the creation nonce was consumed by another transaction (${D}); this order was never created — nothing is re-signed; a new order is a new row` };
+  const LIMITS = { minNativeAtomic: 10n ** 15n, maxNativeAtomic: 10n ** 18n, stepNativeAtomic: 10n ** 12n, defaultNativeAtomic: 5n * 10n ** 16n, maxReferenceLength: 64 };
+  const stepNode = (tree: any, n: number) => nodes(tree).find((x) => typeof x.type === "function" && x.type.name === "StepSection" && x.props.n === n);
+  /** developerApi with the order routes answered from `view` / `list`, and the creation answered by `post` (202 pending by default) */
+  function orderApi(o: { view: (id: string) => any; list: () => any[]; post?: () => [any, number] }) {
+    const calls: { path: string; method: string }[] = [];
+    const inner = developerApi().fetch.getMockImplementation()!;
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET"; calls.push({ path, method });
+      if (path === "/v1/demo/orders" && method === "POST") { const [b, st] = (o.post ?? ((): [any, number] => [PENDING, 202]))(); return response(b, st); }
+      if (path === "/v1/demo/orders") return response({ orders: o.list() });
+      const rec = /^\/v1\/demo\/orders\/(0x[0-9a-f]{64})\/recover$/.exec(path);
+      if (rec && method === "POST") return response({ ...o.view(rec[1]), note: "the identical signed creation was handed to the node again; waiting for its receipt" });
+      const one = /^\/v1\/demo\/orders\/(0x[0-9a-f]{64})$/.exec(path);
+      if (one) return response(o.view(one[1]));
+      return inner(path, init);
+    }));
+    return { calls, gets: (id: string) => calls.filter((c) => c.path === `/v1/demo/orders/${id}` && c.method === "GET").length, recovers: () => calls.filter((c) => c.path.endsWith("/recover") && c.method === "POST").length };
+  }
+
+  it("a 202 shows the order with its hash, keeps step 1 active and every later step closed, says 'unknown', offers Recover and polls until CONFIRMED — never 'Nothing was changed'", async () => {
+    let confirmed = false;
+    const api = orderApi({ view: () => (confirmed ? { ...ORDER_VIEW, tx: ORDER_TX } : SENT_VIEW), list: () => [confirmed ? { ...ORDER_VIEW, tx: ORDER_TX } : SENT_VIEW] });
+    h.net.fixtures = [APPROVED_FIXTURE];
+    render(Developer); await flush(); let tree = render(Developer);
+    button(tree, "Create order").props.onClick(); tree = render(Developer);
+    const dlg = dialogNode(tree); expect(dlg.props.unconfirmed).toBeNull();
+    const answer = await dlg.props.create({ payer: ACCOUNT, proxy: "MAIN", amountNativeAtomic: order.amountNativeAtomic });
+    expect(answer).toMatchObject({ pending: true, __status: 202, orderId: order.orderId, state: "SENT", tx: ORDER_TX });
+    dlg.props.onCreated(answer); render(Developer); await flush(); tree = render(Developer);
+    expect(dialogNode(tree)).toBeUndefined();
+    const card = fnNode(tree, "OrderCard"); expect(card.props.order).toMatchObject({ orderId: order.orderId, state: "SENT", tx: ORDER_TX, paid: null }); expect(typeof card.props.onRecover).toBe("function");
+    const stages = fnNode(tree, "Lifecycle").props.stages;
+    expect(stages[0]).toMatchObject({ status: "active", note: "waiting for the creation receipt" }); expect(stages[1].status).not.toBe("done");
+    const summary = content(stepNode(tree, 1).props.summary); expect(summary).toContain("unknown"); expect(summary).not.toContain("unpaid"); expect(summary).toContain("creation not confirmed");
+    expect(nodes(stepNode(tree, 1).props.summary).some((n) => typeof n.type === "function" && n.type.name === "Hex" && n.props.value === ORDER_TX && String(n.props.link).includes(ORDER_TX))).toBe(true);
+    expect(() => button(tree, "Approve & continue")).toThrow(); expect(() => button(tree, "Get quote")).toThrow(); // approval, quote, purchase and execution stay closed
+    expect(content(byTestId(tree, "approve-closed"))).toContain("approval opens once its receipt confirms it");
+    expect(content(tree)).not.toContain("Nothing was changed");
+    // Recover: the owner's bounded reconciliation (the same signed creation, never a second order)
+    card.props.onRecover(); await flush(); await flush(); tree = render(Developer);
+    expect(api.recovers()).toBe(1); expect(fnNode(tree, "OrderCard").props.order.note).toContain("identical signed creation");
+    // polling: GET every 3 s while SENT, until the creation is confirmed — then the workflow opens and the polling stops
+    const before = api.gets(order.orderId);
+    await vi.advanceTimersByTimeAsync(3_000); expect(api.gets(order.orderId)).toBe(before + 1);
+    confirmed = true; await vi.advanceTimersByTimeAsync(3_000); render(Developer); await flush(); tree = render(Developer);
+    expect(fnNode(tree, "OrderCard").props.order.state).toBe("CONFIRMED");
+    expect(fnNode(tree, "Lifecycle").props.stages[0].status).toBe("done");
+    expect(button(tree, "Approve & continue").props.disabled).toBe(false);
+    const settled = api.gets(order.orderId); await vi.advanceTimersByTimeAsync(9_000); expect(api.gets(order.orderId)).toBe(settled);
+  });
+
+  it("while the latest order's creation is unconfirmed the dialog refuses another; 'use' on a failed order stops at step 1 ('unknown', nothing opens); a new order is allowed and the failed row stays listed", async () => {
+    memStorage({ "arcpreflight.session:root": JSON.stringify(SESSION(1)) }); // this browser already holds the session that owns its orders
+    let listed: any[] = [{ ...SENT_VIEW, createdAt: "2026-10-03T11:59:00.000Z" }];
+    orderApi({ view: (id) => listed.find((x) => x.orderId === id) ?? listed[0], list: () => listed, post: () => [{ ...CREATED, orderId: B }, 201] });
+    h.net.fixtures = [APPROVED_FIXTURE];
+    render(Developer); await flush(); let tree = render(Developer);
+    button(tree, "Create order").props.onClick(); tree = render(Developer);
+    expect(dialogNode(tree).props.unconfirmed).toEqual({ orderId: order.orderId }); // the dialog refuses (its own test shows how)
+    expect(nodes(byTestId(tree, "my-orders")).some((n) => n.type === "button" && content(n).includes("Recover order"))).toBe(true);
+    // later the creation was closed FAILED (its nonce went to another transaction): "use" on it stops at step 1
+    freshHooks(); listed = [FAILED_VIEW];
+    render(Developer); await flush(); tree = render(Developer);
+    button(byTestId(tree, "my-orders"), "use").props.onClick(); tree = render(Developer);
+    expect(fnNode(tree, "OrderCard").props.order.state).toBe("FAILED");
+    const stages = fnNode(tree, "Lifecycle").props.stages;
+    expect(stages[0]).toMatchObject({ status: "stop", note: "creation not established — create a new order" }); expect(stages[1].status).not.toBe("done");
+    const summary = content(stepNode(tree, 1).props.summary); expect(summary).toContain("unknown"); expect(summary).not.toContain("unpaid");
+    expect(() => button(tree, "Approve & continue")).toThrow(); expect(() => button(tree, "Get quote")).toThrow();
+    expect(content(byTestId(tree, "approve-closed"))).toContain("create a new order in step 1");
+    // a new order is allowed (the latest order is closed, not unconfirmed); the failed one stays listed
+    button(tree, "Create a new order").props.onClick(); tree = render(Developer);
+    const dlg = dialogNode(tree); expect(dlg.props.unconfirmed).toBeNull();
+    listed = [{ ...ORDER_VIEW, orderId: B, createdAt: "2026-10-03T12:00:00.000Z" }, FAILED_VIEW];
+    dlg.props.onCreated(await dlg.props.create({ payer: ACCOUNT, proxy: "MAIN", amountNativeAtomic: order.amountNativeAtomic }));
+    render(Developer); await flush(); tree = render(Developer);
+    expect(fnNode(tree, "OrderCard").props.order).toMatchObject({ orderId: B, state: "CONFIRMED" });
+    expect(fnNode(tree, "Lifecycle").props.stages[0].status).toBe("done");
+    const mineNow = byTestId(tree, "my-orders"); expect(content(mineNow)).toContain(order.orderId); expect(content(mineNow)).toContain(B);
+  });
+
+  it("OrderDialog: refuses another order while one is unconfirmed; a 502 that names the order hands that order over; a lost answer says the order may exist", async () => {
+    const { OrderDialog } = await import("../src/components/OrderDialog");
+    const net: any = { ...h.net, fixtures: [APPROVED_FIXTURE] };
+    let answer: () => any = () => PENDING;
+    const create = vi.fn(async () => { const a = answer(); if (a instanceof Error) throw a; return a; });
+    const onCreated = vi.fn(); const onLost = vi.fn(); let unconfirmed: any = { orderId: order.orderId };
+    const dlg = () => render(() => OrderDialog({ payer: ACCOUNT, net, limits: LIMITS, create, onCreated, onClose: vi.fn(), unconfirmed, onLost }));
+    const form = (tree: any) => nodes(tree).find((n) => n.type === "form");
+    freshHooks(); let tree = dlg();
+    expect(content(byTestId(tree, "order-unconfirmed"))).toContain("An earlier order creation is still unconfirmed — recover it first");
+    button(tree, "Autofill sample order").props.onClick(); tree = dlg();
+    expect(button(tree, "Review order").props.disabled).toBe(true);
+    form(tree).props.onSubmit({ preventDefault() {} }); tree = dlg();
+    expect(content(tree)).not.toContain("Review the order"); expect(create).not.toHaveBeenCalled();
+    // recovered or closed: the dialog works again; a 502 naming the order hands it over as FAILED — never "nothing was changed"
+    unconfirmed = null; tree = dlg(); expect(byTestId(tree, "order-unconfirmed")).toBeUndefined();
+    form(tree).props.onSubmit({ preventDefault() {} }); tree = dlg(); expect(content(tree)).toContain("Review the order");
+    answer = () => new ApiError(502, { error: "ORDER_CREATION_FAILED", reason: "the creation transaction reverted", orderId: order.orderId, state: "FAILED", tx: D });
+    await form(tree).props.onSubmit({ preventDefault() {} }); tree = dlg();
+    expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ failed: true, orderId: order.orderId, state: "FAILED", tx: D, reason: "the creation transaction reverted", payer: ACCOUNT, proxy: "MAIN", merchant: MERCHANT }));
+    expect(content(tree)).not.toContain("Nothing was changed");
+    // the answer was lost on the way: the order may exist — My workflow is re-read; nothing claims "nothing was sent"
+    answer = () => new TypeError("Failed to fetch");
+    await form(tree).props.onSubmit({ preventDefault() {} }); tree = dlg();
+    expect(onLost).toHaveBeenCalledTimes(1); expect(onCreated).toHaveBeenCalledTimes(1);
+    expect(content(tree)).toContain("The order may have been recorded"); expect(content(tree)).not.toContain("Nothing was sent");
+    // a 202 is handed over as it came
+    answer = () => PENDING; await form(tree).props.onSubmit({ preventDefault() {} });
+    expect(onCreated).toHaveBeenLastCalledWith(PENDING);
+  });
+
+  it("OrderCard: a sent creation says 'Order creation sent — not yet confirmed' with its hash link and Recover; an identity without a hash says so; payment reads 'unknown'", async () => {
+    const { OrderCard } = await import("../src/components/OrderCard");
+    const onRecover = vi.fn();
+    let tree: any = OrderCard({ order: SENT_VIEW, net: h.net, feeTokenAtomic: "10000", onRecover, onRefresh: vi.fn() });
+    expect(content(byTestId(tree, "order-creation-status"))).toContain("Order creation sent — not yet confirmed");
+    expect(nodes(tree).some((n) => typeof n.type === "function" && n.type.name === "Hex" && n.props.value === ORDER_TX && String(n.props.link).includes(ORDER_TX))).toBe(true);
+    const chips = nodes(tree).filter((n) => typeof n.type === "function" && n.type.name === "Chip").map((n) => content(n)).join(" ");
+    expect(chips).toContain("unknown"); expect(chips).not.toContain("unpaid");
+    button(tree, "Recover order").props.onClick(); expect(onRecover).toHaveBeenCalledTimes(1);
+    tree = OrderCard({ order: { ...SENT_VIEW, state: "PLANNED", tx: null }, net: h.net, feeTokenAtomic: "10000", onRecover });
+    expect(content(byTestId(tree, "order-creation-status"))).toContain("identity recorded; creation not confirmed");
+    tree = OrderCard({ order: { ...ORDER_VIEW, paid: false }, net: h.net, feeTokenAtomic: "10000", onRecover });
+    expect(byTestId(tree, "order-creation-status")).toBeUndefined(); expect(() => button(tree, "Recover order")).toThrow();
+    expect(nodes(tree).filter((n) => typeof n.type === "function" && n.type.name === "Chip").map((n) => content(n)).join(" ")).toContain("unpaid"); // a confirmed, unpaid order says so
+  });
+
+  it("the Live Demo's wallet check stops at a 202: the order is named, nothing is quoted or signed, and the error never reads 'Nothing was changed'", async () => {
+    const { useWalletRun } = await import("../src/lib/walletRun");
+    const api = orderApi({ view: () => SENT_VIEW, list: () => [SENT_VIEW] });
+    const wallet = { provider: h.wallet.provider, account: ACCOUNT, chainId: 5042002 };
+    freshHooks(); let hook = render(() => useWalletRun(h.net, wallet));
+    await hook.start({ ...APPROVED_FIXTURE, expected: "NO_POLICY_VIOLATION", implementation: IMPL } as any);
+    hook = render(() => useWalletRun(h.net, wallet));
+    expect(hook.run.phase).toBe("error");
+    expect(hook.run.err?.text).toContain(`Order ${order.orderId.slice(0, 10)}… is recorded, but its creation is not confirmed yet`);
+    expect(hook.run.err?.text).not.toContain("Nothing was changed");
+    expect(hook.run.steps.map((s: any) => s.step)).toEqual(["orderCreationPending", "error"]);
+    expect(api.calls.some((c) => c.path === "/v1/preflight")).toBe(false); expect(h.sign).not.toHaveBeenCalled();
+  });
+
+  it("FaucetCard: a 202 claim reads 'Sent, not yet confirmed' with its hash — never as received", async () => {
+    const HASH = `0x${"fa".repeat(32)}`; h.net.faucet = FAUCET;
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+      if (path === "/v1/faucet") return response({ ok: true, pending: true, txHash: HASH, amountNativeAtomic: "200000000000000000", address: ACCOUNT, note: "sent, not yet confirmed: no receipt within the wait; follow the hash on the explorer" }, 202);
+      throw new Error(`Unexpected URL: ${path}`);
+    }));
+    freshHooks();
+    let card = render(() => FaucetCard({ net: h.net, wallet: h.wallet, balance: 0n, required: 63_000_000_000_000_000n, step: "buying the report" }));
+    await button(card, "Claim testnet USDC").props.onClick(); card = render(() => FaucetCard({ net: h.net, wallet: h.wallet, balance: 0n, required: 63_000_000_000_000_000n, step: "buying the report" }));
+    expect(content(card)).toContain("Sent, not yet confirmed: 0.20 USDC"); expect(content(card)).toContain("never repeated"); expect(content(card)).not.toContain("the balance refreshes in a moment");
+    expect(nodes(card).some((n) => typeof n.type === "function" && n.type.name === "Hex" && n.props.value === HASH)).toBe(true);
+  });
+});

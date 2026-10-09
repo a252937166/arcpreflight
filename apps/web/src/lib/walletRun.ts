@@ -15,7 +15,8 @@ import { signTypedDataV4, type Eip1193 } from "./wallet";
 import { withSession } from "./session";
 import { rememberCheck } from "./checks";
 import { saveWorkflow } from "./workflow";
-import { describeError, type Described } from "./errors";
+import { describeError, ORDER_RESPONSE_LOST_TEXT, type Described } from "./errors";
+import { isPendingOrder } from "./orders";
 
 /** the truthful line a check-only wallet run ends with (v3.3): what the check decided, and where execution happens */
 export const checkDecidedLine = (decision: string) => decision === "NO_POLICY_VIOLATION"
@@ -76,7 +77,14 @@ export function useWalletRun(net: NetworkInfo | null, wallet: WalletLike) {
     const push = (step: string, facts: Record<string, unknown>) => { if (alive()) setRun((r) => ({ ...r, steps: [...r.steps, { step, atMs: Date.now() - t0, ...facts }] })); };
     setRun({ ...EMPTY_WALLET_RUN, phase: "running", fixture: fixture.id, startedAt: t0 });
     try {
-      const o = await withSession((t) => api.createOrder({ payer: account, proxy: fixture.proxy }, t));
+      let answer;
+      try { answer = await withSession((t) => api.createOrder({ payer: account, proxy: fixture.proxy }, t)); }
+      catch (e) { if (describeError(e).code === "NETWORK") throw new Error(ORDER_RESPONSE_LOST_TEXT); throw e; } // a lost answer may hide a recorded order
+      if (isPendingOrder(answer)) { // 202: the identity is recorded, the creation is not confirmed — nothing below may use it yet (2026-10-09)
+        push("orderCreationPending", { who: "order-creator (API)", why: answer.reason ?? "the creation is not confirmed yet", orderId: answer.orderId, createOrderTx: answer.tx });
+        throw new Error(`Order ${answer.orderId.slice(0, 10)}… is recorded, but its creation is not confirmed yet${answer.reason ? ` (${answer.reason})` : ""}. It is reconciled from the chain — the same signed transaction is re-sent, never a second order. Follow it in the Developer workflow (My workflow) before starting another check.`);
+      }
+      const o = answer;
       const order: WalletRun["order"] = { orderId: o.orderId as Hex, tx: o.tx as Hex, block: o.block, merchant: o.merchant as Hex, amountNativeAtomic: o.amountNativeAtomic, baselineDigest: (o.baselineDigest as Hex | null) ?? null, proxy: o.proxy ?? fixture.proxy };
       patch({ order });
       push("createOrder", { who: "order-creator (API)", why: `an order payable only by your address on the ${order.proxy} proxy — the independent business expectation`, orderId: order.orderId, block: order.block, createOrderTx: order.tx, merchant: order.merchant, proxy: order.proxy, amountNativeAtomic: order.amountNativeAtomic });

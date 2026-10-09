@@ -76,7 +76,9 @@ export function paysThisOrder(rc: any, x: Pick<StoredExecution, "merchant" | "or
 /** The transaction that consumed `x.nonce` from `x.payer`, found by a bounded binary search over eth_getTransactionCount at
  *  block numbers (an account transaction count alone names no transaction; the block that raised it does). Returns null when
  *  the node cannot serve the history or the window is exhausted — callers must then say "unidentified", never guess. */
-export async function findNonceConsumer(rpc: ReconcileRpc, x: StoredExecution, maxSearchBlocks = 20_000): Promise<{ hash: Hex; block: bigint } | null> {
+/** The chain reads the nonce search needs (also used for order creations, which have no StoredExecution). */
+export type NonceSearchRpc = Pick<ReconcileRpc, "getBlockNumber" | "getTransactionCount" | "getBlock">;
+export async function findNonceConsumer(rpc: NonceSearchRpc, x: Pick<StoredExecution, "payer" | "nonce" | "broadcastBlock">, maxSearchBlocks = 20_000): Promise<{ hash: Hex; block: bigint } | null> {
   const head = await rpc.getBlockNumber();
   const countAt = (b: bigint) => rpc.getTransactionCount({ address: x.payer, blockNumber: b });
   if ((await countAt(head)) <= x.nonce) return null;

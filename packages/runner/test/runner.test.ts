@@ -6,13 +6,17 @@ import { BaselineCore, ReportCore, baselineDigest, intentDigest, reportDigest, t
 import { PAY_SELECTOR } from "@arcpreflight/policy";
 import { signTransferAuthorization } from "@arcpreflight/client";
 import { captureSnapshot, readCode } from "@arcpreflight/observer";
-import { runFixture, createOrder, DEFAULT_ORDER_GAS_COST_CAP, type Fixture, type RunOptions, type SignedExecution, type ExecutionOutcome, type OrderStore } from "../src/index.js";
+import { runFixture, createOrder, DEFAULT_ORDER_GAS_COST_CAP, OrderCreationPending, OrderCreationNotSent, type Fixture, type RunOptions, type SignedExecution, type ExecutionOutcome, type OrderStore } from "../src/index.js";
 
 const D = (`0x${"11".repeat(32)}`) as Hex;
 const T = (`0x${"22".repeat(32)}`) as Hex;
 const MERCHANT = "0x0000000000000000000000000000000000000a11" as Hex;
 const IMPL = "0x0000000000000000000000000000000000000b22" as Hex;
 const AMOUNT = 50_000_000_000_000_000n;
+/** the order creator's locally signed creation transaction (opaque bytes for the mocks) and its hash */
+const ORDER_RAW = (`0x02${"c4".repeat(120)}`) as Hex;
+const ORDER_TX = keccak256(ORDER_RAW);
+const ORDER_CREATOR = "0x0000000000000000000000000000000000000c33" as Hex;
 const pausedAbi = parseAbi(["function paused() view returns (bool)"]);
 const snapshot = () => ({ chainId: 5042002 as const, blockNumber: "150", blockHash: D, observedAt: new Date().toISOString(), providerId: "mock-rpc", pinningMode: "BLOCK_HASH" as const });
 
@@ -96,12 +100,12 @@ function harness(s: Scenario) {
   const sendRawTransaction = vi.fn(async ({ serializedTransaction }: { serializedTransaction: Hex }) => { calls.push("send"); if (s.broadcastThrows) throw new Error("socket hang up"); return keccak256(serializedTransaction); });
   const publicClient = {
     getBlockNumber: vi.fn(async () => 200n),
-    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => { if (s.receiptTimeout && hash !== D) throw new Error("Timed out while waiting for transaction"); return { status: "success", blockNumber: 100n, transactionHash: hash }; }),
+    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => { if (s.receiptTimeout && hash !== D && hash !== ORDER_TX) throw new Error("Timed out while waiting for transaction"); return { status: "success", blockNumber: 100n, transactionHash: hash }; }),
     getTransactionReceipt: vi.fn(async () => { if (s.feeReceiptMissing) throw new Error("not found"); return { status: "success", blockNumber: 100n }; }), // the service-fee confirmation
     getBalance: vi.fn(async () => 10n ** 18n), estimateGas: vi.fn(async () => 50_000n), getTransactionCount: vi.fn(async () => 1), sendRawTransaction,
     readContract: vi.fn(async () => [account.address, AMOUNT, true, 100n, 151n]),
   };
-  const options = { fixture: s.fixture, net: "testnet", chain: arcTestnet, publicClient, admin: { writeContract: vi.fn(async () => D) }, runner: account,
+  const options = { fixture: s.fixture, net: "testnet", chain: arcTestnet, publicClient, admin: { account: { address: ORDER_CREATOR }, chain: arcTestnet, writeContract: vi.fn(async () => D), signTransaction: vi.fn(async () => ORDER_RAW), sendRawTransaction: vi.fn(async ({ serializedTransaction }: { serializedTransaction: Hex }) => keccak256(serializedTransaction)) }, runner: account,
     merchant: MERCHANT, baselineDigest: bDigest, apiUrl: "http://mock-api.invalid", token: "test-token", feeParams: async () => ({ maxFeePerGas: 20_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n }), labels: ["LIVE_REQUEST"],
     executionStore: store, receiptTimeoutMs: 1000, onArtifact } as unknown as RunOptions;
   return { options, signTransaction, sendRawTransaction, quoteIds, getIntent: () => lastIntent, calls, store, getSigned: () => signed, outcomes, artifacts, onArtifact };
@@ -271,43 +275,128 @@ describe("review round 2 — evidence before the broadcast, the real snapshot ag
 
 describe("Gate D: the order creation's per-transaction gas cap", () => {
   const PAYER = "0x00000000000000000000000000000000000000aa" as Hex;
-  const parts = (maxFeePerGas: bigint, estimate = 50_000n) => {
-    const order: string[] = [];
-    const writeContract = vi.fn(async (_a: any) => { order.push("send"); return D; });
-    const store: OrderStore = { planned: vi.fn(() => { order.push("planned"); }), sent: vi.fn(() => { order.push("sent"); }), confirmed: vi.fn(() => { order.push("confirmed"); }) };
-    const publicClient = { estimateGas: vi.fn(async () => { order.push("estimate"); return estimate; }), waitForTransactionReceipt: vi.fn(async () => ({ status: "success", blockNumber: 100n, gasUsed: 41_000n, effectiveGasPrice: maxFeePerGas, from: PAYER })) };
-    const o = { publicClient, admin: { account: { address: PAYER }, writeContract }, merchant: MERCHANT, feeParams: async () => ({ maxFeePerGas, maxPriorityFeePerGas: 1_000_000_000n }) } as any;
-    return { o, writeContract, store, publicClient, order };
+  const REFUSED = 'The method "eth_sendRawTransaction" does not exist / is not available.';
+  type Opt = { sendAnswers?: (string | null)[]; receipt?: "timeout" | "reverted"; signFails?: boolean; sentFails?: boolean };
+  const parts = (maxFeePerGas: bigint, estimate = 50_000n, opt: Opt = {}) => {
+    const order: string[] = []; const answers = [...(opt.sendAnswers ?? [])];
+    const writeContract = vi.fn(async (_a: any) => D); // the old sign-and-send-in-one-call path: never used for a creation any more
+    const signTransaction = vi.fn(async (_tx: any) => { order.push("sign"); if (opt.signFails) throw new Error("signer unavailable"); return ORDER_RAW; });
+    const sendRawTransaction = vi.fn(async ({ serializedTransaction }: { serializedTransaction: Hex }) => { order.push("send"); const a = answers.shift(); if (a) throw new Error(a); return keccak256(serializedTransaction); });
+    const store: OrderStore = { planned: vi.fn(() => { order.push("planned"); }), sent: vi.fn(() => { order.push("sent"); if (opt.sentFails) throw new Error("disk full"); }), confirmed: vi.fn(() => { order.push("confirmed"); }), notSent: vi.fn(() => { order.push("notSent"); }) };
+    const publicClient = {
+      estimateGas: vi.fn(async () => { order.push("estimate"); return estimate; }),
+      getTransactionCount: vi.fn(async () => { order.push("nonce"); return 7; }),
+      waitForTransactionReceipt: vi.fn(async () => { order.push("receipt"); if (opt.receipt === "timeout") throw new Error("Timed out while waiting for transaction"); return { status: opt.receipt === "reverted" ? "reverted" : "success", blockNumber: 100n, gasUsed: 41_000n, effectiveGasPrice: maxFeePerGas, from: PAYER }; }),
+    };
+    const o = { publicClient, admin: { account: { address: PAYER }, chain: arcTestnet, signTransaction, sendRawTransaction, writeContract }, merchant: MERCHANT, feeParams: async () => ({ maxFeePerGas, maxPriorityFeePerGas: 1_000_000_000n }) } as any;
+    return { o, writeContract, signTransaction, sendRawTransaction, store, publicClient, order };
   };
-  it("estimates first and sends with an explicit gas limit of estimate × 1.2; the identity is durable before the send", async () => {
-    const { o, writeContract, store, publicClient, order } = parts(20_000_000_000n);
-    const created = await createOrder(o, PAYER, AMOUNT, store);
-    expect(created.tx).toBe(D);
-    expect(publicClient.estimateGas).toHaveBeenCalledWith(expect.objectContaining({ account: PAYER, to: MERCHANT, data: expect.stringMatching(/^0x/) }));
-    expect(writeContract).toHaveBeenCalledTimes(1);
-    expect(writeContract.mock.calls[0][0]).toMatchObject({ address: MERCHANT, functionName: "createOrder", gas: 60_000n, maxFeePerGas: 20_000_000_000n });
-    expect(order).toEqual(["estimate", "planned", "send", "sent", "confirmed"]);
+  it("estimates first, signs locally with an explicit nonce, gas limit (estimate × 1.2) and fees, and records hash and bytes before the broadcast", async () => {
+    const p = parts(20_000_000_000n);
+    const created = await createOrder(p.o, PAYER, AMOUNT, p.store);
+    expect(created.tx).toBe(ORDER_TX);
+    expect(p.publicClient.estimateGas).toHaveBeenCalledWith(expect.objectContaining({ account: PAYER, to: MERCHANT, data: expect.stringMatching(/^0x/) }));
+    expect(p.publicClient.getTransactionCount).toHaveBeenCalledWith({ address: PAYER, blockTag: "pending" });
+    const tx = p.signTransaction.mock.calls[0][0];
+    expect(tx).toMatchObject({ to: MERCHANT, value: 0n, nonce: 7, gas: 60_000n, maxFeePerGas: 20_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n });
+    expect(tx.data).toContain(created.orderId.slice(2)); // the calldata carries the identity that was planned
+    expect(p.store.sent).toHaveBeenCalledWith({ orderId: created.orderId, tx: ORDER_TX, raw: ORDER_RAW, nonce: 7, from: PAYER });
+    expect(p.sendRawTransaction).toHaveBeenCalledWith({ serializedTransaction: ORDER_RAW });
+    expect(p.writeContract).not.toHaveBeenCalled();
+    expect(p.order).toEqual(["estimate", "planned", "nonce", "sign", "sent", "send", "receipt", "confirmed"]);
     expect(DEFAULT_ORDER_GAS_COST_CAP).toBe(6_000_000_000_000_000n); // 150k gas × 40 gwei = 0.006 USDC
   });
-  it("a fee spike that puts gas limit × maxFeePerGas above the cap refuses before anything is persisted or sent", async () => {
-    const { o, writeContract, store, order } = parts(200_000_000_000n); // 60k × 200 gwei = 0.012 USDC > 0.006
-    await expect(createOrder(o, PAYER, AMOUNT, store)).rejects.toThrow(/^createOrder refused: worst-case gas cost 12000000000000000 \(gas limit 60000 × maxFeePerGas 200000000000\) exceeds the per-transaction cap 6000000000000000; nothing was persisted or sent$/);
-    expect(writeContract).not.toHaveBeenCalled(); expect(store.planned).not.toHaveBeenCalled(); expect(order).toEqual(["estimate"]);
+  it("the caller's single-sender lock covers nonce → sign → record → send and is released before the receipt wait", async () => {
+    const p = parts(20_000_000_000n);
+    const adminLock = vi.fn(async <T,>(fn: () => Promise<T>) => { p.order.push("lock"); try { return await fn(); } finally { p.order.push("unlock"); } });
+    await createOrder({ ...p.o, adminLock }, PAYER, AMOUNT, p.store);
+    expect(adminLock).toHaveBeenCalledTimes(1);
+    expect(p.order).toEqual(["estimate", "planned", "lock", "nonce", "sign", "sent", "send", "unlock", "receipt", "confirmed"]);
+  });
+  it("a fee spike that puts gas limit × maxFeePerGas above the cap refuses before anything is persisted, signed or sent", async () => {
+    const p = parts(200_000_000_000n); // 60k × 200 gwei = 0.012 USDC > 0.006
+    await expect(createOrder(p.o, PAYER, AMOUNT, p.store)).rejects.toThrow(/^createOrder refused: worst-case gas cost 12000000000000000 \(gas limit 60000 × maxFeePerGas 200000000000\) exceeds the per-transaction cap 6000000000000000; nothing was persisted or sent$/);
+    expect(p.signTransaction).not.toHaveBeenCalled(); expect(p.sendRawTransaction).not.toHaveBeenCalled(); expect(p.store.planned).not.toHaveBeenCalled(); expect(p.order).toEqual(["estimate"]);
   });
   it("the caller's cap is used when given: a tighter cap refuses at normal fees, an estimate above the default ceiling refuses too", async () => {
     const tight = parts(20_000_000_000n);
     await expect(createOrder({ ...tight.o, maxOrderGasCostNativeAtomic: 1_000_000_000_000_000n }, PAYER, AMOUNT, tight.store)).rejects.toThrow(/^createOrder refused:/); // 0.0012 > 0.001
-    expect(tight.writeContract).not.toHaveBeenCalled();
+    expect(tight.signTransaction).not.toHaveBeenCalled();
     const heavy = parts(30_000_000_000n, 200_000n); // 240k × 30 gwei = 0.0072 > 0.006
-    await expect(createOrder(heavy.o, PAYER, AMOUNT, heavy.store)).rejects.toThrow(/^createOrder refused:/); expect(heavy.writeContract).not.toHaveBeenCalled();
+    await expect(createOrder(heavy.o, PAYER, AMOUNT, heavy.store)).rejects.toThrow(/^createOrder refused:/); expect(heavy.signTransaction).not.toHaveBeenCalled();
   });
   it("the run path refuses the same way: runFixture stops before the order exists and nothing is signed or sent", async () => {
     const h = harness({ fixture: "APPROVED_PAYMENT" });
     const opts = { ...h.options, feeParams: async () => ({ maxFeePerGas: 200_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n }) } as RunOptions;
     const expectation = expect(runFixture(opts)).rejects.toThrow(/^createOrder refused:/);
     await vi.runAllTimersAsync(); await expectation;
-    expect((opts.admin as any).writeContract).not.toHaveBeenCalled(); expect(h.signTransaction).not.toHaveBeenCalled(); expect(h.sendRawTransaction).not.toHaveBeenCalled();
+    expect((opts.admin as any).signTransaction).not.toHaveBeenCalled(); expect((opts.admin as any).sendRawTransaction).not.toHaveBeenCalled();
+    expect(h.signTransaction).not.toHaveBeenCalled(); expect(h.sendRawTransaction).not.toHaveBeenCalled();
     expect(h.calls).toEqual([]);
+  });
+  it("a node that refuses eth_sendRawTransaction is handed the SAME signed bytes again; the hash was recorded before the first try (2026-10-09 13:57:49Z)", async () => {
+    const p = parts(20_000_000_000n, 50_000n, { sendAnswers: [REFUSED, null] });
+    const creating = createOrder(p.o, PAYER, AMOUNT, p.store);
+    await vi.runAllTimersAsync();
+    const created = await creating;
+    expect(created.tx).toBe(ORDER_TX);
+    expect(p.sendRawTransaction.mock.calls.map((c) => c[0].serializedTransaction)).toEqual([ORDER_RAW, ORDER_RAW]);
+    expect(p.signTransaction).toHaveBeenCalledTimes(1); // never re-signed: one hash, one nonce, one order
+    expect(p.order).toEqual(["estimate", "planned", "nonce", "sign", "sent", "send", "send", "receipt", "confirmed"]);
+  });
+  it("an unacknowledged creation is OrderCreationPending with the recorded identity: never a plain failure, never a second order", async () => {
+    const p = parts(20_000_000_000n, 50_000n, { sendAnswers: [REFUSED, REFUSED, REFUSED] });
+    const creating = createOrder(p.o, PAYER, AMOUNT, p.store).catch((e) => e);
+    await vi.runAllTimersAsync();
+    const err = await creating;
+    expect(err).toBeInstanceOf(OrderCreationPending);
+    expect(err).toMatchObject({ orderId: expect.stringMatching(/^0x[0-9a-f]{64}$/), txHash: ORDER_TX, reason: expect.stringContaining("did not confirm taking the creation transaction") });
+    expect(p.store.sent).toHaveBeenCalledTimes(1); expect(p.store.confirmed).not.toHaveBeenCalled(); expect(p.store.notSent).not.toHaveBeenCalled();
+    expect(p.signTransaction).toHaveBeenCalledTimes(1); expect(p.sendRawTransaction).toHaveBeenCalledTimes(3);
+    expect(p.publicClient.waitForTransactionReceipt).not.toHaveBeenCalled();
+    // "nonce too low" is not retried, and stays pending: the creation itself may already be mined
+    const q = parts(20_000_000_000n, 50_000n, { sendAnswers: ["nonce too low: next nonce 8, tx nonce 7"] });
+    const e2 = await createOrder(q.o, PAYER, AMOUNT, q.store).catch((e) => e);
+    expect(e2).toBeInstanceOf(OrderCreationPending); expect(e2.txHash).toBe(ORDER_TX); expect(q.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+  it("a receipt that does not arrive within the bounded wait is pending with the hash, not a failure", async () => {
+    const p = parts(20_000_000_000n, 50_000n, { receipt: "timeout" });
+    const err = await createOrder({ ...p.o, orderReceiptTimeoutMs: 5_000 }, PAYER, AMOUNT, p.store).catch((e) => e);
+    expect(err).toBeInstanceOf(OrderCreationPending);
+    expect(err).toMatchObject({ txHash: ORDER_TX, reason: expect.stringMatching(/^no receipt within the wait/) });
+    expect(p.publicClient.waitForTransactionReceipt).toHaveBeenCalledWith({ hash: ORDER_TX, timeout: 5_000 });
+    expect(p.store.confirmed).not.toHaveBeenCalled();
+  });
+  it("a creation that cannot be signed or recorded is OrderCreationNotSent, closed through the store, and nothing is broadcast", async () => {
+    for (const opt of [{ signFails: true }, { sentFails: true }] as Opt[]) {
+      const p = parts(20_000_000_000n, 50_000n, opt);
+      const err = await createOrder(p.o, PAYER, AMOUNT, p.store).catch((e) => e);
+      expect(err).toBeInstanceOf(OrderCreationNotSent);
+      expect(err.reason).toMatch(/nothing was sent$/);
+      expect(p.sendRawTransaction).not.toHaveBeenCalled();
+      expect(p.store.notSent).toHaveBeenCalledWith({ orderId: err.orderId, reason: err.reason });
+    }
+  });
+  it("a creation receipt that reverted is a plain failure with its hash (the order does not exist)", async () => {
+    const p = parts(20_000_000_000n, 50_000n, { receipt: "reverted" });
+    await expect(createOrder(p.o, PAYER, AMOUNT, p.store)).rejects.toThrow(`createOrder failed: ${ORDER_TX}`);
+    expect(p.store.confirmed).not.toHaveBeenCalled();
+  });
+  it("in a run, an unacknowledged creation logs orderCreationPending with the identity and stops before anything else is signed", async () => {
+    const h = harness({ fixture: "APPROVED_PAYMENT" });
+    const steps: any[] = []; const sent: any[] = [];
+    const orderStore: OrderStore = { planned: vi.fn(), sent: vi.fn((x) => { sent.push(x); }), confirmed: vi.fn(), notSent: vi.fn() };
+    const admin = { ...(h.options.admin as any), sendRawTransaction: vi.fn(async () => { throw new Error(REFUSED); }) };
+    const running = runFixture({ ...h.options, admin, orderStore, onStep: (x: any) => steps.push(x) } as RunOptions).catch((e) => e);
+    await vi.runAllTimersAsync();
+    const err = await running;
+    expect(err).toBeInstanceOf(OrderCreationPending);
+    expect(admin.sendRawTransaction).toHaveBeenCalledTimes(3);
+    expect(sent).toEqual([expect.objectContaining({ tx: ORDER_TX, raw: ORDER_RAW, nonce: 1, from: ORDER_CREATOR })]);
+    const pending = steps.find((x) => x.step === "orderCreationPending");
+    expect(pending).toMatchObject({ orderId: err.orderId, tx: ORDER_TX });
+    expect(steps.map((x) => x.step)).toEqual(["orderPlanned", "orderCreationPending"]);
+    expect(h.signTransaction).not.toHaveBeenCalled(); expect(h.sendRawTransaction).not.toHaveBeenCalled(); expect(orderStore.confirmed).not.toHaveBeenCalled();
   });
 });
 

@@ -46,7 +46,7 @@ export function phaseOf(run: Run | null | undefined): Phase {
 }
 
 const HAPPENED: Record<string, string> = {
-  orderPlanned: "Order identity recorded before its creation was sent", createOrder: "Order created on the DemoMerchant", intent: "Exact intent built against the order",
+  orderPlanned: "Order identity recorded before its creation was sent", orderCreationPending: "Order creation sent, not yet confirmed — reconciled from the chain", orderNotSent: "Order creation not sent — nothing reached the network", createOrder: "Order created on the DemoMerchant", intent: "Exact intent built against the order",
   quote: "Report quoted over HTTP 402", staleObservation: "Pinned block predates the order — quoting again", signServiceFee: "Check fee signed (one EIP-3009 authorization)",
   settlementPending: "Check fee settlement pending on Arc", reportDelivered: "Pinned report delivered after the fee settled", finalValidation: "Final validation at a fresh pinned block",
   signed: "Transaction signed and compared with the plan, field by field", broadcastAttempted: "Durable broadcast marker written", broadcast: "Transaction broadcast to Arc",

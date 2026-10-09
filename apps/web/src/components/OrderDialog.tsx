@@ -6,11 +6,14 @@
 // units and the raw JSON body live under a collapsed "technical details". A 400 from the server lands on the field it names.
 // Review round 3 (item 5): the review stage renders only while the validated body exists and its payer is still the account the review was
 // opened for; a wallet that disconnects or switches accounts mid-review returns the dialog to the form with a notice — nothing reads `body.*` on null.
+// 2026-10-09: once the server answers with an order identity (202 pending, 502 naming the order) the dialog hands that order to the page —
+// it never says "nothing was changed"; a lost answer says the order may exist; and while the latest order's creation is unconfirmed the
+// dialog refuses another one ("recover it first").
 import { useEffect, useRef, useState } from "react";
 import { Chip, Hex, Spinner } from "./Badges";
-import { ApiError, explorerAddr, type NetworkInfo, type OrderCreated } from "../lib/api";
-import { EMPTY_ORDER_FORM, feeUsdcText, fixtureForProxy, nativeAtomicToUsdcText, sampleOrder, serverFieldError, usdcToNativeAtomic, validateOrderForm, type OrderBody, type OrderForm, type OrderFormErrors, type OrderLimits, type Proxy } from "../lib/orders";
-import { describeError } from "../lib/errors";
+import { ApiError, explorerAddr, type NetworkInfo, type OrderCreated, type OrderCreationFailure, type OrderPending } from "../lib/api";
+import { EMPTY_ORDER_FORM, feeUsdcText, fixtureForProxy, nativeAtomicToUsdcText, sampleOrder, serverFieldError, usdcToNativeAtomic, validateOrderForm, UNCONFIRMED_BLOCK_TEXT, type OrderBody, type OrderForm, type OrderFormErrors, type OrderLimits, type Proxy } from "../lib/orders";
+import { describeError, ORDER_RESPONSE_LOST_TEXT } from "../lib/errors";
 
 /** what the two merchant choices mean to a visitor; the proxy code name is a technical detail */
 export const PROXY_LABELS: Record<Proxy, { title: string; blurb: string }> = {
@@ -18,7 +21,10 @@ export const PROXY_LABELS: Record<Proxy, { title: string; blurb: string }> = {
   CHANGED: { title: "Merchant changed since approval", blurb: "upgraded to a compatible but unapproved implementation — the check should stop at REVIEW REQUIRED" },
 };
 
-export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: { payer: string | null; net: NetworkInfo | null; limits: OrderLimits; create: (body: OrderBody) => Promise<OrderCreated>; onCreated: (o: OrderCreated) => void; onClose: () => void }) {
+export type OrderAnswer = OrderCreated | OrderPending | OrderCreationFailure;
+export function OrderDialog({ payer, net, limits, create, onCreated, onClose, unconfirmed = null, onLost }: { payer: string | null; net: NetworkInfo | null; limits: OrderLimits; create: (body: OrderBody) => Promise<OrderCreated | OrderPending>; onCreated: (o: OrderAnswer) => void; onClose: () => void;
+  /** the latest order of this wallet whose creation is not confirmed: no other order until it is recovered (or closed) */ unconfirmed?: { orderId: string } | null;
+  /** the answer was lost on the way: the page re-reads My workflow (the order may exist) */ onLost?: () => void }) {
   const [form, setForm] = useState<OrderForm>(EMPTY_ORDER_FORM);
   const [touched, setTouched] = useState(false);
   const [stage, setStage] = useState<"edit" | "review">("edit");
@@ -43,12 +49,23 @@ export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: 
   const set = (patch: Partial<OrderForm>) => { setForm((f) => ({ ...f, ...patch })); setServerErrors({}); setTouched(true); };
   const atomic = usdcToNativeAtomic(form.amountUsdc);
   const submit = async () => {
-    if (!body || !reviewing) return;
+    if (!body || !reviewing || unconfirmed) return;
     setState({ busy: true, err: null });
     try { const o = await create(body); setState({ busy: false, err: null }); onCreated(o); }
     catch (e) {
       if (e instanceof ApiError && e.status === 400 && e.body?.error === "INVALID_INPUT") { setServerErrors(serverFieldError(e.body)); setStage("edit"); setState({ busy: false, err: null }); return; }
-      setState({ busy: false, err: describeError(e).text });
+      if (e instanceof ApiError && typeof e.body?.orderId === "string") { // the identity exists: show that order, never "nothing was changed"
+        const known = { orderId: e.body.orderId as string, tx: (e.body.tx as string | null | undefined) ?? null, merchant: fixtureForProxy(net, body.proxy)?.merchant ?? "", proxy: body.proxy, payer: body.payer, amountNativeAtomic: body.amountNativeAtomic, reference: body.reference ?? null };
+        const st = e.body.state ?? "FAILED"; const why: string = e.body.reason ?? describeError(e).text;
+        setState({ busy: false, err: null });
+        onCreated(st === "PLANNED" || st === "SENT"
+          ? { pending: true, ...known, state: st, reason: why, nextAction: "creation not confirmed — it is reconciled from the chain; recover re-sends the same signed transaction (never a second order)" }
+          : { failed: true, ...known, state: st, reason: why });
+        return;
+      }
+      const d = describeError(e);
+      if (d.code === "NETWORK") { setState({ busy: false, err: ORDER_RESPONSE_LOST_TEXT }); onLost?.(); return; }
+      setState({ busy: false, err: d.text });
     }
   };
   const changedFor = (p: Proxy) => { const f = fixtureForProxy(net, p); return !!f?.approvedImplementation && !!f?.implementation && f.approvedImplementation.toLowerCase() !== f.implementation.toLowerCase(); };
@@ -67,11 +84,12 @@ export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: 
   const reviewFixture = reviewing && body ? fixtureForProxy(net, body.proxy) : null;
   return (
     <dialog ref={ref} className="dlg" aria-labelledby="order-dialog-title" onCancel={(e) => { e.preventDefault(); onClose(); }} onClick={(e) => { if (e.target === ref.current) onClose(); }}>
-      <form className="dlg-inner stack" style={{ gap: 14 }} onSubmit={(e) => { e.preventDefault(); if (!reviewing) { setTouched(true); if (body && samePayer(body.payer, payer)) { setReviewPayer(payer); setNotice(null); setStage("review"); } } else void submit(); }}>
+      <form className="dlg-inner stack" style={{ gap: 14 }} onSubmit={(e) => { e.preventDefault(); if (unconfirmed) return; if (!reviewing) { setTouched(true); if (body && samePayer(body.payer, payer)) { setReviewPayer(payer); setNotice(null); setStage("review"); } } else void submit(); }}>
         <div className="row between" style={{ alignItems: "baseline" }}>
           <h3 id="order-dialog-title">{!reviewing ? "Create a demonstration order" : "Review the order"}</h3>
           <button type="button" className="btn sm ghost" onClick={onClose} aria-label="close">✕</button>
         </div>
+        {unconfirmed && <div className="banner bad" role="alert" data-testid="order-unconfirmed">{UNCONFIRMED_BLOCK_TEXT[0].toUpperCase() + UNCONFIRMED_BLOCK_TEXT.slice(1)} — order <Hex value={unconfirmed.orderId} n={6} /> (Recover in step 1 or in My workflow).</div>}
         {!reviewing || !body ? (
           <>
             {notice && <div className="banner" role="status" data-testid="order-notice">{notice}</div>}
@@ -96,7 +114,7 @@ export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: 
             </details>
             <div className="row between" style={{ gap: 10 }}>
               <button type="button" className="btn" onClick={() => { setForm(sampleOrder(new Date(), limits)); setServerErrors({}); setTouched(true); }}>Autofill sample order</button>
-              <button type="submit" className="btn primary" disabled={!payer}>Review order →</button>
+              <button type="submit" className="btn primary" disabled={!payer || !!unconfirmed}>Review order →</button>
             </div>
           </>
         ) : (
@@ -121,7 +139,7 @@ export function OrderDialog({ payer, net, limits, create, onCreated, onClose }: 
             {state.err && <div className="banner bad" role="alert">{state.err}</div>}
             <div className="row between" style={{ gap: 10 }}>
               <button type="button" className="btn ghost" disabled={state.busy} onClick={() => { setStage("edit"); setReviewPayer(null); }}>← Edit</button>
-              <button type="submit" className="btn primary" disabled={state.busy}>{state.busy ? <><Spinner /> creating…</> : "Create order"}</button>
+              <button type="submit" className="btn primary" disabled={state.busy || !!unconfirmed}>{state.busy ? <><Spinner /> creating…</> : "Create order"}</button>
             </div>
           </>
         )}

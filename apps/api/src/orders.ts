@@ -4,7 +4,7 @@
 // resolves from the chain (getOrder), never by creating a replacement inside the same admission. No key material lives here;
 // chain access is injected, so the module is testable with a fake RPC.
 import { type Hex } from "viem";
-import { reconcilePlannedOrder, readChainOrder, type OrderStore, type OrderRpc } from "@arcpreflight/runner";
+import { reconcilePlannedOrder, readChainOrder, type OrderStore, type OrderRpc, type RawSender } from "@arcpreflight/runner";
 export { readChainOrder, type OrderRpc };
 import { type Db, row, rows, run, now } from "./db.js";
 
@@ -14,6 +14,8 @@ export type OrderRow = {
   payer: string; merchant: string; proxy: string | null; amount_atomic: string; reference: string | null;
   state: OrderState; tx_hash: string | null; block: string | null; from_addr: string | null; gas_used: string | null; effective_gas_price: string | null;
   paid: number | null; paid_checked_at: string | null; note: string | null; created_at: string; updated_at: string;
+  /** the signed creation transaction and its nonce, recorded before the broadcast so a refused send is re-sent IDENTICALLY; never part of a view */
+  raw_tx?: string | null; tx_nonce?: number | null;
 };
 
 export const ORDER_LIMITS: { minNativeAtomic: bigint; maxNativeAtomic: bigint; stepNativeAtomic: bigint; defaultNativeAtomic: bigint; maxReferenceLength: number } = {
@@ -53,11 +55,17 @@ export function planOrder(db: Db, o: PlanOrderInput) {
   run(db, "INSERT INTO orders (order_id, owner, client_key, source, run_id, payer, merchant, proxy, amount_atomic, reference, state, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
     o.orderId.toLowerCase(), o.owner, o.clientKey, o.source, o.runId ?? null, o.payer.toLowerCase(), o.merchant.toLowerCase(), o.proxy, o.amountNativeAtomic, o.reference, "PLANNED", now(), now());
 }
-export function orderSent(db: Db, orderId: Hex, tx: Hex) {
-  run(db, "UPDATE orders SET state = 'SENT', tx_hash = ?, updated_at = ? WHERE order_id = ? AND state = 'PLANNED'", tx.toLowerCase(), now(), orderId.toLowerCase());
+/** SENT: the creation's hash (its identity from here on) and, when the caller signed locally, the signed bytes, nonce and signer */
+export function orderSent(db: Db, orderId: Hex, tx: Hex, signed: { raw?: Hex | null; nonce?: number | null; from?: Hex | null } = {}) {
+  run(db, "UPDATE orders SET state = 'SENT', tx_hash = ?, raw_tx = ?, tx_nonce = ?, from_addr = COALESCE(?, from_addr), updated_at = ? WHERE order_id = ? AND state = 'PLANNED'",
+    tx.toLowerCase(), signed.raw ?? null, signed.nonce ?? null, signed.from?.toLowerCase() ?? null, now(), orderId.toLowerCase());
+}
+/** The creation was never broadcast (signing or recording failed): FAILED, and any signed bytes are dropped so nothing re-sends them. */
+export function orderNotSent(db: Db, orderId: Hex, reason: string) {
+  run(db, "UPDATE orders SET state = 'FAILED', note = ?, raw_tx = NULL, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')", reason, now(), orderId.toLowerCase());
 }
 export function orderConfirmed(db: Db, o: { orderId: Hex; tx: Hex | null; block: string | null; from?: Hex | null; gasUsed?: string | null; effectiveGasPriceNativeAtomic?: string | null; note?: string | null }) {
-  run(db, "UPDATE orders SET state = 'CONFIRMED', tx_hash = COALESCE(?, tx_hash), block = COALESCE(?, block), from_addr = ?, gas_used = ?, effective_gas_price = ?, note = ?, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')",
+  run(db, "UPDATE orders SET state = 'CONFIRMED', tx_hash = COALESCE(?, tx_hash), block = COALESCE(?, block), from_addr = COALESCE(?, from_addr), gas_used = ?, effective_gas_price = ?, note = ?, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT')",
     o.tx?.toLowerCase() ?? null, o.block ?? null, o.from?.toLowerCase() ?? null, o.gasUsed ?? null, o.effectiveGasPriceNativeAtomic ?? null, o.note ?? null, now(), o.orderId.toLowerCase());
 }
 export function orderFailed(db: Db, orderId: Hex, state: "FAILED" | "UNKNOWN_CREATION", note: string) {
@@ -67,24 +75,33 @@ export function orderFailed(db: Db, orderId: Hex, state: "FAILED" | "UNKNOWN_CRE
 export function runnerOrderStore(db: Db, runId: string, clientKey: string | null, proxy: "MAIN" | "CHANGED", reference: string | null = null): OrderStore {
   return {
     planned: (o) => planOrder(db, { orderId: o.orderId, owner: null, clientKey, source: "runner", runId, payer: o.payer, merchant: o.merchant, proxy, amountNativeAtomic: o.amountNativeAtomic, reference }),
-    sent: (o) => orderSent(db, o.orderId, o.tx),
+    sent: (o) => orderSent(db, o.orderId, o.tx, { raw: o.raw, nonce: o.nonce, from: o.from }),
+    notSent: (o) => orderNotSent(db, o.orderId, o.reason),
     confirmed: (o) => orderConfirmed(db, { orderId: o.orderId, tx: o.tx, block: o.block, from: o.from, gasUsed: o.gasUsed, effectiveGasPriceNativeAtomic: o.effectiveGasPriceNativeAtomic }),
   };
 }
 
-/** Start-up pass, worker and read routes: PLANNED/SENT orders are resolved from the chain through the shared `reconcilePlannedOrder`
- *  (`packages/runner`, also used by the reference CLI); nothing is sent. An order not on chain after the window is closed
- *  UNKNOWN_CREATION (the row stays; a new order is a new row). */
-export async function reconcileOrders(db: Db, rpc: OrderRpc, opts: { orderId?: string | null; now?: Date; windowMs?: number; log?: (m: string) => void } = {}): Promise<{ resolved: number; pending: number }> {
+/** Start-up pass, worker, recover and read routes: PLANNED/SENT orders are resolved from the chain through the shared
+ *  `reconcilePlannedOrder` (`packages/runner`, also used by the reference CLI). Read routes never send. The worker and an explicit
+ *  recover pass `allowSend` with the order creator's serialized sender: a recorded creation the node does not hold is handed the
+ *  IDENTICAL signed bytes again while its window is open — nothing is ever re-signed. A creation nonce consumed by another
+ *  transaction closes the order FAILED; an order not on chain after the window is closed UNKNOWN_CREATION (the row stays; a new
+ *  order is a new row). */
+export type ReconcileOrdersOptions = { orderId?: string | null; now?: Date; windowMs?: number; log?: (m: string) => void; allowSend?: boolean; sender?: RawSender | null };
+export async function reconcileOrders(db: Db, rpc: OrderRpc, opts: ReconcileOrdersOptions = {}): Promise<{ resolved: number; pending: number }> {
   const open: OrderRow[] = opts.orderId ? rows(db, "SELECT * FROM orders WHERE state IN ('PLANNED','SENT') AND order_id = ?", opts.orderId.toLowerCase()) : rows(db, "SELECT * FROM orders WHERE state IN ('PLANNED','SENT') ORDER BY created_at");
   let resolved = 0, pending = 0;
   for (const o of open) {
     try {
-      const r = await reconcilePlannedOrder(rpc, { orderId: o.order_id as Hex, merchant: o.merchant as Hex, txHash: (o.tx_hash as Hex | null) ?? null, createdAt: o.created_at }, { now: opts.now, windowMs: opts.windowMs });
+      const r = await reconcilePlannedOrder(rpc, { orderId: o.order_id as Hex, merchant: o.merchant as Hex, txHash: (o.tx_hash as Hex | null) ?? null, createdAt: o.created_at,
+        raw: (o.raw_tx as Hex | null | undefined) ?? null, nonce: o.tx_nonce ?? null, from: (o.from_addr as Hex | null) ?? null },
+        { now: opts.now, windowMs: opts.windowMs, send: opts.allowSend ? (opts.sender ?? null) : null });
       if (r.kind === "confirmed") orderConfirmed(db, { orderId: o.order_id as Hex, tx: r.tx, block: r.block, from: r.from, gasUsed: r.gasUsed, effectiveGasPriceNativeAtomic: r.effectiveGasPriceNativeAtomic, note: r.note });
       else if (r.kind === "failed") orderFailed(db, o.order_id as Hex, "FAILED", r.note);
       else if (r.kind === "unknown") orderFailed(db, o.order_id as Hex, "UNKNOWN_CREATION", r.note);
-      if (r.kind === "pending") pending++; else { resolved++; opts.log?.(`order ${o.order_id.slice(0, 10)}: ${r.kind.toUpperCase()}`); }
+      else if (r.note) run(db, "UPDATE orders SET note = ?, updated_at = ? WHERE order_id = ? AND state IN ('PLANNED','SENT') AND COALESCE(note, '') <> ?", r.note, now(), o.order_id, r.note); // pending: what was seen
+      if (r.kind === "pending") { pending++; if (r.resent) opts.log?.(`order ${o.order_id.slice(0, 10)}: the identical signed creation was re-sent`); }
+      else { resolved++; opts.log?.(`order ${o.order_id.slice(0, 10)}: ${r.kind.toUpperCase()}`); }
     } catch (e: any) { pending++; opts.log?.(`order ${o.order_id.slice(0, 10)}: ${String(e?.message ?? e).slice(0, 120)}`); }
   }
   return { resolved, pending };
@@ -112,13 +129,15 @@ export function shapeOrder(db: Db, o: OrderRow, owner: string | null) {
   const delivered = checks.find((c) => c.paymentState === "COMPLETED");
   const openAttempt = attempts.find((a) => a.state === "VALIDATED" || a.state === "BROADCAST_ATTEMPTED");
   const paidAttempt = attempts.find((a) => a.businessStatus === "SUCCESS");
-  const nextAction = o.state === "PLANNED" || o.state === "SENT" ? "waiting for the creation receipt; reconciliation resolves it from the chain"
+  // an unconfirmed creation never invites approval: its paid state is not established (null), and the next action is the creation itself
+  const nextAction = o.state === "PLANNED" ? "identity recorded; creation not confirmed as sent — recover reads the chain; approval stays closed until the order is confirmed"
+    : o.state === "SENT" ? "creation sent, not yet confirmed — waiting for its receipt; recover re-sends the same signed transaction (never a second order); approval stays closed until the order is confirmed"
     : o.state !== "CONFIRMED" ? "this creation could not be established; create a new order (this row stays for the record)"
     : o.paid === 1 ? (paidAttempt ? "paid: export the passport of the paying attempt and verify it independently" : "the order reads as paid on chain (by a transaction this service did not establish); export the attempt's passport if one exists")
     : openAttempt ? (openAttempt.state === "VALIDATED" ? "an attempt is validated: confirm it in your wallet, or abandon it" : "a broadcast was attempted: wait for the receipt, or recover to reconcile now")
     : delivered ? "the check is delivered: review the decision and execute with your wallet" : checks.length ? "a check was started: pay its quote to receive the report" : "run the preflight check for this order";
   return { orderId: o.order_id, owner: o.owner, source: o.source, runId: o.run_id, payer: o.payer, merchant: o.merchant, proxy: o.proxy, amountNativeAtomic: o.amount_atomic, reference: o.reference,
-    state: o.state, tx: o.tx_hash, block: o.block, creation: { from: o.from_addr, gasUsed: o.gas_used, effectiveGasPriceNativeAtomic: o.effective_gas_price }, paid: o.paid === null ? null : o.paid === 1, paidCheckedAt: o.paid_checked_at, note: o.note,
+    state: o.state, tx: o.tx_hash, block: o.block, creation: { from: o.from_addr, gasUsed: o.gas_used, effectiveGasPriceNativeAtomic: o.effective_gas_price }, paid: o.state !== "CONFIRMED" || o.paid === null ? null : o.paid === 1, paidCheckedAt: o.paid_checked_at, note: o.note,
     checks, attempts, nextAction, createdAt: o.created_at, updatedAt: o.updated_at };
 }
 export const getOrderRow = (db: Db, orderId: string): OrderRow | undefined => row<OrderRow>(db, "SELECT * FROM orders WHERE order_id = ?", orderId.toLowerCase());

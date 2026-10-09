@@ -16,6 +16,8 @@ export * from "./reconcile.js";
 export * from "./store.js";
 export * from "./validate.js";
 export * from "./orders.js";
+export * from "./send.js";
+import { sendIdentical } from "./send.js";
 
 export type Fixture = "APPROVED_PAYMENT" | "CHANGED_IMPLEMENTATION" | "AMOUNT_UNIT_MISMATCH";
 export type Step = { step: string; atMs: number; [k: string]: unknown };
@@ -59,15 +61,31 @@ export type RunOptions = {
   interruptAfterBroadcast?: boolean;
   /** per-transaction cap on the order creation's worst-case gas cost, gasLimit × maxFeePerGas (Gate D); default {@link DEFAULT_ORDER_GAS_COST_CAP} */
   maxOrderGasCostNativeAtomic?: bigint;
+  /** bounded wait for the order creation's receipt; afterwards the creation is pending and left to order reconciliation (default 90 s) */
+  orderReceiptTimeoutMs?: number;
 };
 /** createOrder ≤ 150k gas at ≤ 40 gwei = 0.006 USDC: the order creation refuses to send above this unless the caller passes another cap */
 export const DEFAULT_ORDER_GAS_COST_CAP = 150_000n * 40_000_000_000n;
 export type ArtifactName = "order" | "intent" | "quote" | "feeAuthorization" | "report" | "approval" | "decision" | "finalValidation" | "execution" | "postcondition";
 export type OrderStore = {
   planned(o: { orderId: Hex; payer: Hex; amountNativeAtomic: string; merchant: Hex }): Promise<void> | void;
-  sent(o: { orderId: Hex; tx: Hex }): Promise<void> | void;
+  /** the SIGNED creation transaction, recorded before any broadcast: its hash, and (when the store keeps them) the raw bytes, nonce and
+   *  signer, so a retry re-sends the identical transaction — the same order, the same hash — and never a new one */
+  sent(o: { orderId: Hex; tx: Hex; raw?: Hex; nonce?: number; from?: Hex | null }): Promise<void> | void;
   confirmed(o: OrderCreation): Promise<void> | void;
+  /** the creation is certain NOT to have been sent: it failed before its signed transaction was recorded (nothing left this process) */
+  notSent?(o: { orderId: Hex; reason: string }): Promise<void> | void;
 };
+/** The order's identity (and, when signed, its creation transaction) is recorded, but the node did not confirm taking the transaction or
+ *  its receipt did not arrive in time: the creation may still land. Order reconciliation resolves it from the chain, re-sending the SAME
+ *  signed transaction while its window is open; a new order is never created in its place. */
+export class OrderCreationPending extends Error {
+  constructor(readonly orderId: Hex, readonly txHash: Hex | null, readonly reason: string) { super(`order creation pending: ${reason}`); this.name = "OrderCreationPending"; }
+}
+/** The order's identity is recorded, and it is certain that nothing was sent (the failure came before the signed transaction was recorded). */
+export class OrderCreationNotSent extends Error {
+  constructor(readonly orderId: Hex, readonly reason: string) { super(`order creation not sent: ${reason}`); this.name = "OrderCreationNotSent"; }
+}
 const bigJson = (v: unknown) => JSON.parse(JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x)));
 const sleep = (ms: number) => new Promise<void>((s) => setTimeout(s, ms));
 /** digest of a business postcondition record; reconciliation recomputes it the same way */
@@ -93,40 +111,46 @@ async function currentBaseline(o: Pick<RunOptions, "apiUrl" | "token" | "baselin
  *  anything is persisted or sent (Gate D) — no order row claims a creation that never left. */
 export type OrderCreation = { orderId: Hex; tx: Hex; block: string; from: Hex | null; gasUsed: string | null; effectiveGasPriceNativeAtomic: string | null };
 const receiptFacts = (r: any) => ({ from: (r?.from as Hex | undefined) ?? null, gasUsed: r?.gasUsed !== undefined && r?.gasUsed !== null ? String(r.gasUsed) : null, effectiveGasPriceNativeAtomic: r?.effectiveGasPrice !== undefined && r?.effectiveGasPrice !== null ? String(r.effectiveGasPrice) : null });
-/** Hands the same signed bytes to the node up to `maxAttempts` times while `inWindow()` holds (checked with a fresh clock before every
- *  retry). Returns whether a node acknowledged them. "already known" counts as acknowledged; definitive rejections end the attempts. */
-export const SEND_ATTEMPTS = 3;
-const DEFINITIVE_SEND_ERROR = /nonce too low|insufficient funds|underpriced|intrinsic gas|exceeds block gas limit|invalid sender|chain ?id/i;
-export async function sendIdentical(client: { sendRawTransaction(a: { serializedTransaction: Hex }): Promise<unknown> }, raw: Hex, inWindow: () => boolean, maxAttempts = SEND_ATTEMPTS, pauseMs = 400): Promise<{ accepted: boolean; sendError: string | null; attempts: number }> {
-  let sendError: string | null = null, attempts = 0;
-  while (attempts < maxAttempts) {
-    if (attempts > 0) { await new Promise((r) => setTimeout(r, pauseMs)); if (!inWindow()) break; } // never after the window
-    attempts++;
-    try { await client.sendRawTransaction({ serializedTransaction: raw }); return { accepted: true, sendError: null, attempts }; }
-    catch (e: any) {
-      sendError = String(e?.shortMessage ?? e?.message ?? e).slice(0, 160);
-      if (/already known|known transaction|already imported/i.test(sendError)) return { accepted: true, sendError, attempts };
-      if (DEFINITIVE_SEND_ERROR.test(sendError)) break;
-    }
-  }
-  return { accepted: false, sendError, attempts };
-}
-export async function createOrder(o: Pick<RunOptions, "publicClient" | "admin" | "merchant" | "feeParams" | "maxOrderGasCostNativeAtomic">, payer: Hex, amount: bigint, store?: OrderStore): Promise<OrderCreation> {
+export async function createOrder(o: Pick<RunOptions, "publicClient" | "admin" | "merchant" | "feeParams" | "maxOrderGasCostNativeAtomic" | "orderReceiptTimeoutMs" | "adminLock">, payer: Hex, amount: bigint, store?: OrderStore): Promise<OrderCreation> {
   const orderId = toHex(randomBytes(32)) as Hex;
   const args = [orderId, payer, amount] as const;
+  const data = encodeFunctionData({ abi: CREATE_ORDER_ABI, functionName: "createOrder", args });
+  const signer = (o.admin.account?.address ?? null) as Hex | null;
   const fees = await o.feeParams();
   // transaction-level cap (Gate D): estimate, add 20 %, and refuse before anything is persisted or sent when the worst case is above the cap
-  const estimate = await o.publicClient.estimateGas({ account: o.admin.account?.address, to: o.merchant, data: encodeFunctionData({ abi: CREATE_ORDER_ABI, functionName: "createOrder", args }) } as any);
+  const estimate = await o.publicClient.estimateGas({ account: signer ?? undefined, to: o.merchant, data } as any);
   const gasLimit = (BigInt(estimate) * 12n + 9n) / 10n;
   const cap = o.maxOrderGasCostNativeAtomic ?? DEFAULT_ORDER_GAS_COST_CAP;
   const worst = gasLimit * fees.maxFeePerGas;
   if (worst > cap) throw new Error(`createOrder refused: worst-case gas cost ${worst} (gas limit ${gasLimit} × maxFeePerGas ${fees.maxFeePerGas}) exceeds the per-transaction cap ${cap}; nothing was persisted or sent`);
   await store?.planned({ orderId, payer, amountNativeAtomic: amount.toString(), merchant: getAddress(o.merchant) as Hex }); // durable before anything is sent
-  const h = await o.admin.writeContract({ address: o.merchant, abi: CREATE_ORDER_ABI, functionName: "createOrder", args, gas: gasLimit, ...fees });
-  await store?.sent({ orderId, tx: h });
-  const r = await o.publicClient.waitForTransactionReceipt({ hash: h });
-  if (r.status !== "success") throw new Error(`createOrder failed: ${h}`);
-  const created = { orderId, tx: h, block: r.blockNumber.toString(), ...receiptFacts(r) };
+  // sign LOCALLY with an explicit nonce, gas limit and fees; the signed transaction is recorded before any broadcast (its hash is the
+  // creation's identity from here on: a retry re-sends these exact bytes, never a new transaction or a new order). The caller's
+  // single-sender lock covers nonce → sign → record → send only, not the receipt wait, so other sends from this key are not held up.
+  const lock = o.adminLock ?? (<T,>(fn: () => Promise<T>) => fn());
+  const { txHash, accepted, sendError } = await lock(async () => {
+    let raw: Hex, txHash: Hex, nonce: number;
+    try {
+      if (!signer) throw new Error("the order signer has no local account");
+      nonce = await o.publicClient.getTransactionCount({ address: signer, blockTag: "pending" });
+      raw = (await o.admin.signTransaction({ account: o.admin.account!, chain: o.admin.chain ?? null, to: o.merchant, data, value: 0n, nonce, gas: gasLimit, maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas, type: "eip1559" } as any)) as Hex;
+      txHash = keccak256(raw);
+      await store?.sent({ orderId, tx: txHash, raw, nonce, from: signer });
+    } catch (e: any) {
+      const reason = `the creation transaction was not signed or not recorded (${String(e?.shortMessage ?? e?.message ?? e).slice(0, 140)}); nothing was sent`;
+      try { await store?.notSent?.({ orderId, reason }); } catch { /* the row stays PLANNED; reconciliation closes it from the chain */ }
+      throw new OrderCreationNotSent(orderId, reason);
+    }
+    // a pool node that does not take transactions may refuse one call: the identical bytes are handed to the node again
+    const sender = typeof (o.admin as any).sendRawTransaction === "function" ? (o.admin as any) : (o.publicClient as any);
+    return { txHash, ...(await sendIdentical(sender, raw, () => true)) };
+  });
+  if (!accepted) throw new OrderCreationPending(orderId, txHash, `the node did not confirm taking the creation transaction${sendError ? ` (${sendError})` : ""}`);
+  let r: any;
+  try { r = await o.publicClient.waitForTransactionReceipt({ hash: txHash, timeout: o.orderReceiptTimeoutMs ?? 90_000 }); }
+  catch (e: any) { throw new OrderCreationPending(orderId, txHash, `no receipt within the wait (${String(e?.shortMessage ?? e?.message ?? e).slice(0, 120)})`); }
+  if (r.status !== "success") throw new Error(`createOrder failed: ${txHash}`);
+  const created = { orderId, tx: txHash, block: r.blockNumber.toString(), ...receiptFacts(r) };
   await store?.confirmed(created);
   return created;
 }
@@ -149,9 +173,15 @@ export async function runFixture(o: RunOptions) {
   // 0. order (order creator): its identity is persisted before the creation transaction leaves (design v3.3 §2)
   const orderStore: OrderStore | undefined = o.orderStore ? {
     planned: async (x) => { log("orderPlanned", { orderId: x.orderId, payer: x.payer, amountNativeAtomic: x.amountNativeAtomic, merchant: x.merchant, who: o.orderSignerLabel ?? "order creator", why: "the order's identity is recorded before its creation transaction is sent, so an interruption can be reconciled from the chain" }); await o.orderStore!.planned(x); },
-    sent: (x) => o.orderStore!.sent(x), confirmed: (x) => o.orderStore!.confirmed(x),
+    sent: (x) => o.orderStore!.sent(x), confirmed: (x) => o.orderStore!.confirmed(x), notSent: (x) => o.orderStore!.notSent?.(x),
   } : undefined;
-  const order = await (o.adminLock ?? ((fn) => fn()))(() => createOrder(o, runnerAcct.address, AMOUNT, orderStore));
+  let order: OrderCreation;
+  try { order = await createOrder(o, runnerAcct.address, AMOUNT, orderStore); } // createOrder takes o.adminLock around its nonce → send section
+  catch (e: any) {
+    if (e instanceof OrderCreationPending) log("orderCreationPending", { orderId: e.orderId, tx: e.txHash, why: `${e.reason}; the order is reconciled from the chain (the same signed creation is re-sent while its window is open); nothing else is signed in this run` });
+    else if (e instanceof OrderCreationNotSent) log("orderNotSent", { orderId: e.orderId, why: e.reason });
+    throw e;
+  }
   log("createOrder", { tx: order.tx, orderId: order.orderId, block: order.block, who: o.orderSignerLabel ?? "order creator", why: "the business expectation must come from an independently approved order, never from the calldata" });
   await artifact("order", { ...order, reference: o.orderReference ?? null, signer: o.orderSignerLabel ?? "order creator" });
   // 1. policy + intent

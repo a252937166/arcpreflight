@@ -11,6 +11,7 @@ import type { PrivateKeyAccount } from "viem/accounts";
 import { FIAT_TOKEN_EIP3009_ABI, verifyTransferAuthorization, encodeTransferWithAuthorization, findSettlementInLogs, decodeRevertReason, authorizationCallMatches,
   AUTHORIZATION_USED_TOPIC, AUTHORIZATION_CANCELED_TOPIC, addressTopic, type Eip3009Authorization, type SettlementEvidence, type SettlementExpectation, type ArcNet } from "@arcpreflight/client";
 import { type Db, row, run, now } from "./db.js";
+import { sendIdentical, SEND_ATTEMPTS } from "@arcpreflight/runner";
 
 export type RelayPayload = { signature: Hex; authorization: Eip3009Authorization };
 export type RelayState = "SUBMITTED" | "PENDING" | "COMPLETED" | "FAILED";
@@ -134,18 +135,22 @@ export class Relayer {
     return this.broadcastAndAwait(db, requestId, raw, hash, x, payload);
   }
   private async broadcastAndAwait(db: Db, requestId: string, raw: Hex, hash: Hex, x: SettlementExpectation, payload: RelayPayload): Promise<RelayOutcome> {
-    try { await this.c.rpc.sendRawTransaction({ serializedTransaction: raw }); }
-    catch (e: any) { // "already known" / nonce races are harmless; anything else is recorded and re-examined by reconcile
-      run(db, "UPDATE payments SET last_response_json = ?, updated_at = ? WHERE request_id = ?", JSON.stringify({ stage: "broadcast-error", hash, error: revertText(e) }), now(), requestId);
-    }
-    return this.awaitReceipt(db, requestId, hash, x, payload);
+    // the IDENTICAL signed bytes are handed to the node again while the authorization is valid — a pool node may refuse one call
+    // ("eth_sendRawTransaction does not exist", 2026-10-09); "already known" counts as taken. Never a different transaction: the fee
+    // cap checked before signing and the single-sender lock the caller holds still bound it.
+    const valid = () => BigInt(payload.authorization.validBefore) > BigInt(Math.floor(Date.now() / 1000));
+    const sent = await sendIdentical(this.c.rpc, raw, valid, SEND_ATTEMPTS, 400, (ms) => this.sleep(ms));
+    if (!sent.accepted) // nonce races and refusals are recorded and re-examined by reconcile
+      run(db, "UPDATE payments SET last_response_json = ?, updated_at = ? WHERE request_id = ?", JSON.stringify({ stage: "broadcast-error", hash, error: sent.sendError, attempts: sent.attempts }), now(), requestId);
+    return this.awaitReceipt(db, requestId, hash, x, payload, sent.accepted ? undefined
+      : `the node did not confirm taking the relay transaction (${sent.attempts} identical attempt(s): ${sent.sendError ?? "no answer"}); the settlement worker re-examines it and may rebroadcast the identical bytes while the authorization is valid`);
   }
-  private async awaitReceipt(db: Db, requestId: string, hash: Hex, x: SettlementExpectation, payload: RelayPayload): Promise<RelayOutcome> {
+  private async awaitReceipt(db: Db, requestId: string, hash: Hex, x: SettlementExpectation, payload: RelayPayload, pendingReason = "relay transaction broadcast; receipt not yet available"): Promise<RelayOutcome> {
     const deadline = Date.now() + this.c.receiptTimeoutMs;
     for (;;) {
       const rc = await this.c.rpc.getTransactionReceipt({ hash }).catch(() => null);
       if (rc) return this.settleFromReceipt(db, requestId, rc, x, payload);
-      if (Date.now() >= deadline) return this.keep(db, requestId, "PENDING", "relay transaction broadcast; receipt not yet available");
+      if (Date.now() >= deadline) return this.keep(db, requestId, "PENDING", pendingReason);
       await this.sleep(1000);
     }
   }

@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { type Hex } from "viem";
 import { BaselineCore, baselineDigest, IntentCore, reportDigest, ReportCore } from "@arcpreflight/schema";
-const mocks = vi.hoisted(() => ({ relay: vi.fn(), paused: vi.fn(), build: vi.fn(), order: vi.fn(), listOrders: vi.fn(), getOrder: vi.fn(), startRun: vi.fn(), attempt: vi.fn(), sent: vi.fn(), abandon: vi.fn(), observe: vi.fn(), recover: vi.fn(), listAttempts: vi.fn(), walletPassport: vi.fn() }));
+const mocks = vi.hoisted(() => ({ relay: vi.fn(), paused: vi.fn(), build: vi.fn(), order: vi.fn(), listOrders: vi.fn(), getOrder: vi.fn(), startRun: vi.fn(), attempt: vi.fn(), sent: vi.fn(), abandon: vi.fn(), observe: vi.fn(), recover: vi.fn(), listAttempts: vi.fn(), walletPassport: vi.fn(), recoverOrder: vi.fn() }));
 vi.mock("../src/config.js", () => ({ cfg: {
   dbPath: ":memory:", root: "/tmp/arcpreflight-offline-test", net: "testnet", chainId: 5042002, caip2: "eip155:5042002", usdc: "0x3600000000000000000000000000000000000000", publicBaseUrl: "http://offline.invalid", port: 4040, profile: "SUBMISSION_RESTRICTED", releaseSha: "test",
   principals: new Map([["buyer-token", "buyer"], ["other-token", "other"]]), adminToken: "admin-test", supportedTargets: ["0x2222222222222222222222222222222222222222"], maxPreflightPerPrincipalPerDay: 200, priceTokenAtomic: "10000", quoteTtlSeconds: 30, retentionDays: 30, relay: { floorNativeAtomic: 50000000000000000n, maxFeeNativeAtomic: 5000000000000000n, receiptTimeoutMs: 0, scanChunkBlocks: 9000, scanChunksPerCall: 3 },
@@ -12,7 +12,7 @@ vi.mock("../src/config.js", () => ({ cfg: {
 } }));
 vi.mock("../src/relay.js", () => ({ Relayer: class { settle = mocks.relay; paused = mocks.paused; }, relayRpcFromClient: () => ({}) }));
 vi.mock("../src/report.js", () => ({ client: {}, buildObjectReport: vi.fn(), buildIntentReport: mocks.build }));
-vi.mock("../src/demo.js", () => ({ claimFaucet: vi.fn(async () => ({ ok: false, status: 404, error: "FAUCET_DISABLED", reason: "the faucet exists on Arc testnet only" })), faucetInfo: vi.fn(() => ({ enabled: false, note: "testnet only" })), FIXTURES: { APPROVED_PAYMENT: {} }, networkInfo: vi.fn(), startRun: mocks.startRun, getRun: vi.fn(), listRuns: vi.fn(), createOrderFor: mocks.order, listOrders: mocks.listOrders, getOrder: mocks.getOrder, reconcileOrderCreations: vi.fn(), chainClient: {}, evidenceIndex: vi.fn(), evidenceFile: vi.fn(), clientKey: vi.fn(() => "client-key"), reconcileExecutions: vi.fn(), observeExecutions: vi.fn(), recoverRun: vi.fn() }));
+vi.mock("../src/demo.js", () => ({ claimFaucet: vi.fn(async () => ({ ok: false, status: 404, error: "FAUCET_DISABLED", reason: "the faucet exists on Arc testnet only" })), faucetInfo: vi.fn(() => ({ enabled: false, note: "testnet only" })), FIXTURES: { APPROVED_PAYMENT: {} }, networkInfo: vi.fn(), startRun: mocks.startRun, getRun: vi.fn(), listRuns: vi.fn(), createOrderFor: mocks.order, listOrders: mocks.listOrders, getOrder: mocks.getOrder, recoverOrder: mocks.recoverOrder, reconcileOrderCreations: vi.fn(), chainClient: {}, evidenceIndex: vi.fn(), evidenceFile: vi.fn(), clientKey: vi.fn(() => "client-key"), reconcileExecutions: vi.fn(), observeExecutions: vi.fn(), recoverRun: vi.fn() }));
 vi.mock("../src/wallet.js", () => ({ createWalletAttempt: mocks.attempt, markSent: mocks.sent, abandonAttempt: mocks.abandon, observeAttempt: mocks.observe, recoverAttempt: mocks.recover, listAttempts: mocks.listAttempts, buildWalletPassport: mocks.walletPassport, reconcileWalletAttempts: vi.fn(), walletRpcFromClient: () => ({}) }));
 import { db, handle } from "../src/server.js";
 import { buildObjectReport } from "../src/report.js";
@@ -343,6 +343,33 @@ describe("the complete lifecycle for every session (design v3.3): orders and wal
     expect(await call("GET", "/v1/demo/orders")).toMatchObject({ status: 200, body: { orders: [{ orderId: D }] } }); expect(mocks.listOrders.mock.calls[0][1]).toBe("buyer");
     expect(await call("GET", `/v1/demo/orders/${D}`)).toMatchObject({ status: 404 }); expect(mocks.getOrder.mock.calls[0].slice(1)).toEqual(["buyer", D]);
   });
+  it("order creation answers 202 ORDER_CREATION_PENDING with the identity, 502 naming the order, and says no order was created before an identity exists (2026-10-09)", async () => {
+    mocks.order.mockResolvedValueOnce({ ok: true, pending: true, status: 202, orderId: D, state: "SENT", tx: T, nextAction: "creation sent, not yet confirmed — waiting for its receipt; recover re-sends the same signed transaction (never a second order); approval stays closed until the order is confirmed",
+      reason: "the node did not confirm taking the creation transaction", merchant, proxy: "MAIN", payer, amountNativeAtomic: "50000000000000000", reference: null, owner: "buyer" });
+    const pending = await call("POST", "/v1/demo/orders", { payer });
+    expect(pending).toMatchObject({ status: 202, body: { error: "ORDER_CREATION_PENDING", code: "ORDER_CREATION_PENDING", pending: true, orderId: D, state: "SENT", tx: T, nextAction: expect.stringContaining("not yet confirmed") } });
+    expect(pending.body).not.toHaveProperty("ok"); expect(pending.body).not.toHaveProperty("status");
+    mocks.order.mockResolvedValueOnce({ ok: false, status: 502, error: "ORDER_CREATION_FAILED", reason: "the creation transaction reverted", orderId: D, state: "FAILED", tx: T });
+    expect(await call("POST", "/v1/demo/orders", { payer })).toMatchObject({ status: 502, body: { error: "ORDER_CREATION_FAILED", reason: "the creation transaction reverted", orderId: D, state: "FAILED", tx: T } });
+    mocks.order.mockResolvedValueOnce({ ok: false, status: 503, error: "DEPENDENCY_ERROR", reason: "the order was not created (rpc unavailable); no order identity was recorded and nothing was sent" });
+    const before = await call("POST", "/v1/demo/orders", { payer });
+    expect(before).toMatchObject({ status: 503, body: { error: "DEPENDENCY_ERROR", reason: expect.stringContaining("no order identity was recorded") } });
+    expect(before.body).not.toHaveProperty("orderId");
+  });
+  it("order recovery: the owner's session, owner-scoped, rate-limited by the service, answers with the order", async () => {
+    expect(await call("POST", `/v1/demo/orders/${D}/recover`, undefined, null)).toMatchObject({ status: 401 });
+    mocks.recoverOrder.mockResolvedValueOnce({ ok: true, order: { orderId: D, state: "SENT", paid: null } });
+    expect(await call("POST", `/v1/demo/orders/${D}/recover`)).toMatchObject({ status: 200, body: { orderId: D, state: "SENT", paid: null } });
+    expect(mocks.recoverOrder.mock.calls[0].slice(1)).toEqual(["buyer", D]);
+    mocks.recoverOrder.mockResolvedValueOnce({ ok: false, status: 429, error: "RATE_LIMITED", reason: "one recovery per order every 3 seconds" });
+    expect(await call("POST", `/v1/demo/orders/${D}/recover`)).toMatchObject({ status: 429, body: { error: "RATE_LIMITED" } });
+    mocks.recoverOrder.mockResolvedValueOnce({ ok: false, status: 404, error: "NOT_FOUND", reason: "unknown order" });
+    expect(await call("POST", `/v1/demo/orders/${D}/recover`, undefined, "other-token")).toMatchObject({ status: 404 });
+    expect(mocks.recoverOrder.mock.calls[2].slice(1)).toEqual(["other", D]);
+    const paths = (await call("GET", "/openapi.json", undefined, null)).body.paths;
+    expect(paths["/v1/demo/orders/{orderId}/recover"].post.summary).toMatch(/IDENTICAL signed creation.*never signs a replacement/);
+    expect(paths["/v1/demo/orders"].post.summary).toContain("202 ORDER_CREATION_PENDING");
+  });
   it("wallet attempts: every route needs the owner's session; validation refusals carry their reasons", async () => {
     expect(await call("POST", "/v1/wallet/attempts", { requestId: ATT, orderId: D }, null)).toMatchObject({ status: 401 });
     mocks.attempt.mockResolvedValue({ ok: false, status: 409, error: "VALIDATION_FAILED", reason: "final validation did not pass; nothing is signed", reasons: ["balance < value + gas reserve"], attemptId: ATT });
@@ -424,6 +451,11 @@ describe("faucet route", () => {
     expect(await call("POST", "/v1/faucet", { address: "0x1234" }, null)).toMatchObject({ status: 400, body: { error: "INVALID_INPUT" } });
     expect(await call("POST", "/v1/faucet", { address: payer }, null)).toMatchObject({ status: 404, body: { error: "FAUCET_DISABLED" } });
     expect(await call("GET", "/v1/faucet", undefined, null)).toMatchObject({ status: 200, body: { enabled: false } });
+  });
+  it("answers 202 with the recorded hash when the claim was sent but not yet confirmed", async () => {
+    const { claimFaucet } = await import("../src/demo.js");
+    vi.mocked(claimFaucet).mockResolvedValueOnce({ ok: true, pending: true, txHash: T, amountNativeAtomic: "200000000000000000", address: payer as Hex, note: "sent, not yet confirmed: no receipt within the wait; follow the hash on the explorer" });
+    expect(await call("POST", "/v1/faucet", { address: payer }, null)).toMatchObject({ status: 202, body: { pending: true, txHash: T, note: expect.stringMatching(/^sent, not yet confirmed/) } });
   });
 });
 

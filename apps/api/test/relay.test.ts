@@ -144,6 +144,27 @@ describe("self-relayed EIP-3009 settlement", () => {
     expect(await settle()).toMatchObject({ state: "COMPLETED", txHash: first.tx_hash });
     expect(keccak256(rpc.sent[0])).toBe(first.tx_hash); // same bytes, same hash
   });
+  it("a node that refuses eth_sendRawTransaction is handed the identical relay bytes again, inside the authorization's validity (2026-10-09)", async () => {
+    const tries: Hex[] = []; let refusals = 2;
+    rpc.sendRawTransaction = async ({ serializedTransaction }) => {
+      tries.push(serializedTransaction);
+      if (refusals-- > 0) throw new Error('The method "eth_sendRawTransaction" does not exist / is not available.');
+      const h = keccak256(serializedTransaction); rpc.sent.push(serializedTransaction); rpc.receipts.set(h, receipt(h, "success", logsFor(h, payload.authorization))); return h;
+    };
+    expect(await settle()).toMatchObject({ state: "COMPLETED", txHash: keccak256(tries[0]) });
+    expect(tries).toHaveLength(3); expect(new Set(tries).size).toBe(1); // one signature, one hash, one nonce
+    expect(saved().tx_hash).toBe(keccak256(tries[0]));
+    // three refusals: recorded with the attempts, the row stays PENDING on the same hash (re-examined by the worker)
+    db = openDb(":memory:");
+    run(db, "INSERT INTO payments (request_id, payment_identifier, network, asset, payer, auth_nonce, state, created_at, updated_at, backend, created_block) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      REQ, "ap_request-relay-00001", "eip155:5042002", USDC, buyer.address.toLowerCase(), payload.authorization.nonce, "SUBMITTED", new Date().toISOString(), new Date().toISOString(), "relay", 900);
+    const refused: Hex[] = []; rpc.receipts.clear();
+    rpc.sendRawTransaction = async ({ serializedTransaction }) => { refused.push(serializedTransaction); throw new Error('The method "eth_sendRawTransaction" does not exist / is not available.'); };
+    expect(await settle()).toMatchObject({ state: "PENDING" });
+    expect(refused).toHaveLength(3); expect(new Set(refused).size).toBe(1);
+    expect(saved()).toMatchObject({ state: "PENDING", tx_hash: keccak256(refused[0]) });
+    expect(JSON.parse(saved().last_response_json).reason).toMatch(/^the node did not confirm taking the relay transaction \(3 identical attempt\(s\): The method "eth_sendRawTransaction" does not exist/);
+  });
   it("signs a fresh transaction when the relayer nonce was consumed elsewhere, but settles the same authorization exactly once", async () => {
     expect((await settle()).state).toBe("PENDING");
     const stale = saved().tx_hash;
