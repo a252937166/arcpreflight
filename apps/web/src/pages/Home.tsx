@@ -56,7 +56,7 @@ export default function Home() {
                 <div><dt><span>GET</span><code>{apiPath("/v1/wallet/attempts/{id}")}</code></dt><dd>Follow the original attempt, its transaction and the order outcome.</dd></div>
                 <div><dt><span>GET</span><code>{apiPath("/v1/wallet/attempts/{id}/passport")}</code></dt><dd>Export the records for independent verification.</dd></div>
               </dl>
-              <a href={apiPath("/openapi.json")} target="_blank" rel="noreferrer" className="btn sm">Open API reference</a>
+              <Link to={link("/api")} className="btn sm">Open API reference</Link>
             </div>
           </div>
         </div>

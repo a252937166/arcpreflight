@@ -11,6 +11,7 @@ import { MATRIX, STAGES, WAYS, WayTiles, Snippet, stageLabel, wayById, type Way 
 import lifecycleDownload from "../../../../docs/LIFECYCLE.md?url";
 import requestContractsDownload from "../../../../packages/schema/src/types.ts?url";
 import authorizationHelperDownload from "../../../../packages/client/src/eip3009.ts?url";
+import walletHelperDownload from "../../../../packages/client/src/walletExecute.ts?url";
 
 const REPOSITORY = "https://github.com/a252937166/arcpreflight";
 /** a published wallet passport and its anchors, used for the captured verifier run below */
@@ -132,27 +133,53 @@ export TOKEN=…`;
 #   GET  …/{id} until CONFIRMED
 #   a lost answer → POST …/{id}/recover, never a second payment`;
 
+  const walletHelper = `// packages/client/src/walletExecute.ts (download below): the hand-over
+// the site performs, for your own code — one instance, one session
+import { executeValidatedAttempt } from "@arcpreflight/client";
+const r = await executeValidatedAttempt({
+  api: "${apiBase}", token: TOKEN,
+  attemptId, provider: window.ethereum,   // any EIP-1193 provider
+});
+// it reads the attempt; converts the plan to the wallet's fields
+// (hex value, gas, fees, type 2, chainId; no nonce); checks the
+// account, the chain and the window; claims the prompt (claimId);
+// checks again; eth_sendTransaction; reports the hash at once.
+switch (r.outcome) {
+  case "sent": /* r.txHash; observe GET …/{id} until it closes */ break;
+  case "not-prompted": /* r.check.code: ACCOUNT_CHANGED, CHAIN_CHANGED,
+     WINDOW_CLOSED, ATTEMPT_UNCERTAIN … nothing was asked */ break;
+  case "claimed-elsewhere": /* another tab holds the claim: recover */ break;
+  case "abandoned": /* the wallet prompt was rejected: NOT_SENT */ break;
+  case "unknown-submission": /* marked and reconciled; never re-prompt */ break;
+}`;
   const setupCheckout = `git clone --recurse-submodules \\
   https://github.com/a252937166/arcpreflight && cd arcpreflight
 pnpm install && (cd packages/contracts && forge build)
-# Node 22.6 or newer, pnpm and Foundry`;
+# Node 22.6 or newer, pnpm and Foundry. The public repository holds an
+# older release than this site; the commands below exist in both.`;
   const verifyPublished = `E=${apiBase}/v1/evidence/selftest/passports
 P=testnet-wallet-2026-10-10T07-35-28-806Z
 curl -sO "$E/$P.passport.json" && curl -sO "$E/$P.anchors.json"
-pnpm exec arcpreflight-verify $P.passport.json \\
+pnpm exec tsx packages/verifier/src/cli.ts $P.passport.json \\
   --rpc ${rpc} --anchors $P.anchors.json
-# no API, no token, no key: exit 0 when nothing fails, 2 on a FAIL
-# --json for machines; without --rpc the online findings stay UNVERIFIED`;
+# run from the checkout's root; no API, no token, no key
+# exit 0 when nothing fails, 2 on a FAIL; --json for machines
+# without --rpc the online findings stay UNVERIFIED`;
   const runAgent = `# against your own testnet API (README): the runner key pays
-# the check fee and the order
-A="pnpm exec tsx examples/merchant-agent/src/run.ts"
+# the check fee and the order; run from the checkout's root
 ARC_NET=testnet API_URL=http://127.0.0.1:4040 \\
-RUNNER_TOKEN=… BASELINE_DIGEST_MAIN=0x… $A run APPROVED_PAYMENT
+RUNNER_TOKEN=… BASELINE_DIGEST_MAIN=0x… \\
+  pnpm exec tsx examples/merchant-agent/src/run.ts run APPROVED_PAYMENT
 # the same, stopping right after the send, like a crash:
-#   … $A run APPROVED_PAYMENT --crash-after-broadcast
-ARC_NET=testnet $A reconcile   # resolves open attempts; never re-signs
-ARC_NET=testnet $A list
-ARC_NET=testnet $A passport <attemptId> --out ./passport`;
+ARC_NET=testnet API_URL=http://127.0.0.1:4040 \\
+RUNNER_TOKEN=… BASELINE_DIGEST_MAIN=0x… \\
+  pnpm exec tsx examples/merchant-agent/src/run.ts run APPROVED_PAYMENT \\
+  --crash-after-broadcast
+# resolve open attempts from the store; never re-signs
+ARC_NET=testnet pnpm exec tsx examples/merchant-agent/src/run.ts reconcile
+ARC_NET=testnet pnpm exec tsx examples/merchant-agent/src/run.ts list
+ARC_NET=testnet pnpm exec tsx examples/merchant-agent/src/run.ts \\
+  passport <attemptId> --out ./passport`;
 
   return (
     <div className="ways-page">
@@ -225,6 +252,7 @@ ARC_NET=testnet $A passport <attemptId> --out ./passport`;
               <Snippet label="Create an order for your wallet (0.05 USDC on the MAIN proxy)" code={createOrder} />
               <Snippet label="Quote the check, pay its fee, receive the report" code={quoteCheck} note="the data is pay(orderId) on the DemoMerchant proxy; every field is defined in the request schema below" />
               <Snippet label="Validate, claim the prompt, sign, report the hash, recover" code={executeAttempt} />
+              <Snippet label="The same hand-over from your own code: the wallet helper" code={walletHelper} note={<>the helper is <a href={walletHelperDownload} download="arcpreflight-walletExecute.ts">one file without dependencies</a>, tested in <code>packages/client/test/walletExecute.test.ts</code>; the site's Developer page runs the same checks</>} />
             </div>
           </div>
         </div>
@@ -232,16 +260,16 @@ ARC_NET=testnet $A passport <attemptId> --out ./passport`;
 
       <section id="cli" className="way" style={hue(cli)} tabIndex={-1} aria-labelledby="way-cli">
         <div className="container">
-          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-cli">Command line</h2><p className="muted">Two programs in the repository. The verifier needs only a passport, an Arc RPC and anchors you trust. The reference agent runs the lifecycle from a durable store and restarts into recovery. Not on npm; the public repository holds an earlier release.</p></div></div>
+          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-cli">Command line</h2><p className="muted">Two programs in the repository, run with <code>pnpm exec tsx</code> from the checkout's root: nothing is on npm, and the public repository holds an older release than this site. The verifier needs only a passport, an Arc RPC and anchors you trust. The reference agent runs the lifecycle from a durable store and restarts into recovery.</p></div></div>
           <div className="way-body">
             <div className="stack" style={{ gap: 14 }}>
               <h3>What it does</h3>
               <dl className="fn-list">
-                <div><dt><code>arcpreflight-verify &lt;passport&gt; --rpc --anchors</code></dt><dd>Re-hashes, re-reads the chain, checks the anchors. Exit 0, or 2 on a FAIL.</dd></div>
-                <div><dt><code>merchant-agent run &lt;FIXTURE&gt;</code></dt><dd>Order, report, decision, validation, signature, broadcast, outcome, receipts.</dd></div>
-                <div><dt><code>merchant-agent run … --crash-after-broadcast</code></dt><dd>Stops right after the send, like a crash.</dd></div>
-                <div><dt><code>merchant-agent reconcile</code></dt><dd>Resolves open attempts; the only way a crashed run continues.</dd></div>
-                <div><dt><code>merchant-agent list · passport &lt;id&gt;</code></dt><dd>Lists stored runs; exports one as a passport.</dd></div>
+                <div><dt><code>pnpm exec tsx packages/verifier/src/cli.ts &lt;passport&gt; --rpc --anchors</code></dt><dd>Re-hashes, re-reads the chain, checks the anchors. Exit 0, or 2 on a FAIL.</dd></div>
+                <div><dt><code>pnpm exec tsx examples/merchant-agent/src/run.ts run &lt;FIXTURE&gt;</code></dt><dd>Order, report, decision, validation, signature, broadcast, outcome, receipts.</dd></div>
+                <div><dt><code>… run.ts run &lt;FIXTURE&gt; --crash-after-broadcast</code></dt><dd>Stops right after the send, like a crash.</dd></div>
+                <div><dt><code>… run.ts reconcile</code></dt><dd>Resolves open attempts; the only way a crashed run continues.</dd></div>
+                <div><dt><code>… run.ts list · … run.ts passport &lt;attemptId&gt; --out &lt;dir&gt;</code></dt><dd>Lists stored runs; exports one as a passport.</dd></div>
               </dl>
               <p className="muted">Fixtures: <code>APPROVED_PAYMENT</code>, <code>CHANGED_IMPLEMENTATION</code>, <code>AMOUNT_UNIT_MISMATCH</code>. A run spends the runner key's testnet funds.</p>
             </div>
@@ -289,6 +317,7 @@ ARC_NET=testnet $A passport <attemptId> --out ./passport`;
             <a href={lifecycleDownload} download="arcpreflight-lifecycle.md" className="btn sm">Lifecycle contract</a>
             <a href={requestContractsDownload} download="arcpreflight-schema.ts" className="btn sm">Request schemas</a>
             <a href={authorizationHelperDownload} download="arcpreflight-eip3009.ts" className="btn sm">EIP-3009 signing helper</a>
+            <a href={walletHelperDownload} download="arcpreflight-walletExecute.ts" className="btn sm">Wallet execution helper</a>
             <a href={REPOSITORY} target="_blank" rel="noreferrer" className="btn sm">Repository</a>
           </div>
           <div className="ways-close">

@@ -3,6 +3,9 @@ import { finalValidationDigest, transactionPlanDigest, quoteDigest } from "@arcp
 import { ORDER_PAID_TOPIC } from "@arcpreflight/runner";
 import { fromBundle } from "@arcpreflight/passport";
 import { openDb, run, type Db } from "../src/db.js";
+import { openapi } from "../src/openapi.js";
+import { checkSchema } from "./helpers/schema.js";
+const DOC: any = openapi({ releaseSha: "test", profile: "SUBMISSION_RESTRICTED", caip2: "eip155:5042002" }); // every real view below is checked against the published schema
 import { syntheticRun, PAYER, MERCHANT, ORDER_ID, USDC } from "../../../packages/passport/test/fixture.js";
 
 // Wallet execution (design v3.3 §3, AP33-07/08/09/10): durable attempts, after-the-fact plan comparison and reconciliation from the
@@ -58,6 +61,7 @@ const minedReceipt = (hash = HASH, status = "success") => ({ transactionHash: ha
 async function validated(): Promise<string> {
   const r = await createWalletAttempt(db, OWNER, "c1", body());
   expect(r.ok).toBe(true); if (!r.ok) throw new Error("not validated");
+  expect(checkSchema(DOC, "Attempt", r.attempt)).toEqual([]); // a VALIDATED attempt as POST /v1/wallet/attempts answers it
   return (r.attempt as any).attemptId as string;
 }
 beforeEach(() => {
@@ -149,6 +153,7 @@ describe("reported hash → outcome from the receipt, the order and the OrderPai
     const rpc = fakeRpc({ tx: planTx({ input: "0xdeadbeef", gas: 70_000n }), receipt: minedReceipt(), paid: false });
     const r = await markSent(db, OWNER, id, HASH, rpc);
     expect(r.ok).toBe(true); if (!r.ok) return;
+    expect(checkSchema(DOC, "Attempt", r.attempt)).toEqual([]); // a MISMATCH attempt as POST …/sent answers it
     expect(r.attempt).toMatchObject({ state: "MISMATCH", businessStatus: "FAILED", deviations: { mismatch: ["data"], deviations: { gasLimit: { plan: R.plan!.gasLimit, actual: "70000" } } } });
     expect(r.attempt.note).toContain("deviates from the validated plan in data");
   });
@@ -182,6 +187,7 @@ describe("reported hash → outcome from the receipt, the order and the OrderPai
     backdate();
     const r = await observeAttempt(db, OWNER, id, fakeRpc({ tx: planTx(), consumed: { nonce: n, block: 65_999_999n, hash: OTHER }, receipts: { [OTHER.toLowerCase()]: { transactionHash: OTHER, status: "success", blockNumber: 65_999_999n, logs: [] } } }));
     expect(r.ok && r.attempt).toMatchObject({ state: "NOT_MINED", businessStatus: "NOT_EXECUTED", businessTxHash: null, note: expect.stringContaining(OTHER) });
+    expect(r.ok && checkSchema(DOC, "Attempt", r.attempt)).toEqual([]); // the full observed view, nulls where the schema says so
     expect(r.ok && (r.attempt as any).execution).toMatchObject({ chainStatus: "UNKNOWN", businessStatus: "NOT_EXECUTED" });
   });
   it("a lagging node (testnet 2026-10-08): the nonce reads consumed and the receipt is hidden, but the block scan finds the reported hash → wait, then CONFIRMED when the receipt appears", async () => {
@@ -260,6 +266,7 @@ describe("review round 2 — recovery needs the receipt and the plan, reconcile-
     expect(getAttemptRow(db, id)!.note).toBeNull();
     const r = await recoverAttempt(db, OWNER, id, fakeRpc({ paid: false }));
     expect(r.ok && r.attempt).toMatchObject({ state: "VALIDATED", note: expect.stringContaining("recovery found no payment for this order yet") });
+    expect(r.ok && checkSchema(DOC, "Attempt", r.attempt)).toEqual([]); // the recovered view
     const paidNow = fakeRpc({ paid: true, receipt: minedReceipt(OTHER), txs: { [OTHER.toLowerCase()]: planTx({ hash: OTHER }) }, logs: [{ transactionHash: OTHER, blockNumber: "0x3ef1a0a" }] });
     const r2 = await recoverAttempt(db, OWNER, id, paidNow);
     expect(r2.ok && r2.attempt).toMatchObject({ state: "CONFIRMED", businessStatus: "SUCCESS", businessTxHash: OTHER });

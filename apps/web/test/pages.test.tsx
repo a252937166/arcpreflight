@@ -1838,7 +1838,7 @@ describe("how to use (usage guide, 2026-10-10) · three ways in, one lifecycle",
     expect(rowHeads(tree)).toHaveLength(7); expect(cells(tree)).toHaveLength(21); // seven stages × three ways
     expect(new Set(cells(tree).map((c) => c.props["data-way"]))).toEqual(new Set(["HTTP API", "Command line", "Browser"]));
     const text = content(tree);
-    expect(text).toContain("POST /v1/preflight"); expect(text).toContain("arcpreflight-verify"); expect(text).toContain("run.ts reconcile"); expect(text).toContain("No API call"); // a route, two commands, an honest cell
+    expect(text).toContain("POST /v1/preflight"); expect(text).toContain("packages/verifier/src/cli.ts"); expect(text).toContain("run.ts reconcile"); expect(text).toContain("No API call"); // a route, two commands, an honest cell
     expect(nodes(tree).filter((n) => n.props?.className === "m-step").map((n) => n.props.to)).toEqual(["/developer", "/developer", "/developer", "/developer", "/developer", "/developer", "/verify"]); // the browser way links to the page that holds the step
     const cardNode = fnNode(tree, "InstanceCard"); expect(cardNode.props.apiBase).toBe("http://offline.invalid"); expect(cardNode.props.counts).toEqual({ runs: 38, files: 3 }); // the live counts arrived
     const facts = content(cardNode.type(cardNode.props)); // the card uses no hooks: call it to read what it renders
@@ -1846,6 +1846,10 @@ describe("how to use (usage guide, 2026-10-10) · three ways in, one lifecycle",
     const snips = snippets(tree); expect(snips.length).toBeGreaterThanOrEqual(9);
     expect(snips[0].props.code).toContain("http://offline.invalid/v1/network"); // the commands carry this instance's origin
     expect(snips.find((n) => n.props.label.includes("printed"))?.props.output).toBe(true); // the captured verifier run is shown as output, not as a command
+    const commands = snips.filter((n) => !n.props.output).map((n) => n.props.code).join("\n");
+    expect(commands).toContain("pnpm exec tsx packages/verifier/src/cli.ts"); expect(commands).toContain("pnpm exec tsx examples/merchant-agent/src/run.ts reconcile"); // commands that run as written from the checkout
+    expect(commands).not.toMatch(/\$A\b|arcpreflight-verify/); // no shell variable standing in for a command, no bin that the root does not expose
+    expect(snips.some((n) => n.props.label.includes("wallet helper") && n.props.code.includes("executeValidatedAttempt"))).toBe(true); // the hand-over helper, shown in use
     expect(text).toContain("MCP: this release has no MCP server"); // honest about what does not exist
     expect(nodes(tree).filter((n) => n.props?.className === "way").map((n) => n.props.id)).toEqual(["api", "cli", "browser"]);
   });

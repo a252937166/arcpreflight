@@ -3,6 +3,9 @@ import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { type Hex } from "viem";
 import { BaselineCore, baselineDigest, IntentCore, reportDigest, ReportCore } from "@arcpreflight/schema";
+import { openapi } from "../src/openapi.js";
+import { check } from "./helpers/schema.js";
+const DOC: any = openapi({ releaseSha: "test", profile: "SUBMISSION_RESTRICTED", caip2: "eip155:5042002" }); // real route answers below are checked against the published schema
 const mocks = vi.hoisted(() => ({ relay: vi.fn(), paused: vi.fn(), build: vi.fn(), order: vi.fn(), listOrders: vi.fn(), getOrder: vi.fn(), startRun: vi.fn(), attempt: vi.fn(), sent: vi.fn(), abandon: vi.fn(), observe: vi.fn(), recover: vi.fn(), listAttempts: vi.fn(), walletPassport: vi.fn(), recoverOrder: vi.fn() }));
 vi.mock("../src/config.js", () => ({ cfg: {
   dbPath: ":memory:", root: "/tmp/arcpreflight-offline-test", net: "testnet", chainId: 5042002, caip2: "eip155:5042002", usdc: "0x3600000000000000000000000000000000000000", publicBaseUrl: "http://offline.invalid", port: 4040, profile: "SUBMISSION_RESTRICTED", releaseSha: "test",
@@ -312,6 +315,7 @@ describe("history lists (design v3.2 §6: records a developer can come back to)"
     expect(await call("GET", "/v1/requests", undefined, "other-token")).toMatchObject({ status: 200, body: { requests: [] } });
     const mine = await call("GET", "/v1/requests");
     expect(mine.status).toBe(200); expect(mine.body.requests).toHaveLength(1);
+    expect(check(DOC, "get", "/v1/requests", 200, mine.body)).toEqual([]); // the check history as served
     expect(mine.body.requests[0]).toMatchObject({ requestId: quoted.body.requestId, state: "DELIVERED", subject: merchant, payment: { state: "COMPLETED", backend: "relay", transaction: T }, passportAvailable: true });
     expect(mocks.relay).toHaveBeenCalledTimes(1); // listing reconciles nothing
   });
@@ -464,9 +468,11 @@ describe("open self-service through anonymous sessions (user decision 2026-10-08
     const { clientKey } = await import("../src/demo.js"); vi.mocked(clientKey).mockReturnValue("client-session-test");
     const made = await call("POST", "/v1/session", undefined, null);
     expect(made.status).toBe(201); expect(made.body.token).toMatch(/^vs_[0-9a-f]{48}$/); expect(made.body.principal).toMatch(/^visitor:/);
+    expect(check(DOC, "post", "/v1/session", 201, made.body)).toEqual([]); // the session as served
     const intent = makeIntent();
     const quoted = await call("POST", "/v1/preflight", { intent }, made.body.token);
     expect(quoted.status).toBe(402);
+    expect(check(DOC, "post", "/v1/preflight", 402, quoted.body)).toEqual([]); // the quote as served
     expect(await call("GET", "/v1/requests", undefined, made.body.token)).toMatchObject({ status: 200, body: { requests: [{ requestId: quoted.body.requestId }] } });
     const other = await call("POST", "/v1/session", undefined, null);
     expect(await call("GET", `/v1/requests/${quoted.body.requestId}`, undefined, other.body.token)).toMatchObject({ status: 404 }); // another visitor's session cannot see it

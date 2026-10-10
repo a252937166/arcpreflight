@@ -103,7 +103,7 @@ export default function Evidence() {
               <h3>Published evidence files</h3>
               <EvidenceFiles files={files} href={(path) => apiPath(`/v1/evidence/${path}`)} />
             </div>
-            <p className="small muted">API: <a href={apiPath("/openapi.json")} target="_blank" rel="noreferrer">{apiPath("/openapi.json")}</a> · <a href={apiPath("/health/ready")} target="_blank" rel="noreferrer">{apiPath("/health/ready")}</a> · <a href={apiPath("/v1/network")} target="_blank" rel="noreferrer">{apiPath("/v1/network")}</a> · <a href={apiPath("/v1/demo/runs")} target="_blank" rel="noreferrer">{apiPath("/v1/demo/runs")}</a></p>
+            <p className="small muted">API: <Link to={link("/api")}>API reference</Link> · <a href={apiPath("/health/ready")} target="_blank" rel="noreferrer">{apiPath("/health/ready")}</a> · <a href={apiPath("/v1/network")} target="_blank" rel="noreferrer">{apiPath("/v1/network")}</a> · <a href={apiPath("/v1/demo/runs")} target="_blank" rel="noreferrer">{apiPath("/v1/demo/runs")}</a></p>
           </div>
         </div>
 

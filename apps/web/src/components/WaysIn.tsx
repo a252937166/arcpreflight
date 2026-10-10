@@ -20,7 +20,7 @@ export const STAGES: readonly LifecycleId[] = ["order", "approve", "check", "exe
 export const MATRIX: Record<LifecycleId, Record<WayId, Cell>> = {
   order: {
     api: { code: ["POST /v1/session", "POST /v1/demo/orders", "GET /v1/demo/orders/{orderId}"], text: "A session once, then your order, read back until confirmed." },
-    cli: { code: ["run.ts run APPROVED_PAYMENT"], text: "Creates the order with the order-creator key; the identity is stored first." },
+    cli: { code: ["pnpm exec tsx examples/merchant-agent/src/run.ts run APPROVED_PAYMENT"], text: "Creates the order with the order-creator key; the identity is stored first." },
     browser: { step: "Wallet workflow · step 1", to: "/developer", text: "The order dialog. The live demo creates its own." },
   },
   approve: {
@@ -30,27 +30,27 @@ export const MATRIX: Record<LifecycleId, Record<WayId, Cell>> = {
   },
   check: {
     api: { code: ["POST /v1/preflight → 402 quote", "POST /v1/preflight + payment", "GET /v1/requests/{requestId}"], text: "A quote, one EIP-3009 fee authorization, the same intent again, the report." },
-    cli: { code: ["run.ts run <FIXTURE>"], text: "Buys the pinned report over x402 and applies the policy." },
+    cli: { code: ["… run.ts run <FIXTURE>"], text: "Buys the pinned report over x402 and applies the policy." },
     browser: { step: "Wallet workflow · step 3", to: "/developer", text: "Quote, sign the fee, read the report and the decision." },
   },
   execute: {
-    api: { code: ["POST /v1/wallet/attempts", "POST /v1/wallet/attempts/{id}/prompt", "POST /v1/wallet/attempts/{id}/sent"], text: "Validate the exact plan, claim the prompt, report the hash." },
-    cli: { code: ["run.ts run <FIXTURE> --crash-after-broadcast"], text: "Re-validates, signs exactly the plan, sends. The flag rehearses a crash." },
+    api: { code: ["POST /v1/wallet/attempts", "POST /v1/wallet/attempts/{id}/prompt", "POST /v1/wallet/attempts/{id}/sent"], text: "Validate the exact plan, claim the prompt, report the hash. The wallet helper does all of it." },
+    cli: { code: ["… run.ts run <FIXTURE> --crash-after-broadcast"], text: "Re-validates, signs exactly the plan, sends. The flag rehearses a crash." },
     browser: { step: "Wallet workflow · step 4", to: "/developer", text: "Execute with your wallet: it signs the validated plan, nothing else." },
   },
   recover: {
     api: { code: ["POST /v1/wallet/attempts/{id}/recover", "GET /v1/wallet/attempts/{id}", "POST /v1/requests/{requestId}/recover"], text: "Reconcile from the hash and the order. Abandon only a known rejection." },
-    cli: { code: ["run.ts reconcile", "run.ts list"], text: "Open attempts resolved from the store and the chain, never re-signed." },
+    cli: { code: ["… run.ts reconcile", "… run.ts list"], text: "Open attempts resolved from the store and the chain, never re-signed." },
     browser: { step: "Wallet workflow · step 5", to: "/developer", text: "Recover here or on the recovery desk. Nothing is paid twice." },
   },
   passport: {
     api: { code: ["GET /v1/wallet/attempts/{id}/passport", "GET /v1/requests/{requestId}/passport", "GET /v1/demo/runs/{runId}/passport"], text: "The passport of an attempt, a paid check or a public run." },
-    cli: { code: ["run.ts passport <attemptId> --out <dir>"], text: "A stored run exported as a passport directory." },
+    cli: { code: ["… run.ts passport <attemptId> --out <dir>"], text: "A stored run exported as a passport directory." },
     browser: { step: "Wallet workflow · step 6", to: "/developer", text: "Download your passport. Every demo run offers its own." },
   },
   verify: {
     api: { text: "No API call: the passport is self-contained." },
-    cli: { code: ["arcpreflight-verify passport.json --rpc <rpc> --anchors anchors.json"], text: "Re-hash, re-read the chain, check the anchors. Exit 0 when nothing fails." },
+    cli: { code: ["pnpm exec tsx packages/verifier/src/cli.ts passport.json --rpc <rpc> --anchors anchors.json"], text: "Re-hash, re-read the chain, check the anchors. Exit 0 when nothing fails." },
     browser: { step: "Verify page", to: "/verify", text: "The same checks in this browser, labelled as not independent." },
   },
 };

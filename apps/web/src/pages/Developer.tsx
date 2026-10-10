@@ -744,7 +744,7 @@ export default function Developer() {
 
         <div className="integration-workbench-link row between">
           <div className="stack" style={{ gap: 4 }}><h3>Use this workflow in your app.</h3><p className="small muted">Follow the HTTP lifecycle, API examples and repository CLI commands in the integration guide.</p></div>
-          <Link to={link("/integrate")} className="btn">API & CLI guide →</Link>
+          <Link to={link("/integrate")} className="btn">How to use</Link>
         </div>
       </div>
     </section>

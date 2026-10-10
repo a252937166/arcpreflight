@@ -22,7 +22,12 @@ export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 export const opId = (method: string, path: string) => `op-${method}-${path.replace(/[{}]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 
 /** the name a `$ref` points at, or null for an inline schema */
-export const refName = (schema: Schema | null | undefined): string | null => (schema && typeof schema.$ref === "string" ? /^#\/components\/schemas\/([^/]+)$/.exec(schema.$ref)?.[1] ?? null : null);
+export const refName = (schema: Schema | null | undefined): string | null => {
+  if (!schema) return null;
+  if (typeof schema.$ref === "string") return /^#\/components\/schemas\/([^/]+)$/.exec(schema.$ref)?.[1] ?? null;
+  if (Array.isArray(schema.allOf) && schema.allOf.length === 1) return refName(schema.allOf[0]); // `{ allOf: [ref], nullable }`: a reference that may be null
+  return null;
+};
 export const schemaId = (name: string) => `schema-${name.replace(/[^a-zA-Z0-9]+/g, "-")}`;
 /** `#/components/schemas/Name` → the schema; anything else → the input */
 export function resolve(doc: any, schema: Schema | null | undefined): Schema | null {
@@ -40,10 +45,14 @@ const typeOf = (s: Schema): string => {
  *  descriptions as trailing comments. Depth-limited; references resolved against the document's components. */
 export function skeleton(doc: any, schema: Schema | null | undefined, depth = 0): string {
   const s = resolve(doc, schema); if (!s) return "…";
+  const text = skeletonOf(doc, s, depth);
+  return s.nullable || schema?.nullable ? (text.startsWith("{") || text.startsWith("[") ? `${text} | null` : `${text} | null`) : text;
+}
+function skeletonOf(doc: any, s: Schema, depth: number): string {
   const pad = "  ".repeat(depth);
   const comment = (d: unknown) => (typeof d === "string" && d.length <= 90 ? `  // ${d}` : "");
   if (Array.isArray(s.oneOf) || Array.isArray(s.anyOf)) return (s.oneOf ?? s.anyOf).map((x: Schema) => skeleton(doc, x, depth)).join(`\n${pad}| `);
-  if (s.allOf) return skeleton(doc, Object.assign({}, ...s.allOf.map((x: Schema) => resolve(doc, x) ?? {})), depth);
+  if (s.allOf) return skeletonOf(doc, Object.assign({}, ...s.allOf.map((x: Schema) => resolve(doc, x) ?? {})), depth);
   if (s.type === "array" || s.items) return `[ ${skeleton(doc, s.items, depth)} ]`;
   if (s.type === "object" || s.properties || s.additionalProperties) {
     if (depth >= 4) return "{ … }";

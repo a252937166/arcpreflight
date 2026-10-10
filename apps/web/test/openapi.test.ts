@@ -35,5 +35,7 @@ describe("the API reference model", () => {
     const net = skeleton(DOC, { $ref: "#/components/schemas/Network" });
     expect(net.startsWith(`{\n  "network?": "mainnet" | "testnet"\n  "nested?": {`)).toBe(true); expect(net).toContain("{ … }"); // the self-reference stops at depth 4
     expect(skeleton(DOC, { $ref: "#/components/schemas/Missing" })).toBe("any"); expect(skeleton(DOC, null)).toBe("…");
+    expect(skeleton(DOC, { type: "string", nullable: true })).toBe("string | null"); expect(skeleton(DOC, { type: "object", properties: { a: { type: "integer", nullable: true } } })).toBe(`{\n  "a?": integer | null\n}`);
+    expect(refName({ allOf: [{ $ref: "#/components/schemas/Network" }], nullable: true })).toBe("Network"); // a reference that may be null still links to its schema
   });
 });

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDb } from "../src/db.js";
+import { openapi } from "../src/openapi.js";
+import { check, checkSchema } from "./helpers/schema.js";
+const DOC: any = openapi({ releaseSha: "test", profile: "SUBMISSION_RESTRICTED", caip2: "eip155:5042002" }); // real runs and orders below are checked against the published schema
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -192,6 +195,7 @@ describe("order identity before the send (design v3.3 §2, AP33-05)", () => {
       await store.confirmed(created); return created;
     });
     const r = await createOrderFor(db, ORDER_IN("client-a", { amountNativeAtomic: 7_000_000_000_000_000n, reference: "invoice #42" }));
+    { const { ok: _ok, status: _status, ...created } = r as any; expect(checkSchema(DOC, "OrderCreated", created)).toEqual([]); } // the 201 body as POST /v1/demo/orders sends it
     expect(r).toMatchObject({ ok: true, orderId: "0x" + "ab".repeat(32), amountNativeAtomic: "7000000000000000", reference: "invoice #42", state: "CONFIRMED", owner: "visitor:client-a" });
     expect(seen).toEqual(["PLANNED", "SENT"]);
     const o = db.prepare("SELECT * FROM orders").get() as any;
@@ -222,6 +226,7 @@ describe("order identity before the send (design v3.3 §2, AP33-05)", () => {
     if (started.ok) {
       expect(db.prepare("SELECT state, run_id, proxy FROM orders").get()).toMatchObject({ state: "CONFIRMED", run_id: started.runId, proxy: "CHANGED" });
       const shaped = getRun(db, started.runId)!;
+      expect(check(DOC, "get", "/v1/demo/runs/{runId}", 200, shaped)).toEqual([]); // the run view as GET answers it
       expect(shaped.order).toMatchObject({ orderId: "0x" + "ad".repeat(32), state: "CONFIRMED" });
       expect(shaped.outcome).toMatchObject({ kind: "REVIEW_REQUIRED", source: "decision" });
     }
@@ -262,6 +267,7 @@ describe("artefacts, interruption and store-derived outcomes (design v3.3 §4, A
     expect(open.businessExecution).toMatchObject({ state: "BROADCAST_ATTEMPTED", txHash: R.execution.businessTxHash!.toLowerCase() });
     expect(open.outcome).toMatchObject({ kind: "BROADCAST_UNRESOLVED", source: "store" }); // AP33-06: never "nothing sent" while the store says a broadcast was attempted
     expect(open.result?.intent).toBeTruthy(); expect(open.result?.report).toBeTruthy(); expect(open.result?.decision).toBeTruthy();
+    expect(check(DOC, "get", "/v1/demo/runs", 200, listRuns(db))).toEqual([]); expect(check(DOC, "get", "/v1/demo/runs/{runId}", 200, open)).toEqual([]); // the list and the open run as served
     expect(listRuns(db).runs[0]).toMatchObject({ runId: started.runId, businessExecutionState: "BROADCAST_ATTEMPTED", outcome: "BROADCAST_UNRESOLVED", passportAvailable: true });
     // reconciliation from the original hash and the order state completes the record
     const rc = F.receipts[R.execution.businessTxHash!.toLowerCase()]; // the fixture mined the business transaction
