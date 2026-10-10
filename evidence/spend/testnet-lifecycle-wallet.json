@@ -1,12 +1,12 @@
 {
-  "updatedAt": "2026-10-10T03:00:56.728Z",
+  "updatedAt": "2026-10-10T07:53:17.769Z",
   "label": "lifecycle-wallet",
   "network": "testnet",
   "perTxCapUsdc": "0.03",
-  "totalCapUsdc": "0.05",
+  "totalCapUsdc": "0.1",
   "maxFeeCeilingGwei": "40",
-  "committedUsdc": "0.0320182",
-  "remainingUsdc": "0.0179818",
+  "committedUsdc": "0.0580273",
+  "remainingUsdc": "0.0419727",
   "entries": [
     {
       "purpose": "check fee authorization",
@@ -43,6 +43,33 @@
       "status": "settled",
       "txHash": "0x1bb6d9df9b65096103fac0b46d648ec75e5cd0a8bfda06978fa07973459d8df8",
       "at": "2026-10-10T03:00:51.212Z"
+    },
+    {
+      "purpose": "check fee authorization",
+      "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+      "worstNativeAtomic": "10000000000000000",
+      "actualNativeAtomic": "10000000000000000",
+      "status": "settled",
+      "txHash": null,
+      "at": "2026-10-10T07:35:47.705Z"
+    },
+    {
+      "purpose": "business payment",
+      "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+      "worstNativeAtomic": "6181315000000000",
+      "actualNativeAtomic": "6009100000000000",
+      "status": "settled",
+      "txHash": "0xfa6167aabf67467f117672aa7a52fae830da6753785579f809cc9384019a1339",
+      "at": "2026-10-10T07:36:04.762Z"
+    },
+    {
+      "purpose": "check fee authorization",
+      "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+      "worstNativeAtomic": "10000000000000000",
+      "actualNativeAtomic": "10000000000000000",
+      "status": "settled",
+      "txHash": null,
+      "at": "2026-10-10T07:53:15.049Z"
     }
   ]
 }

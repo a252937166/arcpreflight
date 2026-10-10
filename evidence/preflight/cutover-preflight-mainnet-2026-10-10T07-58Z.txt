@@ -1,0 +1,92 @@
+== release: last commit that changed what runs on the server (code paths: apps packages package.json pnpm-lock.yaml pnpm-workspace.yaml)
+release 00f9eb0 (2026-10-10T03:54:26-04:00 fix(lifecycle): resume an interrupted lifecycle invocation from durable identities i)
+working tree clean in code paths and fixtures
+== Arc mainnet RPC
+chainId 5042 · head 25209226 · gasPrice 20.000001003 gwei
+== project keys on mainnet (native USDC, 18-dec) · nonce latest/pending
+deployer-admin 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA 4.499159999957958 USDC · nonce 2/2
+order-creator 0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b 0.0 USDC · nonce 0/0
+demo-runner 0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE 5.0 USDC · nonce 0/0
+merchant-payto 0x06873b35575D6A22eC8008f30F56c71C19BeE7b0 0.5 USDC · nonce 0/0
+visitor-rehearsal 0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2 0.0 USDC · nonce 0/0
+fixtures/deployments-mainnet.json: absent (nothing deployed by this project yet)
+== server (read-only)
+ARC_NET=testnet
+PORT=4040
+RELEASE_SHA=00f9eb0
+DB_PATH=/opt/arcpreflight/data/arcpreflight-testnet-v33.sqlite
+demo-runner.json
+merchant-payto.json
+order-creator.json
+no testnet instance env yet
+== public API now
+network eip155:5042002 release 00f9eb0 access {'selfService': True, 'session': '/v1/session', 'publicExecution': True, 'walletExecution': True, 'executionReady': True, 'operatorAcceptance': False, 'note': 'any visitor: anonymous session, own orders, paid checks, wallet execution with after-the-fact plan comparison, recovery, private passports'}
+== plan ledger (read-only): what every step committed across its invocations, pending, remaining budget
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0 · remaining 0.69
+  deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (new record; a dry run does not write it: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+== fund preflight
+network=mainnet chainId=5042 mode=PREFLIGHT (read-only; nothing is signed)
+from deployer-admin 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 4.499159999957958 USDC nonce 2 · max fee 24.000001003 gwei · caps 0.2 per transfer, 0.2 total (gas included) · ledger /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/mainnet-fund.json (0 committed)
+  → order-creator      0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b +0.1 USDC · gas 21000 (limit 25200) · worst 0.1006048000252756 · balance now 0
+  → visitor-rehearsal  0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2 +0.05 USDC · gas 21000 (limit 25200) · worst 0.0506048000252756 · balance now 0
+  total worst 0.1512096000505512 USDC
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0 · remaining 0.69
+  deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (new record; a dry run does not write it: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+PREFLIGHT OK: nothing was signed or sent.
+== deploy preflight
+network=mainnet chainId=5042 mode=PREFLIGHT (read-only; nothing is signed)
+deployer 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 4.499159999957958 USDC · nonce 2 · runner 0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE · orderCreator 0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b
+fees: base 20 gwei · max fee sent 24.000001003 gwei · priority 0.000001003 gwei · ceiling 40 gwei
+caps: 0.05 USDC per transaction · 0.15 USDC total (gas included) · ledger /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/mainnet-deploy.json (0 prior entries, 0 USDC committed)
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0 · remaining 0.69
+  deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (new record; a dry run does not write it: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+journal /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/deploy-mainnet-journal.json (new):
+  deploy implementation A (DemoMerchantV1)     pending  
+  deploy implementation B (DemoMerchantV2)     pending  
+  deploy MAIN proxy on A                       pending  
+  deploy CHANGED proxy on A                    pending  
+  setOrderCreator on MAIN                      pending  
+  setOrderCreator on CHANGED                   pending  
+  upgrade CHANGED proxy A -> B                 pending  
+plan (7 unfinished steps):
+  deploy implementation A (DemoMerchantV1)     gas  1076707 (live estimate) · limit  1292049 · worst 0.031009177295925147 · expected 0.021534141079937121
+  deploy implementation B (DemoMerchantV2)     gas  1105057 (live estimate) · limit  1326069 · worst 0.031825657330047207 · expected 0.022101141108372171
+  deploy MAIN proxy on A                       gas   178416 (measured on testnet) · limit   214100 · worst 0.0051384002147423 · expected 0.003568320178951248
+  deploy CHANGED proxy on A                    gas   178416 (measured on testnet) · limit   214100 · worst 0.0051384002147423 · expected 0.003568320178951248
+  setOrderCreator on MAIN                      gas    52167 (measured on testnet) · limit    62601 · worst 0.001502424062788803 · expected 0.001043340052323501
+  setOrderCreator on CHANGED                   gas    52167 (measured on testnet) · limit    62601 · worst 0.001502424062788803 · expected 0.001043340052323501
+  upgrade CHANGED proxy A -> B                 gas    37633 (measured on testnet) · limit    45160 · worst 0.00108384004529548 · expected 0.000752660037745899
+  total worst 0.07720032322633004 USDC · expected 0.053611262688604689 USDC
+predicted addresses: implA 0x00e393aCDCD8cfBef4Ab5D0F826bEBD87bf4Ae14 · implB 0x816Ca9Da6D3A316D9b4cFf414890b07cBC95B399 · proxyMAIN 0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc · proxyCHANGED 0x3bc7340CfE664c3b09D4e64d1B7dE239F6748605
+PREFLIGHT OK: nothing was signed or sent.
+== probe preflight (nothing is signed on mainnet in a dry run)
+guard: https://arcpreflight.axiqo.xyz reports chain 5042002 / relayer 0x06873b35575D6A22eC8008f30F56c71C19BeE7b0 — no conflict
+network=mainnet chainId=5042 mode=DRY RUN (nothing will be sent)
+plan: ONE transferWithAuthorization on USDC 0x3600000000000000000000000000000000000000
+  payer   demo-runner    0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE  native 5.0 USDC, erc20 5 USDC  → pays 0.01 USDC (6-dec 10000)
+  relayer merchant-payto 0x06873b35575D6A22eC8008f30F56c71C19BeE7b0  native 0.5 USDC  → receives 0.01 USDC, pays gas
+  gas bound (measured on testnet; nothing signed on mainnet in a dry run) 87141 (limit 104569) at 24.000001003 gwei max → cost ceiling 0.002509656104882707 USDC (cap 0.005)
+  spend guard: 0.016 USDC per transaction (fee + gas), 0.02 USDC for the step, 0.0 already committed
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0 · remaining 0.69
+  deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (new record; a dry run does not write it: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+DRY RUN OK: nothing sent. Re-run with --execute to relay this one authorization.

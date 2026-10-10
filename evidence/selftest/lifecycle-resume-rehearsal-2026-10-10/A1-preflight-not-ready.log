@@ -1,0 +1,17 @@
+2026-10-10T07:51:58.401Z open from invocation 1: interrupt-2026-10-10T07-35-28-806Z — a run would stop: no durable identity to recover from (a record written before this version, or an unknown scenario): check the server's state (GET /v1/demo/runs newest first, the attempt) and re-run with LIFECYCLE_SETTLE_OPEN=interrupt-2026-10-10T07-35-28-806Z to settle it from the balances
+2026-10-10T07:51:59.044Z visitor key ledger: 6 prior entries, 0.0480273 USDC committed of 0.05 (carried across runs)
+2026-10-10T07:51:59.348Z PREFLIGHT (read-only: no session, no order, no signature) · eip155:5042002 release 40c5858 · gate: publicExecution true · operatorAcceptance false · executionReady true · admin token absent
+2026-10-10T07:51:59.348Z caps: visitor key 0.03 per transaction / 0.05 total (fee authorization + business tx + gas) · project outflow 0.12 (measured over 4 keys, baseline 48.3590576315 USDC carried from the first invocation; now 48.2926667815, outflow so far 0.06639085)
+2026-10-10T07:51:59.348Z plan release-40c5858-lifecycle-20261010 (testnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.083695325 · remaining 0.606304675
+2026-10-10T07:51:59.348Z   deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:51:59.348Z   fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:51:59.348Z   probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:51:59.348Z   acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:51:59.348Z   lifecycle   running  cap 0.12   outflow 0.010695325          pending 0.073                internal 0      invocations 1 open interrup baseline 48.3590576315
+2026-10-10T07:51:59.348Z   (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-release-40c5858-lifecycle-20261010.json)
+2026-10-10T07:51:59.349Z   wallet     worst 0.028 USDC
+2026-10-10T07:51:59.349Z   interrupt  worst 0.073 USDC
+2026-10-10T07:51:59.349Z   total worst 0.101 USDC
+2026-10-10T07:51:59.349Z PROBLEM: lifecycle: 0.083695325 USDC committed across every invocation + worst case 0.101 USDC exceeds the step cap 0.12 USDC — stopping
+2026-10-10T07:51:59.349Z PREFLIGHT: NOT READY (1)
+EXIT=2

@@ -1,0 +1,19 @@
+2026-10-10T07:53:01.062Z visitor key ledger: 6 prior entries, 0.0480273 USDC committed of 0.1 (carried across runs)
+2026-10-10T07:53:01.397Z limits · eip155:5042002 release 40c5858 · gate: publicExecution true · operatorAcceptance false · executionReady true · admin token absent
+2026-10-10T07:53:01.397Z caps: visitor key 0.03 per transaction / 0.1 total (fee authorization + business tx + gas) · project outflow 0.12 (measured over 4 keys, baseline 48.2926667815 USDC carried from the first invocation; now 48.2369726565, outflow so far 0.055694125)
+2026-10-10T07:53:01.398Z plan release-40c5858-lifecycle-resume-20261010 (testnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.055694125 · remaining 0.634305875
+2026-10-10T07:53:01.398Z   deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:53:01.398Z   fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:53:01.398Z   probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:53:01.398Z   acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:53:01.398Z   lifecycle   running  cap 0.12   outflow 0.055694125          pending 0                    internal 0      invocations 3 baseline 48.2926667815
+2026-10-10T07:53:01.398Z   (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-release-40c5858-lifecycle-resume-20261010.json)
+2026-10-10T07:53:01.398Z   wallet     worst 0.028 USDC
+2026-10-10T07:53:01.398Z   total worst 0.028 USDC
+2026-10-10T07:53:01.725Z wallet: measured project outflow so far 0.055694125 USDC; worst case of this scenario 0.028 USDC; cap 0.12 USDC
+2026-10-10T07:53:01.756Z wallet scenario: payer 0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2, amount 5000000000000000 native units, reference "lifecycle rehearsal 2026-10-10T07-52-59"
+2026-10-10T07:53:09.370Z order 0xc0c3b1e5da… created in 0x545a4f6793cee8c89b5e8c2113ce5d726e1b1d2d6b38e7c2ec664e12ad884dd5 (block 66444466) on 0xA8eB51EF994567B84215981E8d1Fe17cb8e42252
+2026-10-10T07:53:17.769Z report delivered; fee settled in 0xb39f6033e897393a1ae9531e662ac09e5bd6bb53e77f9693677c1776894f231d; baselineResult MATCH
+2026-10-10T07:53:23.488Z attempt a372ef64-fb29-46c7-b2a0-2d1ce2e51aa5 VALIDATED until 2026-10-10T07:54:15.161Z; plan nonce 13 gas 40735 maxFee 29 gwei
+2026-10-10T07:53:23.488Z LIFECYCLE_STOP_AFTER=wallet-attempt: stopping here like an interrupted process; the plan record keeps the open scenario
+EXIT=3

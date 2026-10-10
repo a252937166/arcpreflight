@@ -1,0 +1,113 @@
+{
+  "generatedAt": "2026-10-10T07:53:30.997Z",
+  "api": "https://arcpreflight.axiqo.xyz",
+  "network": "eip155:5042002",
+  "release": "40c5858",
+  "scenarios": {},
+  "recovered": [
+    {
+      "open": "wallet-2026-10-10T07-52-59-056Z:order:0xc0c3b1e5da0c205d70fb5e105d90ec808b73c990fcf6d096ede76a0a4686a2b5:attempt:a372ef64-fb29-46c7-b2a0-2d1ce2e51aa5",
+      "scenario": "wallet",
+      "action": "settle",
+      "how": "attempt a372ef64-fb29-46c7-b2a0-2d1ce2e51aa5 existed: the project's order creation and fee relay were already mined, the wallet had not broadcast",
+      "measuredProjectOutflowUsdc": "0.06038085"
+    }
+  ],
+  "spend": {
+    "visitorKey": {
+      "label": "lifecycle-wallet",
+      "network": "testnet",
+      "perTxCapUsdc": "0.03",
+      "totalCapUsdc": "0.1",
+      "maxFeeCeilingGwei": "40",
+      "committedUsdc": "0.0580273",
+      "remainingUsdc": "0.0419727",
+      "entries": [
+        {
+          "purpose": "check fee authorization",
+          "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+          "worstNativeAtomic": "10000000000000000",
+          "actualNativeAtomic": "10000000000000000",
+          "status": "settled",
+          "txHash": null,
+          "at": "2026-10-10T02:49:13.815Z"
+        },
+        {
+          "purpose": "business payment",
+          "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+          "worstNativeAtomic": "6181315000000000",
+          "actualNativeAtomic": "6009100000000000",
+          "status": "settled",
+          "txHash": "0x75fc10b2c5fbf59af0c564c1582c3cf6f2fdd7a95da7e48d9cd90c73da5c9e11",
+          "at": "2026-10-10T02:49:31.126Z"
+        },
+        {
+          "purpose": "check fee authorization",
+          "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+          "worstNativeAtomic": "10000000000000000",
+          "actualNativeAtomic": "10000000000000000",
+          "status": "settled",
+          "txHash": null,
+          "at": "2026-10-10T03:00:37.995Z"
+        },
+        {
+          "purpose": "business payment",
+          "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+          "worstNativeAtomic": "6181315000000000",
+          "actualNativeAtomic": "6009100000000000",
+          "status": "settled",
+          "txHash": "0x1bb6d9df9b65096103fac0b46d648ec75e5cd0a8bfda06978fa07973459d8df8",
+          "at": "2026-10-10T03:00:51.212Z"
+        },
+        {
+          "purpose": "check fee authorization",
+          "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+          "worstNativeAtomic": "10000000000000000",
+          "actualNativeAtomic": "10000000000000000",
+          "status": "settled",
+          "txHash": null,
+          "at": "2026-10-10T07:35:47.705Z"
+        },
+        {
+          "purpose": "business payment",
+          "to": "0xa8eb51ef994567b84215981e8d1fe17cb8e42252",
+          "worstNativeAtomic": "6181315000000000",
+          "actualNativeAtomic": "6009100000000000",
+          "status": "settled",
+          "txHash": "0xfa6167aabf67467f117672aa7a52fae830da6753785579f809cc9384019a1339",
+          "at": "2026-10-10T07:36:04.762Z"
+        },
+        {
+          "purpose": "check fee authorization",
+          "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+          "worstNativeAtomic": "10000000000000000",
+          "actualNativeAtomic": "10000000000000000",
+          "status": "settled",
+          "txHash": null,
+          "at": "2026-10-10T07:53:15.049Z"
+        }
+      ]
+    },
+    "projectOutflow": {
+      "capUsdc": "0.12",
+      "measuredUsdc": "0.06038085",
+      "baselineUsdc": "48.2926667815",
+      "carriedBaseline": true,
+      "addresses": [
+        "0xa71138ff271db9a18d2b216caf13b830eeab3ff2",
+        "0xc6182d363d7c3da6db491f703c430dc91d0e2ace",
+        "0xb6eef219f86ae75ffc3af9ef3cade49f89a7582b",
+        "0x06873b35575d6a22ec8008f30f56c71c19bee7b0"
+      ]
+    },
+    "plan": [
+      "plan release-40c5858-lifecycle-resume-20261010 (testnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.06038085 · remaining 0.62961915",
+      "  deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0",
+      "  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0",
+      "  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0",
+      "  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0",
+      "  lifecycle   running  cap 0.12   outflow 0.06038085           pending 0                    internal 0      invocations 4 baseline 48.2926667815",
+      "  (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-release-40c5858-lifecycle-resume-20261010.json)"
+    ]
+  }
+}

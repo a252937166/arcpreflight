@@ -1,0 +1,55 @@
+2026-10-10T07:35:30.833Z visitor key ledger: 4 prior entries, 0.0320182 USDC committed of 0.05 (carried across runs)
+2026-10-10T07:35:31.150Z limits · eip155:5042002 release 40c5858 · gate: publicExecution true · operatorAcceptance false · executionReady true · admin token absent
+2026-10-10T07:35:31.151Z caps: visitor key 0.03 per transaction / 0.05 total (fee authorization + business tx + gas) · project outflow 0.12 (measured over 4 keys, baseline 48.3590576315 USDC)
+2026-10-10T07:35:31.151Z plan release-40c5858-lifecycle-20261010 (testnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0 · remaining 0.69
+2026-10-10T07:35:31.151Z   deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:35:31.151Z   fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:35:31.151Z   probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:35:31.151Z   acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:35:31.151Z   lifecycle   running  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 1 baseline 48.3590576315
+2026-10-10T07:35:31.151Z   (new record: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-release-40c5858-lifecycle-20261010.json)
+2026-10-10T07:35:31.152Z   wallet     worst 0.028 USDC
+2026-10-10T07:35:31.152Z   interrupt  worst 0.073 USDC
+2026-10-10T07:35:31.152Z   total worst 0.101 USDC
+2026-10-10T07:35:31.526Z wallet: measured project outflow so far 0 USDC; worst case of this scenario 0.028 USDC; cap 0.12 USDC
+2026-10-10T07:35:31.569Z wallet scenario: payer 0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2, amount 5000000000000000 native units, reference "lifecycle rehearsal 2026-10-10T07-35-28"
+2026-10-10T07:35:36.005Z order 0x6bbfbaf0bb… created in 0x5b0e32b0884d89b3c46990859ccfbd1b1c617fcc93628aefaa7768b38c5c3625 (block 66442392) on 0xA8eB51EF994567B84215981E8d1Fe17cb8e42252
+2026-10-10T07:35:51.995Z report delivered; fee settled in 0x191354152bd2c39f8c162938193ac2824653a339b8e376a7cf7c4f5d8289c37e; baselineResult MATCH
+2026-10-10T07:36:00.266Z attempt 07b79860-fd54-4b70-8554-6eb0798a2efc VALIDATED until 2026-10-10T07:36:47.188Z; plan nonce 12 gas 40735 maxFee 29 gwei
+2026-10-10T07:36:04.762Z prompt claim probe: granted once (200), second claim 409 PROMPT_CLAIMED, stranger's hand-back 409 PROMPT_CLAIMED, holder's hand-back 200 → plain VALIDATED again
+2026-10-10T07:36:06.081Z wallet broadcast 0xfa6167aabf67467f117672aa7a52fae830da6753785579f809cc9384019a1339
+2026-10-10T07:36:07.066Z attempt CONFIRMED: order paid in block 66442454; cost statement buyer total 0.0160091 USDC
+2026-10-10T07:36:07.379Z visitor key spend: 0.0480273 USDC of the 0.05 USDC cap
+2026-10-10T07:36:13.840Z verifier: exit 0, pass 10, fail 0, unverified 0; TRANSACTION_PLAN_AGREEMENT=PASS ORDER_OUTCOME=PASS COST_STATEMENT=PASS
+2026-10-10T07:36:15.505Z interrupt: measured project outflow so far 0.010695325 USDC; worst case of this scenario 0.073 USDC; cap 0.12 USDC
+2026-10-10T07:36:17.708Z live demo run 7cd0d661-5165-4188-83cd-0df614b546cb started with a labelled interruption after the broadcast
+node:internal/deps/undici/undici:15141
+      Error.captureStackTrace(err);
+            ^
+
+TypeError: fetch failed
+    at node:internal/deps/undici/undici:15141:13
+    at async <anonymous> (/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/scripts/selftest/lifecycle.ts:236:61) {
+  [cause]: SocketError: other side closed
+      at TLSSocket.<anonymous> (node:internal/deps/undici/undici:6497:28)
+      at TLSSocket.emit (node:events:531:35)
+      at endReadableNT (node:internal/streams/readable:1698:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:89:21) {
+    code: 'UND_ERR_SOCKET',
+    socket: {
+      localAddress: '198.18.0.1',
+      localPort: 50422,
+      remoteAddress: '198.18.0.52',
+      remotePort: 443,
+      remoteFamily: 'IPv4',
+      timeout: undefined,
+      bytesWritten: 830,
+      bytesRead: 2815
+    },
+    [Symbol(undici.error.UND_ERR)]: true,
+    [Symbol(undici.error.UND_ERR_SOCKET)]: true
+  }
+}
+
+Node.js v22.23.1
+EXIT=1

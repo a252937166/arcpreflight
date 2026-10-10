@@ -1,0 +1,16 @@
+2026-10-10T07:53:32.376Z resuming: wallet-2026-10-10T07-52-59-056Z:order:0xc0c3b1e5da0c205d70fb5e105d90ec808b73c990fcf6d096ede76a0a4686a2b5:attempt:a372ef64-fb29-46c7-b2a0-2d1ce2e51aa5 was started by invocation 3 and is still open in the plan record — settling it before starting anything (settle)
+2026-10-10T07:53:32.749Z   settled: attempt a372ef64-fb29-46c7-b2a0-2d1ce2e51aa5 existed: the project's order creation and fee relay were already mined, the wallet had not broadcast; measured project outflow 0.06038085 USDC
+2026-10-10T07:53:33.340Z visitor key ledger: 7 prior entries, 0.0580273 USDC committed of 0.1 (carried across runs)
+2026-10-10T07:53:33.340Z limits · eip155:5042002 release 40c5858 · gate: publicExecution true · operatorAcceptance false · executionReady true · admin token absent
+2026-10-10T07:53:33.340Z caps: visitor key 0.03 per transaction / 0.1 total (fee authorization + business tx + gas) · project outflow 0.12 (measured over 4 keys, baseline 48.2926667815 USDC carried from the first invocation; now 48.2322859315, outflow so far 0.06038085)
+2026-10-10T07:53:33.341Z plan release-40c5858-lifecycle-resume-20261010 (testnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.06038085 · remaining 0.62961915
+2026-10-10T07:53:33.341Z   deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:53:33.341Z   fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:53:33.341Z   probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:53:33.341Z   acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:53:33.341Z   lifecycle   running  cap 0.12   outflow 0.06038085           pending 0                    internal 0      invocations 4 baseline 48.2926667815
+2026-10-10T07:53:33.341Z   (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-release-40c5858-lifecycle-resume-20261010.json)
+2026-10-10T07:53:33.341Z   total worst 0 USDC
+2026-10-10T07:53:34.661Z measured project outflow: 0.06038085 USDC of the 0.12 USDC cap
+2026-10-10T07:53:34.662Z evidence written to /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/testnet-lifecycle-2026-10-10T07-53-30-995Z.json
+EXIT=0

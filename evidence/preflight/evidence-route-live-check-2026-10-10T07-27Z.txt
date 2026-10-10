@@ -1,0 +1,28 @@
+Evidence route live check — release 40c5858, public testnet preview, 2026-10-10 07:26–07:28Z
+
+Context: audit finding API-01 (P0, 2026-10-10): the public /v1/evidence/<path> route read JSON files outside its root when given an
+absolute path. Contained at nginx the same day at 06:18Z (`location ^~ /v1/evidence/ { return 404; }`, backup
+arcpreflight.conf.bak-evidence-20261010T061822Z). Fixed in apps/api/src/evidence.ts: only the files of an explicit publish manifest
+under evidence/ are served, the real path must stay inside the real root, no private/ segment at any depth, no symlink escapes.
+Release 40c5858 deployed with ops/deploy.sh; the service became active 07:26:37Z; /health/live reported
+{"ok":true,"release":"40c5858","profile":"SUBMISSION_RESTRICTED","network":"eip155:5042002"}.
+
+1. Checks at the API port (http://127.0.0.1:4040, bypassing nginx while the public route was still contained)
+   GET /v1/evidence (manifest)                                               200, 186 files
+   encoded absolute path of a public fixture (%2Fopt%2F…%2Ffixtures%2F…json) 404
+   literal double slash (//opt/…/fixtures/…json)                            404
+   encoded absolute path under the server's key directory                   404
+   encoded traversal (..%2F…)                                                404
+   nested private/ path                                                      404
+   encoded absolute path outside the service (/etc/…)                       404
+   manifest file baseline-testnet-CHANGED-016e7586.json                     200
+
+2. The nginx containment removed at 07:27:14Z (backup arcpreflight.conf.bak-uncontain-20261010T072714Z; `nginx -t` ok; reload).
+   /etc/nginx/conf.d/arcpreflight.conf no longer contains the route (0 matches); ops/nginx-arcpreflight.conf in the repository never did.
+
+3. Checks through the public host https://arcpreflight.axiqo.xyz after the removal
+   encoded absolute path (the audit's probe)                                 404
+   literal double slash                                                      404
+   manifest file baseline-testnet-CHANGED-016e7586.json                     200
+
+Nothing else on the server changed. The access-log review is recorded in docs/ACCEPTANCE.md (AP33-80).

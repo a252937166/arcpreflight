@@ -1,0 +1,15 @@
+2026-10-10T07:35:26.036Z visitor key ledger: 4 prior entries, 0.0320182 USDC committed of 0.05 (carried across runs)
+2026-10-10T07:35:26.349Z PREFLIGHT (read-only: no session, no order, no signature) · eip155:5042002 release 40c5858 · gate: publicExecution true · operatorAcceptance false · executionReady true · admin token absent
+2026-10-10T07:35:26.349Z caps: visitor key 0.03 per transaction / 0.05 total (fee authorization + business tx + gas) · project outflow 0.12 (measured over 4 keys, baseline 48.3590576315 USDC)
+2026-10-10T07:35:26.349Z plan release-40c5858-lifecycle-20261010 (testnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0 · remaining 0.69
+2026-10-10T07:35:26.349Z   deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:35:26.349Z   fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:35:26.349Z   probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:35:26.349Z   acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:35:26.349Z   lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T07:35:26.350Z   (new record; a dry run does not write it: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-release-40c5858-lifecycle-20261010.json)
+2026-10-10T07:35:26.350Z   wallet     worst 0.028 USDC
+2026-10-10T07:35:26.350Z   interrupt  worst 0.073 USDC
+2026-10-10T07:35:26.350Z   total worst 0.101 USDC
+2026-10-10T07:35:26.350Z PREFLIGHT OK: nothing was created, signed or sent.
+EXIT=0

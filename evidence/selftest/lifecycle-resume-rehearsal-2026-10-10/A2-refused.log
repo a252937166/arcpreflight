@@ -1,0 +1,11 @@
+2026-10-10T07:52:07.356Z resuming: interrupt-2026-10-10T07-35-28-806Z was started by invocation 1 and is still open in the plan record — settling it before starting anything (refuse)
+/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/scripts/selftest/lifecycle.ts:164
+  if (d.action === "wait" || d.action === "refuse") throw new SpendRefused(`${open}: ${d.note}`);
+                                                          ^
+
+SpendRefused: interrupt-2026-10-10T07-35-28-806Z: no durable identity to recover from (a record written before this version, or an unknown scenario): check the server's state (GET /v1/demo/runs newest first, the attempt) and re-run with LIFECYCLE_SETTLE_OPEN=interrupt-2026-10-10T07-35-28-806Z to settle it from the balances
+    at <anonymous> (/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/scripts/selftest/lifecycle.ts:164:59)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+Node.js v22.23.1
+EXIT=1

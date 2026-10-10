@@ -102,12 +102,25 @@ The plan, budget and stop conditions are in `docs/MAINNET-PLAN.md`. `preflight` 
   after every receipt; re-running `--execute` after an interruption reconciles the journal against the chain and continues with the
   unfinished steps only. Testnet rehearsal hooks: `DEPLOY_OUT_DIR` (keeps the journal, manifest and evidence out of `fixtures/`),
   `DEPLOY_STOP_AFTER=<step>` (exit after that step's confirmation), `DEPLOY_STOP_AFTER_SEND=<step>` (exit after its broadcast); refused on mainnet.
-- **Evidence route containment (2026-10-10):** `/etc/nginx/conf.d/arcpreflight.conf` carries `location ^~ /v1/evidence/ { return 404; }` since the audit's
-  API-01; remove that line (and `nginx -t && systemctl reload nginx`) only after a release with `apps/api/src/evidence.ts` is deployed and the live
-  checks pass (an encoded absolute path → 404, a manifest file → 200).
+- **Evidence route containment (2026-10-10):** `/etc/nginx/conf.d/arcpreflight.conf` carried `location ^~ /v1/evidence/ { return 404; }` from 06:18Z
+  (the audit's API-01) until 07:27Z, when release `40c5858` with `apps/api/src/evidence.ts` was live and the checks had passed at the API port
+  (encoded absolute, double-slash, traversal, nested `private/` paths → 404; a manifest file → 200); the line was removed, `nginx -t`, reload, and
+  the checks repeated through the public host (`evidence/preflight/evidence-route-live-check-2026-10-10T07-27Z.txt`). The repository's
+  `ops/nginx-arcpreflight.conf` never carried the line; backups `arcpreflight.conf.bak-evidence-20261010T061822Z` and
+  `arcpreflight.conf.bak-uncontain-20261010T072714Z` stay on the server.
 - **Plan ledger:** `evidence/spend/<net>-plan-<id>.json` (`PLAN_ID`; mainnet defaults to `gate-d-mainnet-2026-10`, testnet has none unless set)
   carries every step's settled outflow, pending commitments and first baseline across restarts, with the approved caps pinned; environment
   cap overrides may lower, never raise. `pnpm exec tsx scripts/lib/plan-status.ts` prints it (read-only; part of `preflight`).
+- **Lifecycle restart (found in the `40c5858` rehearsal, fixed in `00f9eb0`, 2026-10-10):** every scenario `scripts/selftest/lifecycle.ts` starts is open in the plan record
+  under an id that carries its durable identity — `interrupt-<stamp>:key:<admission key>` (written before the POST) and `wallet-<stamp>` with
+  `:order:`, `:attempt:` and `:tx:` appended as the scenario learns them. A re-run under the same `PLAN_ID` (on mainnet: the same
+  `ops/mainnet-cutover.sh lifecycle`) settles the open scenarios of previous invocations before it starts anything: the interruption scenario by
+  re-sending its admission key (the server returns the original run, which is followed to its outcome and verified; the scenario then counts as
+  complete under the plan and is not started again), the wallet scenario from its hash (receipt awaited) or its attempt (nothing of the project's
+  left in flight), or from the balances once the server's receipt deadlines are past (10 minutes). A record without identities (written before
+  this version) stops the run until `LIFECYCLE_SETTLE_OPEN=<open id>` names it after a manual check of the server's state. `--preflight` shows
+  the same decisions read-only. Rehearsal hook `LIFECYCLE_STOP_AFTER=interrupt-start|wallet-order|wallet-attempt|wallet-sent` (testnet only)
+  stops right after that checkpoint's durable write, the way an interrupted process would.
 
 ## Delayed chain RPC (acceptance row S12, testnet only)
 
