@@ -26,6 +26,7 @@ import Inspect from "../src/pages/Inspect";
 import Demo from "../src/pages/Demo";
 import Verify from "../src/pages/Verify";
 import Home from "../src/pages/Home";
+import Evidence from "../src/pages/Evidence";
 import { AMBIGUOUS_TEXT, UNCERTAIN_OPEN_TEXT, UNCERTAIN_TEXT, resetExecutionGuard } from "../src/lib/attempts";
 import { RunPanel, RecoveryDesk, messageOf, headlineOf, orderResultOf } from "../src/components/RunPanel";
 import { WalletChip } from "../src/components/WalletChip";
@@ -1553,5 +1554,127 @@ describe("review of bf0c800 · operations bound to their instance and payer", ()
     releaseA(response({ orders: [ORDER_A] })); await flush(); tree = render(Developer); // A's answer lands late
     expect(content(tree)).not.toContain(ORDER_A.orderId.slice(0, 10)); // it populates nothing — not B's workflow, not "other wallets"
     expect(content(tree)).toContain(ORDER_B.orderId.slice(0, 10)); // B's listing stands
+  });
+});
+
+describe("review of 0d1088e · one instance per wallet operation (P1); late answers never restore a retired workflow (P2)", () => {
+  /** the Developer API stub, served under the /testnet prefix: a request that reaches the root instance answers 403 WRONG_INSTANCE */
+  function testnetApi() {
+    const api = developerApi(); const paths: string[] = []; const orig = api.fetch.getMockImplementation()!;
+    api.fetch.mockImplementation(async (path: string, init?: RequestInit) => { paths.push(path); if (!path.startsWith("/testnet/")) return response({ error: "WRONG_INSTANCE", reason: `reached the root instance: ${path}` }, 403); return orig(path.slice("/testnet".length), init); });
+    return { api, paths };
+  }
+  it("P1: an execution started on /testnet reports its hash and polls on /testnet although the visitor selected the root instance while the wallet prompt was open", async () => {
+    setApiBase("/testnet"); const { paths } = testnetApi(); memStorage();
+    let release!: (h: string) => void;
+    h.wallet.provider.request.mockImplementation(async ({ method }: { method: string }) => (method === "eth_sendTransaction" ? new Promise((r) => { release = r; }) : method === "eth_accounts" ? [ACCOUNT] : method === "eth_chainId" ? "0x4cef52" : "0x1"));
+    let tree = await createDeveloperOrder(); await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    await button(tree, "Sign TransferWithAuthorization").props.onClick(); render(Developer); await flush(); tree = render(Developer);
+    const pending = button(tree, "Execute with your wallet").props.onClick(); await flush(); tree = render(Developer);
+    setApiBase(""); // the root instance selected while the wallet is being asked
+    release(D); await pending; render(Developer); await flush(); tree = render(Developer);
+    const execution = paths.filter((p) => p.includes("/wallet/attempts")); // the operation: validate, prompt, the hash report, the polls
+    expect(execution).toContain(`/testnet/v1/wallet/attempts/${ATTEMPT_ID}/sent`); expect(execution).toContain(`/testnet/v1/wallet/attempts/${ATTEMPT_ID}`);
+    expect(execution.filter((p) => !p.startsWith("/testnet/"))).toEqual([]); // no step of it reached the newly selected instance (the hash report and the polls used to)
+    expect(fnNode(tree, "AttemptPanel").props.attempt.state).toBe("CONFIRMED");
+  });
+  it("P1: the Demo's wallet check stays on the instance it began on — the quote, the purchase and the approval read go to /testnet after a switch to root", async () => {
+    const { useWalletRun } = await import("../src/lib/walletRun");
+    setApiBase("/testnet"); const { api, paths } = testnetApi(); memStorage();
+    let releaseOrder!: (r: Response) => void; const prefixed = api.fetch.getMockImplementation()!;
+    api.fetch.mockImplementation(async (path: string, init?: RequestInit) => (path === "/testnet/v1/demo/orders" && init?.method === "POST" ? (paths.push(path), new Promise<Response>((r) => { releaseOrder = r; })) : prefixed(path, init)));
+    let hook = render(() => useWalletRun(h.net, h.wallet));
+    const started = hook.start({ id: "APPROVED_PAYMENT", proxy: "MAIN", merchant: MERCHANT } as any); await flush();
+    setApiBase(""); releaseOrder(response(CREATED, 201)); await started; hook = render(() => useWalletRun(h.net, h.wallet));
+    expect(hook.run.phase).toBe("done"); expect(hook.run.decision?.decision).toBe("NO_POLICY_VIOLATION");
+    expect(paths).toEqual(expect.arrayContaining(["/testnet/v1/preflight", `/testnet/v1/baselines/${baselineHash}`])); expect(paths.filter((p) => !p.startsWith("/testnet/"))).toEqual([]);
+  });
+  it("P2: a row action's answer that lands after 'start over' never restores the retired workflow — the list row updates, no attempt and no order come back", async () => {
+    const api = developerApi(); memStorage({ "arcpreflight.session:root": JSON.stringify(SESSION(1)) }); // a session: the listings are read
+    let releaseRecover!: (r: Response) => void; const orig = api.fetch.getMockImplementation()!; let recovered = false;
+    api.fetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === "/v1/wallet/attempts" && (init?.method ?? "GET") === "GET") return response({ attempts: [recovered ? { ...VALIDATED, state: "NOT_SENT" } : VALIDATED] });
+      if (path === `/v1/wallet/attempts/${ATTEMPT_ID}`) return response(recovered ? { ...VALIDATED, state: "NOT_SENT" } : VALIDATED); // open, no marker
+      if (path === `/v1/wallet/attempts/${ATTEMPT_ID}/recover`) return new Promise<Response>((r) => { releaseRecover = (x) => { recovered = true; r(x); }; });
+      return orig(path, init);
+    });
+    render(Developer); await flush(); let tree = render(Developer);
+    await button(tree, "use").props.onClick(); render(Developer); await flush(); tree = render(Developer); // the listed attempt becomes the current one; its order follows
+    expect(fnNode(tree, "AttemptPanel").props.attempt.attemptId).toBe(ATTEMPT_ID); expect(fnNode(tree, "OrderCard")).toBeDefined();
+    const row = nodes(tree).find((n) => n.type === "tr" && n.key === ATTEMPT_ID); expect(row).toBeDefined(); // the My workflow row of that attempt
+    const recovering = button(row, "Recover").props.onClick(); await flush(); tree = render(Developer); // the row action is in flight
+    button(tree, "start over").props.onClick(); render(Developer); await flush(); tree = render(Developer); // the workflow is retired
+    expect(fnNode(tree, "AttemptPanel")).toBeUndefined(); expect(fnNode(tree, "OrderCard")).toBeUndefined();
+    releaseRecover(response({ ...VALIDATED, state: "NOT_SENT", nextAction: "nothing to do" })); await recovering; render(Developer); await flush(); tree = render(Developer);
+    expect(fnNode(tree, "AttemptPanel")).toBeUndefined(); expect(fnNode(tree, "OrderCard")).toBeUndefined(); // nothing restored (the answer used to be adopted into the empty slot)
+    expect(lifecycleOf(tree).order.status).toBe("active");
+    const after = nodes(tree).find((n) => n.type === "tr" && n.key === ATTEMPT_ID); expect(content(after)).toContain("not sent"); // the list row did take the answer (states render lowercased)
+  });
+});
+
+describe("long lists (review of 2026-10-10) — folders, pages of eight, one filter", () => {
+  const folderNodes = (tree: any) => nodes(tree).filter((n) => n.type === "details" && n.props?.["data-testid"] === "evidence-folder");
+  const rowsOf = (folder: any) => nodes(folder).filter((n) => n.props?.role === "listitem");
+  const moreOf = (tree: any, id: string) => nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "ShowMore" && n.props?.testId === id);
+  const manyFiles = () => {
+    const files = [{ path: "baseline-testnet-MAIN-aaaa.json", bytes: 1797 }, { path: "baseline-testnet-CHANGED-bbbb.json", bytes: 1797 }, { path: "spend/testnet-plan-x.json", bytes: 900 }];
+    for (let i = 0; i < 12; i++) { const stamp = `2026-10-${String(1 + i).padStart(2, "0")}T10-00-00-000Z`; files.push({ path: `selftest/passports/testnet-wallet-${stamp}.passport.json`, bytes: 78_000 + i }, { path: `selftest/passports/testnet-wallet-${stamp}.anchors.json`, bytes: 202 }); }
+    return files;
+  };
+  it("the file list shows folders with counts and sizes — collapsed except the root — a passport and its anchors on one row, eight rows per folder with 'show more', and one filter that narrows every folder", async () => {
+    const { EvidenceFiles } = await import("../src/components/EvidenceFiles");
+    const files = manyFiles(); const href = (p: string) => `/v1/evidence/${p}`;
+    let tree = render(() => EvidenceFiles({ files, href }));
+    expect(content(tree)).toContain("27 files"); expect(content(tree)).toContain("3 folders");
+    let folders = folderNodes(tree);
+    expect(folders.map((f) => [f.props["data-dir"], f.props.open])).toEqual([["", true], ["selftest/passports", false], ["spend", false]]);
+    expect(content(folders[1])).toContain("24 files"); // 12 passports with their anchors …
+    expect(rowsOf(folders[1])).toHaveLength(8); // … shown as 8 rows of the 12 pairs
+    const first = rowsOf(folders[1])[0]; expect(content(first)).toContain("testnet-wallet-2026-10-12T10-00-00-000Z.passport.json"); expect(content(first)).toContain("anchors"); // newest first, anchors folded in
+    const link = nodes(first).find((n) => n.type === "a"); expect(link.props.children).toBe("testnet-wallet-2026-10-12T10-00-00-000Z.passport.json"); // the row shows the name …
+    expect(link.props.href).toBe("/v1/evidence/selftest/passports/testnet-wallet-2026-10-12T10-00-00-000Z.passport.json"); expect(link.props.title).toBe("selftest/passports/testnet-wallet-2026-10-12T10-00-00-000Z.passport.json"); // … the link and the title carry the exact path
+    const more = moreOf(tree, "more:selftest/passports"); expect(more.props).toMatchObject({ shown: 8, total: 12 }); expect(moreOf(tree, "more:spend").props).toMatchObject({ shown: 1, total: 1 });
+    more.props.onMore(); tree = render(() => EvidenceFiles({ files, href })); folders = folderNodes(tree);
+    expect(rowsOf(folders[1])).toHaveLength(12); expect(moreOf(tree, "more:selftest/passports").props).toMatchObject({ shown: 12, total: 12 });
+    const input = nodes(tree).find((n) => n.type === "input"); input.props.onChange({ target: { value: "2026-10-03" } }); tree = render(() => EvidenceFiles({ files, href })); folders = folderNodes(tree);
+    expect(folders).toHaveLength(1); expect(folders[0].props.open).toBe(true); expect(rowsOf(folders[0])).toHaveLength(1); expect(content(tree)).toContain("2 matches");
+    input.props.onChange({ target: { value: "nothing-like-this" } }); tree = render(() => EvidenceFiles({ files, href }));
+    expect(content(tree)).toContain("no file matches"); expect(content(tree)).toContain("nothing-like-this"); expect(folderNodes(tree)).toHaveLength(0);
+    const { ShowMore } = await import("../src/components/ShowMore");
+    expect(render(() => ShowMore({ shown: 3, total: 3, onMore: () => {} }))).toBeNull(); // a short list has no footer
+    const footer = render(() => ShowMore({ shown: 8, total: 20, onMore: () => {} })); expect(content(footer)).toContain("8 of 20 rows"); expect(content(footer)).toContain("show 8 more");
+  });
+  it("the Evidence page hands its files to the folder list, pages its public reports eight at a time and asks for twelve runs a page", async () => {
+    memStorage();
+    const reports = Array.from({ length: 11 }, (_, i) => ({ reportDigest: `0x${String(i).padStart(64, "0")}`, subject: MERCHANT, mode: "OBJECT_OBSERVATION", createdAt: NOW.toISOString() }));
+    const paths: string[] = []; const files = manyFiles();
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+      paths.push(path);
+      if (path === "/v1/evidence") return response({ files });
+      if (path === "/v1/public-reports") return response({ reports });
+      if (path.startsWith("/v1/demo/runs")) return response({ runs: [], total: 0 });
+      if (path === "/health/ready") return response({ ready: true });
+      throw new Error(`unexpected ${path}`);
+    }));
+    render(Evidence); await flush(); let tree = render(Evidence);
+    expect(paths).toContain("/v1/demo/runs?limit=12&offset=0");
+    expect(fnNode(tree, "EvidenceFiles").props.files).toHaveLength(27);
+    const reportRows = () => nodes(tree).filter((n) => n.type === "tr" && typeof n.key === "string" && n.key.startsWith("0x"));
+    expect(reportRows()).toHaveLength(8);
+    const footer = moreOf(tree, "reports-more"); expect(footer.props).toMatchObject({ shown: 8, total: 11 });
+    footer.props.onMore(); tree = render(Evidence);
+    expect(reportRows()).toHaveLength(11);
+  });
+  it("the Developer page's lists page eight rows at a time: twenty orders show as eight with 'show more'", async () => {
+    const api = developerApi(); memStorage({ "arcpreflight.session:root": JSON.stringify(SESSION(1)) });
+    const orders = Array.from({ length: 20 }, (_, i) => ({ ...ORDER_VIEW, orderId: `0x${String(i + 1).padStart(64, "a")}`, createdAt: new Date(NOW.getTime() - i * 60_000).toISOString() }));
+    const orig = api.fetch.getMockImplementation()!;
+    api.fetch.mockImplementation(async (path: string, init?: RequestInit) => (path === "/v1/demo/orders" && (init?.method ?? "GET") === "GET" ? response({ orders }) : orig(path, init)));
+    render(Developer); await flush(); let tree = render(Developer);
+    const rows = () => nodes(tree).filter((n) => n.type === "tr" && typeof n.key === "string" && n.key.startsWith("0x"));
+    expect(rows()).toHaveLength(8);
+    const footer = moreOf(tree, "more:my-orders"); expect(footer.props).toMatchObject({ shown: 8, total: 20 });
+    footer.props.onMore(); tree = render(Developer); expect(rows()).toHaveLength(16);
+    moreOf(tree, "more:my-orders").props.onMore(); tree = render(Developer); expect(rows()).toHaveLength(20);
   });
 });

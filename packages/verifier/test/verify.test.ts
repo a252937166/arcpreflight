@@ -448,6 +448,42 @@ describe("review of bf0c800 (P2) — missing required evidence never yields a co
   });
 });
 
+describe("review of 0d1088e (P2) — the required evidence follows the records, not the label", () => {
+  /** the review's attack: the creation evidence removed consistently AND the passport relabelled as a paid check (role rewritten too), so the
+   *  verifier's requirements, if taken from the label, would no longer ask for the creation */
+  function relabelledAsPaidCheck() {
+    const f = syntheticRun("APPROVED"); const files = roundTrip(buildPassport(f.source).files);
+    const stripped = editManifest(retouch(files, (c) => {
+      const s2 = JSON.parse(c["order-summary.json"]); s2.createOrder = { tx: null, block: null, signer: null }; c["order-summary.json"] = JSON.stringify(s2, null, 2) + "\n";
+      const cost = JSON.parse(c["cost-statement.json"]); cost.buyer.role = "buyer"; cost.operator.orderCreation = null; cost.operator.totalNativeAtomic = cost.operator.feeRelay.nativeAtomic; cost.operator.totalUsdc = cost.operator.feeRelay.usdc; cost.sources.createOrderTx = null; cost.operator.complete = true;
+      c["cost-statement.json"] = JSON.stringify(cost, null, 2) + "\n";
+      delete c["evidence/chain/create-order-tx.json"];
+    }), (m) => { m.files = m.files.filter((e: any) => e.path !== "evidence/chain/create-order-tx.json"); m.subject = { ...m.subject, kind: "paid-check" }; });
+    return { f, files: stripped };
+  }
+  it("reproduction: a run passport relabelled `paid-check` with its creation evidence removed fails — the label conflicts with the run records and the creation stays required; the unchanged control passes", async () => {
+    const { f, files } = relabelledAsPaidCheck();
+    const r = await verifyPassport(files, { rpc: f.rpc(), anchors: f.anchors });
+    expect(finding(r, "FILE_INTEGRITY").status).toBe("PASS");
+    expect(finding(r, "DIGEST_INTEGRITY")).toMatchObject({ status: "FAIL", detail: expect.stringContaining("paid-check conflicts with the run records present") });
+    expect(finding(r, "COST_STATEMENT").status).not.toBe("PASS"); expect(finding(r, "COST_STATEMENT").detail).toMatch(/order-creation evidence missing|operator\.complete|required evidence missing: order creation/);
+    const control = syntheticRun("APPROVED");
+    expect(statuses(await verifyPassport(roundTrip(buildPassport(control.source).files), { rpc: control.rpc(), anchors: control.anchors }))).toEqual(ALL_PASS);
+  });
+  it("variants: a genuine paid-check passport (no run records) still verifies; a run label without execution.json fails DIGEST_INTEGRITY; the relabel alone, with the creation evidence intact, is caught by the conflict", async () => {
+    const f = syntheticRun("APPROVED"); const r: any = f.source.result!;
+    const check = { ...f.source, result: null, check: { intent: r.intent, report: r.report }, subject: { kind: "paid-check", runId: null, attemptId: null, fixture: null }, chainCaptures: { feeTx: f.source.chainCaptures!.feeTx } };
+    const genuine = await verifyPassport(roundTrip(buildPassport(check as any).files), { rpc: f.rpc(), anchors: f.anchors });
+    expect(finding(genuine, "FILE_INTEGRITY").status).toBe("PASS"); expect(finding(genuine, "DIGEST_INTEGRITY").status).toBe("PASS"); expect(finding(genuine, "FEE_ATTRIBUTION").status).toBe("PASS");
+    expect(finding(genuine, "COST_STATEMENT").status).toBe("UNVERIFIED"); // no cost statement in a check passport: nothing is claimed, nothing is required
+    const files = roundTrip(buildPassport(f.source).files);
+    const noExecution = editManifest(retouch(files, (c) => { delete c["execution.json"]; }), (m) => { m.files = m.files.filter((e: any) => e.path !== "execution.json"); });
+    expect(finding(await verifyPassport(noExecution, { rpc: f.rpc(), anchors: f.anchors }), "DIGEST_INTEGRITY").detail).toMatch(/demo-run without execution\.json/);
+    const relabelOnly = editManifest(files, (m) => { m.subject = { ...m.subject, kind: "paid-check" }; });
+    expect(finding(await verifyPassport(relabelOnly, { rpc: f.rpc(), anchors: f.anchors }), "DIGEST_INTEGRITY")).toMatchObject({ status: "FAIL", detail: expect.stringContaining("paid-check conflicts with the run records present (decision.json, transaction-plan.json, final-validation.json, execution.json)") });
+  });
+});
+
 describe("audit 2026-10-10 · rehashed and lookalike passports", () => {
   /** Re-export a run whose intent was changed AFTER the fact, with every cross-link recomputed — the exporter and the digest checks are satisfied,
    *  so only a binding between the plan/transaction and the intent can catch it (VF-01). */

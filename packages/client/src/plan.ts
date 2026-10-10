@@ -23,14 +23,16 @@ export type PlanStepState = {
   /** API-driven steps: the summed balances of the measured keys when the step FIRST started, carried across restarts */
   baselineTotalNativeAtomic: bigint | null; measuredAddresses: string[] | null;
   openRuns: string[];
-  /** operations this step settled (closed) under the plan, in order — a restart knows what is already done (review of bf0c800, P1) */
+  /** operations this step settled (closed with an outcome) under the plan, in order — a restart knows what is already done (review of bf0c800, P1) */
   settledRuns: string[];
+  /** reservations released because the server proved nothing had started: NOT work done — a restart runs those positions again (review of 0d1088e, P1) */
+  releasedRuns: string[];
   invocations: number; updatedAt: string | null;
 };
 export type PlanLedger = { planVersion: 1; planId: string; network: string; createdAt: string; updatedAt: string; approved: PlanCaps; steps: Record<PlanStepId, PlanStepState> };
 
 const stamp = (now?: string) => now ?? new Date().toISOString();
-const emptyStep = (): PlanStepState => ({ status: "pending", outflowNativeAtomic: 0n, pendingNativeAtomic: 0n, internalNativeAtomic: 0n, baselineTotalNativeAtomic: null, measuredAddresses: null, openRuns: [], settledRuns: [], invocations: 0, updatedAt: null });
+const emptyStep = (): PlanStepState => ({ status: "pending", outflowNativeAtomic: 0n, pendingNativeAtomic: 0n, internalNativeAtomic: 0n, baselineTotalNativeAtomic: null, measuredAddresses: null, openRuns: [], settledRuns: [], releasedRuns: [], invocations: 0, updatedAt: null });
 export function createPlan(o: { planId: string; network: string; approved: PlanCaps; now?: string }): PlanLedger {
   if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(o.planId)) throw new SpendRefused(`plan id ${JSON.stringify(o.planId)} must be 3–64 lower-case letters, digits or dashes`);
   const sum = PLAN_STEPS.reduce((a, s) => a + o.approved.steps[s].totalNativeAtomic, 0n);
@@ -45,7 +47,7 @@ export function serializePlan(p: PlanLedger): string { return JSON.stringify(p, 
 export function parsePlan(text: string): PlanLedger {
   const d = JSON.parse(text);
   if (d?.planVersion !== 1 || typeof d.planId !== "string" || typeof d.network !== "string") throw new SpendRefused("plan file: not a version-1 plan ledger");
-  const steps = Object.fromEntries(PLAN_STEPS.map((s) => { const x = d.steps?.[s] ?? {}; return [s, { ...emptyStep(), ...x, settledRuns: Array.isArray(x.settledRuns) ? x.settledRuns.map(String) : [], outflowNativeAtomic: big(x.outflowNativeAtomic ?? "0", `${s}.outflow`), pendingNativeAtomic: big(x.pendingNativeAtomic ?? "0", `${s}.pending`), internalNativeAtomic: big(x.internalNativeAtomic ?? "0", `${s}.internal`), baselineTotalNativeAtomic: x.baselineTotalNativeAtomic == null ? null : big(x.baselineTotalNativeAtomic, `${s}.baseline`), openRuns: Array.isArray(x.openRuns) ? x.openRuns : [] }]; })) as Record<PlanStepId, PlanStepState>;
+  const steps = Object.fromEntries(PLAN_STEPS.map((s) => { const x = d.steps?.[s] ?? {}; return [s, { ...emptyStep(), ...x, settledRuns: Array.isArray(x.settledRuns) ? x.settledRuns.map(String) : [], releasedRuns: Array.isArray(x.releasedRuns) ? x.releasedRuns.map(String) : [], outflowNativeAtomic: big(x.outflowNativeAtomic ?? "0", `${s}.outflow`), pendingNativeAtomic: big(x.pendingNativeAtomic ?? "0", `${s}.pending`), internalNativeAtomic: big(x.internalNativeAtomic ?? "0", `${s}.internal`), baselineTotalNativeAtomic: x.baselineTotalNativeAtomic == null ? null : big(x.baselineTotalNativeAtomic, `${s}.baseline`), openRuns: Array.isArray(x.openRuns) ? x.openRuns : [] }]; })) as Record<PlanStepId, PlanStepState>;
   const approved: PlanCaps = { budgetCapNativeAtomic: big(d.approved?.budgetCapNativeAtomic, "approved.budgetCap"), maxFeePerGasCeiling: big(d.approved?.maxFeePerGasCeiling ?? "40000000000", "approved.maxFeePerGasCeiling"), steps: Object.fromEntries(PLAN_STEPS.map((s) => [s, { totalNativeAtomic: big(d.approved?.steps?.[s]?.totalNativeAtomic, `approved.${s}.total`), perTxNativeAtomic: d.approved?.steps?.[s]?.perTxNativeAtomic == null ? null : big(d.approved.steps[s].perTxNativeAtomic, `approved.${s}.perTx`) }])) as Record<PlanStepId, PlanStepCaps> };
   return { planVersion: 1, planId: d.planId, network: d.network, createdAt: d.createdAt, updatedAt: d.updatedAt, approved, steps };
 }
@@ -99,12 +101,16 @@ export function updateMeasured(p: PlanLedger, step: PlanStepId, currentTotal: bi
   const out = base - currentTotal;
   return put(p, step, { outflowNativeAtomic: out > 0n ? out : 0n }, now);
 }
-/** a run or scenario the step started whose outcome is not settled yet counts at its worst case until it is */
-export function noteOpen(p: PlanLedger, step: PlanStepId, id: string, open: boolean, worstNativeAtomic: bigint, now?: string): PlanLedger {
+/** A run or scenario the step started whose outcome is not settled yet counts at its worst case until it is. Closing it records it as
+ *  SETTLED (it ran and its outcome is known) or, with `outcome: "released"`, as a reservation the server proved never started — released
+ *  reservations are kept apart from settled operations so a restart never mistakes one for work done (review of 0d1088e, P1). */
+export function noteOpen(p: PlanLedger, step: PlanStepId, id: string, open: boolean, worstNativeAtomic: bigint, now?: string, outcome: "settled" | "released" = "settled"): PlanLedger {
   const s = p.steps[step]; const runs = open ? Array.from(new Set([...s.openRuns, id])) : s.openRuns.filter((r) => r !== id);
   const pending = open ? s.pendingNativeAtomic + (s.openRuns.includes(id) ? 0n : worstNativeAtomic) : (s.openRuns.includes(id) ? (s.pendingNativeAtomic > worstNativeAtomic ? s.pendingNativeAtomic - worstNativeAtomic : 0n) : s.pendingNativeAtomic);
-  const settledRuns = !open && s.openRuns.includes(id) ? Array.from(new Set([...s.settledRuns, id])) : s.settledRuns; // closing an open operation records it as settled
-  return put(p, step, { openRuns: runs, pendingNativeAtomic: pending, settledRuns }, now);
+  const closing = !open && s.openRuns.includes(id);
+  const settledRuns = closing && outcome === "settled" ? Array.from(new Set([...s.settledRuns, id])) : s.settledRuns;
+  const releasedRuns = closing && outcome === "released" ? Array.from(new Set([...s.releasedRuns, id])) : s.releasedRuns;
+  return put(p, step, { openRuns: runs, pendingNativeAtomic: pending, settledRuns, releasedRuns }, now);
 }
 /** Open run ids may carry the identities a scenario learns as it goes, as `:tag:value` suffixes (the lifecycle script writes
  *  `interrupt-<stamp>:key:<admission key>` and `wallet-<stamp>:order:<id>:attempt:<id>:tx:<hash>`); a restart recovers from them. */
@@ -128,6 +134,6 @@ export function resolvePlanId(network: string, envValue: string | undefined, mai
 }
 export function summarizePlan(p: PlanLedger): string[] {
   const lines = [`plan ${p.planId} (${p.network}) · budget cap ${usdc18(p.approved.budgetCapNativeAtomic)} USDC · fee ceiling ${p.approved.maxFeePerGasCeiling / 10n ** 9n} gwei · committed ${usdc18(planCommitted(p))} · remaining ${usdc18(planRemaining(p))}`];
-  for (const s of PLAN_STEPS) { const x = p.steps[s]; lines.push(`  ${s.padEnd(11)} ${x.status.padEnd(8)} cap ${usdc18(p.approved.steps[s].totalNativeAtomic).padEnd(6)} outflow ${usdc18(x.outflowNativeAtomic).padEnd(20)} pending ${usdc18(x.pendingNativeAtomic).padEnd(20)} internal ${usdc18(x.internalNativeAtomic).padEnd(6)} invocations ${x.invocations}${x.openRuns.length ? ` open ${x.openRuns.map((r) => r.slice(0, 8)).join(",")}` : ""}${x.settledRuns.length ? ` settled ${x.settledRuns.length}` : ""}${x.baselineTotalNativeAtomic !== null ? ` baseline ${usdc18(x.baselineTotalNativeAtomic)}` : ""}`); }
+  for (const s of PLAN_STEPS) { const x = p.steps[s]; lines.push(`  ${s.padEnd(11)} ${x.status.padEnd(8)} cap ${usdc18(p.approved.steps[s].totalNativeAtomic).padEnd(6)} outflow ${usdc18(x.outflowNativeAtomic).padEnd(20)} pending ${usdc18(x.pendingNativeAtomic).padEnd(20)} internal ${usdc18(x.internalNativeAtomic).padEnd(6)} invocations ${x.invocations}${x.openRuns.length ? ` open ${x.openRuns.map((r) => r.slice(0, 8)).join(",")}` : ""}${x.settledRuns.length ? ` settled ${x.settledRuns.length}` : ""}${x.releasedRuns.length ? ` released ${x.releasedRuns.length}` : ""}${x.baselineTotalNativeAtomic !== null ? ` baseline ${usdc18(x.baselineTotalNativeAtomic)}` : ""}`); }
   return lines;
 }

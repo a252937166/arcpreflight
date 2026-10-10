@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ACCOUNTS, BALANCES, D, MAIN, WORST_APPROVED, WORST_OTHER, doneRun, evidence as evidenceOf, fakeApi, fakeRpc, planPath, readPlan as readPlanOf, seedPlan as seedPlanAt, serve, type FixtureId, type Json } from "./helpers/mainnet-fakes.js";
+import { ACCOUNTS, BALANCES, D, MAIN, WORST_APPROVED, WORST_OTHER, doneRun, evidence as evidenceOf, evidenceFiles, fakeApi, fakeRpc, planPath, readPlan as readPlanOf, seedPlan as seedPlanAt, serve, type FixtureId, type Json } from "./helpers/mainnet-fakes.js";
+const E18 = 10n ** 18n;
 process.env.MAINNET_SELFTEST_IMPORT_ONLY = "1";
 const { main, classifyReplay, parseOpenId } = await import("../selftest/mainnet.js");
 const deps = {
@@ -98,6 +99,63 @@ describe("mainnet acceptance — recovery first, completed positions kept, the r
     expect(await execute()).toBe(0);
     expect(api.state.posts.map((p) => p.fixture)).toEqual(["APPROVED_PAYMENT", "APPROVED_PAYMENT"]); // one start (+ its replay); nothing re-run
     const ev = evidence(); expect(ev.runs.map((r: any) => r.fixture)).toEqual(["CHANGED_IMPLEMENTATION", "AMOUNT_UNIT_MISMATCH", "APPROVED_PAYMENT"]); expect(ev.positions).toMatchObject({ completedBefore: 2, remainingAtStart: 1 });
+  });
+  describe("review of 0d1088e (P1) — only verified runs count; released reservations are unfinished work; the funds are those of the remaining work", () => {
+    it("reproduction (false PASS): a reservation the previous invocation released used to be read as a completed run — now it is unfinished work: the dry run lists it as remaining, the execution runs it, and PASS carries a verified report for every planned position", async () => {
+      // the record shape the 0d1088e code left behind a release: an entry settled WITHOUT a run id (plus one it recorded as released)
+      seedPlan({ outflow: 100_000_000_000_000_000n, settled: [{ round: 1, fixture: "CHANGED_IMPLEMENTATION", key: "k1", runId: "R1" }, { round: 1, fixture: "AMOUNT_UNIT_MISMATCH", key: "k2", runId: null }], released: [{ round: 1, fixture: "APPROVED_PAYMENT", key: "k3" }] });
+      api.state.runs.set("R1", doneRun("R1", "CHANGED_IMPLEMENTATION"));
+      expect(await dryRun()).toBe(0);
+      expect(logs.join("\n")).toMatch(/1 completed .* 1 released reservation\(s\) and 1 settled without a run id \(NOT counted as done: run again\), 2 of 3 runs remaining/);
+      expect(await execute()).toBe(0);
+      expect(api.state.posts.map((p) => p.fixture)).toEqual(["AMOUNT_UNIT_MISMATCH", "AMOUNT_UNIT_MISMATCH", "APPROVED_PAYMENT", "APPROVED_PAYMENT"]); // both unfinished positions started (each with its AP32-08 replay); R1 only re-read
+      const ev = evidence(); expect(ev.status).toBe("PASS"); expect(ev.runs.map((r: any) => r.fixture)).toEqual(["CHANGED_IMPLEMENTATION", "AMOUNT_UNIT_MISMATCH", "APPROVED_PAYMENT"]);
+      expect(ev.positions).toMatchObject({ total: 3, completedBefore: 1, releasedBefore: 1, unverifiedBefore: 1, remainingAtStart: 2, verified: 3 });
+      const p = readPlan().steps.acceptance; expect(p.status).toBe("done"); expect(p.settledRuns.filter((id) => id.includes(":run:"))).toHaveLength(3); expect(p.releasedRuns).toEqual(["run-1-APPROVED_PAYMENT:key:k3"]);
+    });
+    it("a reservation released in THIS invocation is recorded as released, not settled, and its position is started afterwards; a restart after a stop keeps treating it as unfinished", async () => {
+      api.state.replay = (key) => (key === "ka" ? { status: 429, body: { error: "DEMO_BUDGET_EXHAUSTED" } } : null);
+      seedPlan({ outflow: 0n, open: [{ round: 1, fixture: "APPROVED_PAYMENT", key: "ka", worst: WORST_APPROVED }] });
+      expect(await execute()).toBe(0);
+      const p = readPlan().steps.acceptance;
+      expect(p.releasedRuns).toEqual(["run-1-APPROVED_PAYMENT:key:ka"]); expect(p.settledRuns.some((id) => id.includes(":key:ka"))).toBe(false);
+      expect(p.settledRuns.filter((id) => id.startsWith("run-1-APPROVED_PAYMENT:key:") && id.includes(":run:"))).toHaveLength(1); // the position ran under a NEW key and is settled with its run id
+      expect(evidence().positions.verified).toBe(3);
+    });
+    it("never PASS without evidence: a completed position whose run cannot be re-verified, or cannot be read back, leaves the invocation INCOMPLETE", async () => {
+      seedPlan({ outflow: 100_000_000_000_000_000n, settled: [{ round: 1, fixture: "CHANGED_IMPLEMENTATION", key: "k1", runId: "R1" }, { round: 1, fixture: "AMOUNT_UNIT_MISMATCH", key: "k2", runId: "R2" }] });
+      api.state.runs.set("R1", doneRun("R1", "CHANGED_IMPLEMENTATION")); api.state.runs.set("R2", doneRun("R2", "AMOUNT_UNIT_MISMATCH"));
+      const strict = { ...deps, verifyRun: async (ctx: unknown, fixture: FixtureId, run: any) => { if (run.runId === "R2") throw new Error("R2: service fee log missing"); return deps.verifyRun(ctx, fixture, run); } };
+      expect(await main(strict, ["--execute"])).toBe(1);
+      expect(evidenceFiles(root)[0]).toMatch(/INCOMPLETE/); expect(evidence().failure.message).toContain("R2: service fee log missing"); expect(evidence().runs).toHaveLength(1);
+      expect(api.state.posts).toEqual([]); // nothing new was started after the failed verification
+      rmSync(join(root, "out"), { recursive: true, force: true }); api.state.runs.delete("R2"); // the server no longer serves R2 at all
+      expect(await execute()).toBe(1); expect(evidenceFiles(root)[0]).toMatch(/INCOMPLETE/); expect(readPlan().steps.acceptance.status).toBe("stopped");
+    }, 60_000); // the re-read of a vanished run retries with real 2 s pauses
+    it("reproduction (funds): the balances only have to cover the REMAINING work — a runner and a creator that could not pay for a whole batch but can pay for the one unfinished run are READY, and the run completes", async () => {
+      await apiServer.close(); await rpcServer.close();
+      // 0.27 USDC covers one remaining APPROVED run (0.2632: fee + order + pay gas + floor + order) but not a whole round (0.2832); 0.01 covers one createOrder (0.006), not three (0.018)
+      const low = { [ACCOUNTS.demoRunner.toLowerCase()]: 270_000_000_000_000_000n, [ACCOUNTS.orderCreator.toLowerCase()]: 10_000_000_000_000_000n, [ACCOUNTS.merchantPayTo.toLowerCase()]: E18 / 2n };
+      api = fakeApi(); apiServer = await api.server; rpcServer = await fakeRpc(low); process.env.API_URL = apiServer.url; process.env.ARC_RPC_URL = rpcServer.url;
+      const sum = Object.values(low).reduce((a, b) => a + b, 0n);
+      seedPlan({ outflow: 50_000_000_000_000_000n, sum, settled: [{ round: 1, fixture: "CHANGED_IMPLEMENTATION", key: "k1", runId: "R1" }, { round: 1, fixture: "AMOUNT_UNIT_MISMATCH", key: "k2", runId: "R2" }] });
+      api.state.runs.set("R1", doneRun("R1", "CHANGED_IMPLEMENTATION")); api.state.runs.set("R2", doneRun("R2", "AMOUNT_UNIT_MISMATCH"));
+      expect(await dryRun()).toBe(0); expect(logs.join("\n")).toMatch(/needs >= 0\.2632 for the remaining work/);
+      expect(await execute()).toBe(0); expect(evidence().positions.verified).toBe(3);
+      // and once a reservation is released, the position it frees is funded as unfinished work BEFORE anything is started: too little → stop, no start
+      rmSync(join(root, "out"), { recursive: true, force: true }); api.state.posts.length = 0;
+      await apiServer.close(); await rpcServer.close();
+      const lower = { ...low, [ACCOUNTS.demoRunner.toLowerCase()]: 200_000_000_000_000_000n }; // below 0.2632
+      api = fakeApi(); apiServer = await api.server; rpcServer = await fakeRpc(lower); process.env.API_URL = apiServer.url; process.env.ARC_RPC_URL = rpcServer.url;
+      api.state.replay = (key) => (key === "ka" ? { status: 429, body: { error: "DEMO_BUDGET_EXHAUSTED" } } : null);
+      seedPlan({ outflow: 0n, sum: Object.values(lower).reduce((a, b) => a + b, 0n), settled: [{ round: 1, fixture: "CHANGED_IMPLEMENTATION", key: "k1", runId: "R1" }, { round: 1, fixture: "AMOUNT_UNIT_MISMATCH", key: "k2", runId: "R2" }], open: [{ round: 1, fixture: "APPROVED_PAYMENT", key: "ka", worst: WORST_APPROVED }] });
+      api.state.runs.set("R1", doneRun("R1", "CHANGED_IMPLEMENTATION")); api.state.runs.set("R2", doneRun("R2", "AMOUNT_UNIT_MISMATCH"));
+      expect(await dryRun()).toBe(0); // the open one is recovered first: nothing is remaining at the dry run
+      expect(await execute()).toBe(1);
+      expect(api.state.posts).toEqual([{ fixture: "APPROVED_PAYMENT", key: "ka" }]); // the replay only — the freed position was NOT started with too little
+      expect(logs.join("\n")).toMatch(/unfinished run\(s\) need >= 0\.2632 — nothing more is started/);
+      expect(readPlan().steps.acceptance.releasedRuns).toEqual(["run-1-APPROVED_PAYMENT:key:ka"]);
+    });
   });
   it("classifyReplay and parseOpenId: the pure decisions behind the flow", () => {
     expect(classifyReplay(null, 1000)).toMatchObject({ kind: "ambiguous" });

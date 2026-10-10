@@ -85,7 +85,12 @@ export type RunReport = {
 /** Spend plan (pure): what `repeats` rounds of the three fixtures can cost at most. The hard cap applies to the TOTAL worst case:
  *  fees + business payments + every gas ceiling (order creation, the business pay, the fee relay) — Gate D, 2026-10-09. */
 export function planSpend(o: { repeats: number; feeNative: bigint; businessNative: bigint; capNative: bigint; floorNative: bigint }) {
-  const runs = BigInt(o.repeats * FIXTURES.length), approved = BigInt(o.repeats);
+  return planSpendFor({ runs: o.repeats * FIXTURES.length, approved: o.repeats, feeNative: o.feeNative, businessNative: o.businessNative, capNative: o.capNative, floorNative: o.floorNative });
+}
+/** the same arithmetic for ANY set of positions — `runs` of them, `approved` of which pay the order (review of 0d1088e, P1: the balance
+ *  requirements of a restart are those of the unfinished work, not of the whole batch) */
+export function planSpendFor(o: { runs: number; approved: number; feeNative: bigint; businessNative: bigint; capNative: bigint; floorNative: bigint }) {
+  const runs = BigInt(o.runs), approved = BigInt(o.approved);
   const fees = runs * o.feeNative, business = approved * o.businessNative;
   const gasCreateCeil = runs * GAS_CREATE_ORDER * GAS_PRICE_CEIL, gasPayCeil = approved * GAS_PAY * GAS_PRICE_CEIL, gasRelayCeil = runs * RELAY_GAS_CEIL;
   const gasExpected = runs * GAS_CREATE_ORDER_OBSERVED * GAS_PRICE_OBSERVED + approved * GAS_PAY_OBSERVED * GAS_PRICE_OBSERVED;
@@ -95,7 +100,7 @@ export function planSpend(o: { repeats: number; feeNative: bigint; businessNativ
     /** the worst case of ONE run, for the measured-outflow stop before each start */
     worstPerRun: { approved: o.feeNative + o.businessNative + GAS_CREATE_ORDER * GAS_PRICE_CEIL + GAS_PAY * GAS_PRICE_CEIL + RELAY_GAS_CEIL, other: o.feeNative + GAS_CREATE_ORDER * GAS_PRICE_CEIL + RELAY_GAS_CEIL },
     // the server refuses any run that starts with runner balance < floor + order amount, so the LAST run still needs that after everything else was spent
-    runnerNeed: fees + business + gasPayCeil + o.floorNative + o.businessNative, creatorNeed: gasCreateCeil,
+    runnerNeed: runs === 0n ? 0n : fees + business + gasPayCeil + o.floorNative + o.businessNative, creatorNeed: gasCreateCeil,
   };
 }
 
@@ -359,15 +364,22 @@ export async function main(deps: Partial<Deps> = {}, argv: string[] = process.ar
   const prior = book.plan.steps.acceptance;
   const settledPrior = prior.settledRuns.map((id) => ({ id, ...parseOpenId(id) }));
   const openPrior = prior.openRuns.map((id) => ({ id, ...parseOpenId(id) }));
-  const taken = new Set([...settledPrior, ...openPrior].filter((x) => x.position).map((x) => positionId(x.position!)));
+  const releasedPrior = prior.releasedRuns.map((id) => ({ id, ...parseOpenId(id) }));
+  // review of 0d1088e (P1): only an operation settled WITH its run id is work done (it is re-read and re-verified below); a released reservation
+  // and a settled entry without a run id are NOT — those positions are run again, and they are budgeted and funded as remaining work
+  const completed = settledPrior.filter((x) => x.position && x.runId);
+  const unverifiable = settledPrior.filter((x) => x.position && !x.runId);
+  const taken = new Set([...completed, ...openPrior].filter((x) => x.position).map((x) => positionId(x.position!)));
   const remaining = allPositions.filter((p) => !taken.has(positionId(p)));
   const remainingWorst = remaining.reduce((a, p) => a + worstOf(p.fixture), 0n);
+  const needs = planSpendFor({ runs: remaining.length, approved: remaining.filter((p) => p.fixture === "APPROVED_PAYMENT").length, feeNative, businessNative, capNative: cap, floorNative: floor });
   const unrecoverable = openPrior.filter((x) => !x.key || !x.position);
 
   const problems: string[] = [];
   if (!plan.withinCap) problems.push(`plan worst case ${usdc(plan.totalWorst)} USDC (fees + business + gas ceilings) exceeds the cap ${usdc(cap)}`);
-  if (runnerBal < plan.runnerNeed) problems.push(`demo-runner holds ${usdc(runnerBal)} USDC, needs >= ${usdc(plan.runnerNeed)}`);
-  if (creatorBal < plan.creatorNeed) problems.push(`order-creator holds ${usdc(creatorBal)} USDC, needs >= ${usdc(plan.creatorNeed)} for createOrder gas`);
+  // the balances must cover the REMAINING work (review of 0d1088e, P1), never the whole batch again after a restart
+  if (runnerBal < needs.runnerNeed) problems.push(`demo-runner holds ${usdc(runnerBal)} USDC, needs >= ${usdc(needs.runnerNeed)} for the ${remaining.length} remaining run(s)`);
+  if (creatorBal < needs.creatorNeed) problems.push(`order-creator holds ${usdc(creatorBal)} USDC, needs >= ${usdc(needs.creatorNeed)} for the remaining createOrder gas`);
   if (net.budget.usedToday + remaining.length > net.budget.maxRunsPerDay) problems.push(`daily live-run budget: ${net.budget.usedToday} used + ${remaining.length} remaining > ${net.budget.maxRunsPerDay}`);
   if (net.budget.activeRun && !openPrior.length) problems.push(`a run is already active (${net.budget.activeRun}) and this plan has no open operation to recover`);
   { const c = checkStep(book.plan, "acceptance", remainingWorst, cap); if (!c.ok) problems.push(c.reason!); } // committed so far (settled + open at worst) + the REMAINING work
@@ -387,12 +399,14 @@ export async function main(deps: Partial<Deps> = {}, argv: string[] = process.ar
   console.log(`  fee relay gas     ${plan.runs} x <= ${usdc(RELAY_GAS_CEIL)} = ${usdc(plan.gasRelayCeil)} USDC   merchant-payto (the API's per-relay cap)`);
   console.log(`  TOTAL worst case  ${usdc(plan.totalWorst)} USDC (fees + business + all gas ceilings) · hard cap ${usdc(cap)} · stops before any run whose worst case would carry the measured outflow past it`);
   console.log(`  gas               createOrder ${plan.runs} x <=${GAS_CREATE_ORDER} gas (order-creator) + pay ${plan.approved} x <=${GAS_PAY} gas (demo-runner) at <=${Number(GAS_PRICE_CEIL) / 1e9} gwei: <= ${usdc(plan.gasCreateCeil + plan.gasPayCeil)} USDC (expected ~${usdc(plan.gasExpected)})`);
-  console.log(`  demo-runner       ${usdc(runnerBal)} USDC (needs >= ${usdc(plan.runnerNeed)}: spend + server floor ${usdc(floor)} + order ${usdc(businessNative)})`);
-  console.log(`  order-creator     ${usdc(creatorBal)} USDC (needs >= ${usdc(plan.creatorNeed)}; the deployer-admin key is not used by the demo)`);
+  console.log(`  demo-runner       ${usdc(runnerBal)} USDC (needs >= ${usdc(needs.runnerNeed)} for the remaining work: spend + server floor ${usdc(floor)} + order ${usdc(businessNative)}; a whole batch needs ${usdc(plan.runnerNeed)})`);
+  console.log(`  order-creator     ${usdc(creatorBal)} USDC (needs >= ${usdc(needs.creatorNeed)} for the remaining createOrder gas; a whole batch needs ${usdc(plan.creatorNeed)}; the deployer-admin key is not used by the demo)`);
   console.log(`  server budget     ${net.budget.usedToday}/${net.budget.maxRunsPerDay} runs used today, cooldown ${cooldown} s${Number.isFinite(net.budget.clientCooldownSeconds) ? "" : " (fallback, not reported)"}, active run ${net.budget.activeRun ?? "none"}`);
-  console.log(`  recovery          ${openPrior.length} open operation(s) of previous invocations (recovered first: the same fixture and admission key re-sent), ${settledPrior.length} completed (re-verified from the server's record), ${remaining.length} of ${allPositions.length} runs remaining; budgeted for the remaining work: ${usdc(remainingWorst)} USDC`);
+  console.log(`  recovery          ${openPrior.length} open operation(s) of previous invocations (recovered first: the same fixture and admission key re-sent), ${completed.length} completed (re-verified from the server's record), ${releasedPrior.length} released reservation(s) and ${unverifiable.length} settled without a run id (NOT counted as done: run again), ${remaining.length} of ${allPositions.length} runs remaining; budgeted for the remaining work: ${usdc(remainingWorst)} USDC`);
   for (const x of openPrior) console.log(`    open      ${x.id}${x.position ? ` (round ${x.position.round}, ${x.position.fixture})` : " (no position: NOT recoverable mechanically)"}`);
-  for (const x of settledPrior) console.log(`    completed ${x.id}${x.runId ? "" : " (no run id recorded: counted done, evidence in that invocation's file)"}`);
+  for (const x of completed) console.log(`    completed ${x.id}`);
+  for (const x of unverifiable) console.log(`    unverified ${x.id} (settled without a run id: not evidence of a run — the position is run again)`);
+  for (const x of releasedPrior) console.log(`    released  ${x.id} (the server proved nothing had started: the position is run again)`);
   if (!expectedRelease) console.log(`  EXPECTED_RELEASE not set (required for --execute); the server reports ${net.release}`);
   for (const l of book.lines()) console.log(l);
   for (const p of problems) console.log(`  PROBLEM: ${p}`);
@@ -428,7 +442,7 @@ export async function main(deps: Partial<Deps> = {}, argv: string[] = process.ar
     const file = resolve(dir, `mainnet-${stamp}${status === "PASS" ? "" : "-INCOMPLETE"}.json`);
     writeFileSync(file, JSON.stringify({ status, chainId: 5042, network: "mainnet", release: net.release, profile: net.profile, api, startedAtUTC, finishedAtUTC: new Date().toISOString(), repeats, accounts: ACCOUNTS,
       plan: { runs: plan.runs, serviceFeeUsdc: usdc(plan.fees), businessPaymentUsdc: usdc(plan.business), capUsdc: usdc(cap), gasCeilingUsdc: usdc(plan.gasCreateCeil + plan.gasPayCeil + plan.gasRelayCeil), totalWorstUsdc: usdc(plan.totalWorst) },
-      positions: { total: allPositions.length, recoveredOpen: openPrior.length, completedBefore: settledPrior.length, remainingAtStart: remaining.length, budgetedForRemainingUsdc: usdc(remainingWorst) }, recovered,
+      positions: { total: allPositions.length, recoveredOpen: openPrior.length, completedBefore: completed.length, releasedBefore: releasedPrior.length, unverifiedBefore: unverifiable.length, remainingAtStart: remaining.length, budgetedForRemainingUsdc: usdc(remainingWorst), verified: reports.length }, recovered,
       measuredOutflowUsdc: measured === null ? null : usdc(measured),
       spent: { serviceFeeUsdc: usdc(BigInt(reports.length) * feeNative), businessPaymentUsdc: usdc(BigInt(approved) * businessNative), note: "service fees land in merchant-payto, business payments in the MAIN proxy; both stay inside the project" },
       runs: [...reports].sort((a, b) => (a.round ?? 0) - (b.round ?? 0) || FIXTURES.indexOf(a.fixture) - FIXTURES.indexOf(b.fixture)), failure: failure ?? null }, null, 2));
@@ -447,7 +461,7 @@ export async function main(deps: Partial<Deps> = {}, argv: string[] = process.ar
   const syncMeasured = async () => { const t = await sumBalances(); book.apply((p) => updateMeasured(p, "acceptance", t)); return t; };
   // audit 2026-10-10 (OP-03): the pending commitment is replaced by the measured outflow in ONE durable update, after the balance read succeeded;
   // a failed read keeps the commitment pending (never an understated record)
-  const settleOpen = async (id: string, worst: bigint) => { const t = await sumBalances(); book.apply((p) => updateMeasured(noteOpen(p, "acceptance", id, false, worst), "acceptance", t)); return t; };
+  const settleOpen = async (id: string, worst: bigint, outcome: "settled" | "released" = "settled") => { const t = await sumBalances(); book.apply((p) => updateMeasured(noteOpen(p, "acceptance", id, false, worst, undefined, outcome), "acceptance", t)); return t; };
   const postAdmission = (fixture: FixtureId, key: string) => getJson(`${api}/v1/demo/run`, { method: "POST", headers: adminHeaders(), body: JSON.stringify({ fixture, clientRunRequestId: key }) }).catch(() => null);
   /** a run the server names is followed to its end, settled in the plan, verified and recorded under its position */
   const complete = async (openId: string, pos: Position, runId: string, worst: bigint, how: string) => {
@@ -485,8 +499,8 @@ export async function main(deps: Partial<Deps> = {}, argv: string[] = process.ar
         recovered.push({ id: openId, how: `admission re-sent: ${outcome.admission}; run followed to its end and verified`, runId: outcome.runId, position: pos });
         done.add(positionId(pos));
       } else if (outcome.kind === "nothing-started") {
-        console.log(`  ${x.id}: ${outcome.detail} — the reservation is released, nothing was spent; the position is run later in order`);
-        await settleOpen(x.id, worst);
+        console.log(`  ${x.id}: ${outcome.detail} — the reservation is RELEASED (not settled: nothing ran), nothing was spent; the position is run later in order`);
+        await settleOpen(x.id, worst, "released");
         recovered.push({ id: x.id, how: `released: ${outcome.detail}`, runId: null, position: pos });
       } else {
         throw new Refused(`${x.id}: ${outcome.kind === "retry" ? outcome.detail : outcome.detail} — the reservation is KEPT (not released on an answer that proves nothing); check ${api}/v1/demo/runs and re-run to recover it`);
@@ -494,19 +508,24 @@ export async function main(deps: Partial<Deps> = {}, argv: string[] = process.ar
     }
     // ---- 2. positions completed by previous invocations: their runs are re-read and re-verified (reads only), so the evidence of this
     //         invocation covers the whole plan; one without a run id counts as done with its evidence in the earlier invocation's file
-    for (const x of settledPrior) {
-      if (!x.position) continue; // a settled legacy id without a position says nothing about the schedule
-      if (done.has(positionId(x.position))) continue;
-      done.add(positionId(x.position));
-      if (!x.runId) { recovered.push({ id: x.id, how: "completed by a previous invocation; no run id recorded, its evidence is in that invocation's file", runId: null, position: x.position }); continue; }
-      const r = await withRetry(`run ${x.runId}`, async () => { const g = await getJson(`${api}/v1/demo/runs/${x.runId}`); if (g.status !== 200 || !g.body) throw new Error(`HTTP ${g.status}`); return g.body; }, 5, 2000);
-      const run = r.state === "DONE" ? r : await awaitRun(api, x.runId);
-      const report = await vRun(ctx, x.position.fixture, run); report.round = x.position.round;
+    for (const x of completed) {
+      if (done.has(positionId(x.position!))) continue;
+      const runId = x.runId!; // `completed` holds settled entries WITH a run id only
+      const r = await withRetry(`run ${runId}`, async () => { const g = await getJson(`${api}/v1/demo/runs/${runId}`); if (g.status !== 200 || !g.body) throw new Error(`HTTP ${g.status}`); return g.body; }, 5, 2000);
+      const run = r.state === "DONE" ? r : await awaitRun(api, runId);
+      const report = await vRun(ctx, x.position!.fixture, run); report.round = x.position!.round;
       report.recovery = await vRec(api, token, run.result); report.passport = await vPass(api, run, rpc, net.fixtures.find((f) => f.id === x.position!.fixture)!.baselineDigest!, dir);
-      reports.push(report); recovered.push({ id: x.id, how: "completed by a previous invocation; re-read and re-verified", runId: x.runId, position: x.position });
+      reports.push(report); recovered.push({ id: x.id, how: "completed by a previous invocation; re-read and re-verified", runId, position: x.position });
+      done.add(positionId(x.position!));
       console.log(`  ${x.id}: completed earlier as run ${x.runId}; re-verified`);
     }
-    // ---- 3. the remaining positions, in order
+    for (const x of unverifiable) console.log(`  ${x.id}: settled by a previous invocation without a run id — not evidence of a run; the position is run again`);
+    // ---- 3. the remaining positions, in order — funded as what is still unfinished NOW (a released reservation is unfinished work)
+    const unfinished = allPositions.filter((p) => !done.has(positionId(p)));
+    const needNow = planSpendFor({ runs: unfinished.length, approved: unfinished.filter((p) => p.fixture === "APPROVED_PAYMENT").length, feeNative, businessNative, capNative: cap, floorNative: floor });
+    const [runnerNow, creatorNow] = await Promise.all([client.getBalance({ address: ACCOUNTS.demoRunner }), client.getBalance({ address: ACCOUNTS.orderCreator })]);
+    if (runnerNow < needNow.runnerNeed) throw new Refused(`demo-runner holds ${usdc(runnerNow)} USDC, the ${unfinished.length} unfinished run(s) need >= ${usdc(needNow.runnerNeed)} — nothing more is started`);
+    if (creatorNow < needNow.creatorNeed) throw new Refused(`order-creator holds ${usdc(creatorNow)} USDC, the unfinished createOrder gas needs >= ${usdc(needNow.creatorNeed)} — nothing more is started`);
     for (const pos of allPositions) {
       if (done.has(positionId(pos))) continue;
       const fixture = pos.fixture;
@@ -535,6 +554,18 @@ export async function main(deps: Partial<Deps> = {}, argv: string[] = process.ar
     try { await syncMeasured(); } catch { /* the record keeps its last reading */ } book.apply((p) => endStep(p, "acceptance", "stopped"));
     console.error(`${e instanceof Refused ? "REFUSED" : "STOPPED"} after ${reports.length}/${total} verified runs: ${failure.message}`);
     console.error(`INCOMPLETE evidence (money trail of the failing run included): ${save("INCOMPLETE", failure)}`);
+    return 1;
+  }
+  // review of 0d1088e (P1): PASS needs a verified report for EVERY planned position, exactly once — released reservations, settled entries
+  // without a run id or anything else that is not a verified run never count
+  const verifiedPositions = new Set(reports.map((r) => `run-${r.round}-${r.fixture}`));
+  const unproven = allPositions.filter((p) => !verifiedPositions.has(positionId(p)));
+  const duplicated = allPositions.filter((p) => reports.filter((r) => `run-${r.round}-${r.fixture}` === positionId(p)).length > 1);
+  if (unproven.length || duplicated.length) {
+    measured = meter.outflow(await sumBalances().catch(() => meter.startTotal));
+    book.apply((p) => endStep(p, "acceptance", "stopped"));
+    const failure = { message: `no PASS: ${unproven.length ? `no verified run for ${unproven.map(positionId).join(", ")}` : ""}${unproven.length && duplicated.length ? "; " : ""}${duplicated.length ? `more than one report for ${duplicated.map(positionId).join(", ")}` : ""}`, fixture: null, runId: null, lastStep: null, serviceFeeTx: null, businessTxHash: null };
+    console.error(`INCOMPLETE: ${failure.message}; evidence: ${save("INCOMPLETE", failure)}`);
     return 1;
   }
   measured = meter.outflow(await syncMeasured());

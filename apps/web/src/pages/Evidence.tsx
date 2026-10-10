@@ -5,13 +5,16 @@ import { api, apiPath, explorerAddr, explorerTx, type RunSummary } from "../lib/
 import { Chip, Hex, Labels } from "../components/Badges";
 import { HandRule, ReceiptChain } from "../components/Illustrations";
 import { RunsTable } from "../components/RunsTable";
+import { EvidenceFiles } from "../components/EvidenceFiles";
+import { ShowMore } from "../components/ShowMore";
+import { limited, LIST_PAGE } from "../lib/evidenceFiles";
 import { ago, utc, type Tone } from "../lib/format";
 import { fundsSummary, fundsWarning } from "../lib/funds";
 import type { Capability } from "../lib/api";
 
 const CAP_TONE: Record<Capability["status"], Tone> = { MAINNET_VERIFIED: "violet", IMPLEMENTED_TESTNET: "info", PROPOSED: "warn", DISABLED: "neutral" };
 
-const PAGE = 50;
+const PAGE = 12; // a page of runs at a time, like the Demo page (review of 2026-10-10: no fifty-row dumps)
 
 export default function Evidence() {
   const { net, link = (to: string) => to } = useNet();
@@ -20,6 +23,7 @@ export default function Evidence() {
   const [reports, setReports] = useState<{ reportDigest: string; subject: string; mode: string; createdAt: string }[]>([]);
   const [history, setHistory] = useState<{ runs: RunSummary[]; total?: number; more: boolean }>({ runs: [], total: undefined, more: false });
   const [ready, setReady] = useState<any>(null);
+  const [reportLimit, setReportLimit] = useState(LIST_PAGE);
   useEffect(() => { api.evidence().then((r) => setFiles(r.files)).catch(() => {}); api.publicReports().then((r) => setReports(r.reports)).catch(() => {}); api.runs(PAGE, 0).then((r) => setHistory({ runs: r.runs ?? [], total: r.total ?? (r.runs ?? []).length, more: false })).catch(() => {}); api.health().then(setReady).catch((e) => setReady(e?.body ?? null)); }, []);
   const loadMore = useCallback(() => {
     setHistory((h) => ({ ...h, more: true }));
@@ -97,7 +101,7 @@ export default function Evidence() {
             )}
             <div className="stack" style={{ gap: 8 }}>
               <h3>Published evidence files</h3>
-              {files.length === 0 ? <p className="dim small">none published</p> : <ul className="list plain small">{files.map((f) => <li key={f.path}><a href={apiPath(`/v1/evidence/${f.path}`)} target="_blank" rel="noreferrer" className="mono" style={{ overflowWrap: "anywhere" }}>{f.path}</a> <span className="tiny dim">{f.bytes} B</span></li>)}</ul>}
+              <EvidenceFiles files={files} href={(path) => apiPath(`/v1/evidence/${path}`)} />
             </div>
             <p className="small muted">API: <a href={apiPath("/openapi.json")} target="_blank" rel="noreferrer">{apiPath("/openapi.json")}</a> · <a href={apiPath("/health/ready")} target="_blank" rel="noreferrer">{apiPath("/health/ready")}</a> · <a href={apiPath("/v1/network")} target="_blank" rel="noreferrer">{apiPath("/v1/network")}</a> · <a href={apiPath("/v1/demo/runs")} target="_blank" rel="noreferrer">{apiPath("/v1/demo/runs")}</a></p>
           </div>
@@ -110,7 +114,7 @@ export default function Evidence() {
         </div>
         <div className="stack" style={{ gap: 8 }}>
           <div className="row between"><h3>Public object reports</h3><span className="tiny dim">cached observations with raw evidence</span></div>
-          {reports.length === 0 ? <p className="dim small">none yet</p> : <div className="tablewrap fit"><table className="t"><tbody>{reports.map((r) => <tr key={r.reportDigest}><td className="when" title={ago(r.createdAt)}>{utc(r.createdAt)}</td><td><Link to={link(`/subjects/${r.subject}`)}><Hex value={r.subject} n={6} /></Link></td><td className="small">{r.mode}</td><td><a href={apiPath(`/v1/public-reports/${r.reportDigest}`)} target="_blank" rel="noreferrer"><Hex value={r.reportDigest} n={6} /></a></td></tr>)}</tbody></table></div>}
+          {reports.length === 0 ? <p className="dim small">none yet</p> : <div className="tablewrap fit"><table className="t"><tbody>{limited(reports, reportLimit).shown.map((r) => <tr key={r.reportDigest}><td className="when" title={ago(r.createdAt)}>{utc(r.createdAt)}</td><td><Link to={link(`/subjects/${r.subject}`)}><Hex value={r.subject} n={6} /></Link></td><td className="small">{r.mode}</td><td><a href={apiPath(`/v1/public-reports/${r.reportDigest}`)} target="_blank" rel="noreferrer"><Hex value={r.reportDigest} n={6} /></a></td></tr>)}</tbody></table><ShowMore shown={Math.min(reportLimit, reports.length)} total={reports.length} onMore={() => setReportLimit((l) => l + LIST_PAGE)} noun="reports" testId="reports-more" /></div>}
         </div>
       </div>
     </section>

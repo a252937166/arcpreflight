@@ -14,7 +14,10 @@ import { approvedBaseline, developerIntent, developerPolicy, prepareOrderQuote, 
 import { useWallet } from "../lib/wallet";
 import { purchaseReport, signFeeAuthorization, type Delivered } from "../lib/walletRun";
 import { describeBody, describeError, describedError, purchaseUncertainText, type Described } from "../lib/errors";
-import { storedSession, withSession, type Session } from "../lib/session";
+import { sessionFor, storedSession, withSession, type Session } from "../lib/session";
+import { getApiBase } from "../lib/api";
+import { ShowMore } from "../components/ShowMore";
+import { limited, LIST_PAGE } from "../lib/evidenceFiles";
 import { rememberedChecks } from "../lib/checks";
 import { saveJson } from "../lib/download";
 import { baselineDigestFor, creationStopped, creationUnconfirmed, fixtureForProxy, nativeAtomicToUsdcText, orderLimits, orderViewFromCreated, paymentLabel, toDeveloperOrder, ORDER_GATED_TEXT, type OrderBody, type Proxy } from "../lib/orders";
@@ -95,6 +98,9 @@ export default function Developer() {
   const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({});
   const [mine, setMine] = useState<{ orders: OrderView[]; attempts: AttemptView[]; loaded: boolean; busy: boolean; err: Described | null; rowBusy: string | null; rowErr: Described | null }>({ orders: [], attempts: [], loaded: false, busy: false, err: null, rowBusy: null, rowErr: null });
   const [checks, setChecks] = useState<{ rows: CheckRow[]; busy: boolean; err: Described | null; loaded: boolean; rowBusy: string | null; rowErr: Described | null }>({ rows: [], busy: false, err: null, loaded: false, rowBusy: null, rowErr: null });
+  /** rows shown per list (review of 2026-10-10): eight at a time, more on request — never a dump of everything the session ever did */
+  const [rowLimits, setRowLimits] = useState<Record<string, number>>({});
+  const page = <T,>(name: string, items: T[]) => { const limit = rowLimits[name] ?? LIST_PAGE; return { ...limited(items, limit), footer: <ShowMore shown={Math.min(limit, items.length)} total={items.length} onMore={() => setRowLimits((l) => ({ ...l, [name]: limit + LIST_PAGE }))} testId={`more:${name}`} /> }; };
   /** the account whose workflow is on screen (null while switching or reading back): the save effect writes under this payer only */
   const owner = useRef<string | null>(null);
   const hydrated = useRef<string | null>(null); const hydrating = useRef<string | null>(null); const quoteSeq = useRef(0);
@@ -189,8 +195,9 @@ export default function Developer() {
     if (!current) { setMine((m) => ({ ...m, loaded: true, busy: false })); return; }
     setMine((m) => ({ ...m, busy: true, err: null }));
     const key = hydrated.current; // the (instance, payer) these lists are for — a response that lands after either changed is dropped (review of bf0c800, P2)
+    const session = sessionFor(); // both reads on the instance the listing began on
     try {
-      const [o, a] = await Promise.all([withSession((t, c) => c.orders(t)), withSession((t, c) => c.attempts(t))]);
+      const [o, a] = await Promise.all([session((t, c) => c.orders(t)), session((t, c) => c.attempts(t))]);
       if (hydrated.current !== key) return;
       setSession(storedSession());
       setMine((m) => ({ ...m, orders: o?.orders ?? [], attempts: a?.attempts ?? [], loaded: true, busy: false, err: null }));
@@ -294,7 +301,13 @@ export default function Developer() {
 
   // ---- actions
   const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); setErr(null); try { await fn(); } catch (e: any) { setErr(describeError(e)); } finally { setBusy(null); setSession(storedSession()); } };
-  const rowAction = async (id: string, fn: () => Promise<void>) => { setMine((m) => ({ ...m, rowBusy: id, rowErr: null })); try { await fn(); setMine((m) => ({ ...m, rowBusy: null })); } catch (e) { setMine((m) => ({ ...m, rowBusy: null, rowErr: describeError(e) })); } };
+  /** Review of 0d1088e (P2): a result is applied only while the workflow generation, the payer and the instance it was requested under are still
+   *  the ones on screen — and the current attempt/order only while it is still the selected one. Anything else is a retired workflow's answer:
+   *  the server record stands, the list row may update, nothing is restored on screen. */
+  const stamp = () => ({ g: wf.current, key: hydrated.current, base: getApiBase() });
+  const stillLive = (s: { g: number; key: string | null; base: string }) => current(s.g) && hydrated.current === s.key && getApiBase() === s.base;
+  const sameListing = (s: { key: string | null; base: string }) => hydrated.current === s.key && getApiBase() === s.base;
+  const rowAction = async (id: string, fn: (s: ReturnType<typeof stamp>) => Promise<void>) => { const s = stamp(); setMine((m) => ({ ...m, rowBusy: id, rowErr: null })); try { await fn(s); if (sameListing(s)) setMine((m) => ({ ...m, rowBusy: null })); } catch (e) { if (sameListing(s)) setMine((m) => ({ ...m, rowBusy: null, rowErr: describeError(e) })); } };
   const resetAll = () => { nextWorkflow(); clearWorkflow(account); resetVisible(); };
   const createOrder = (body: OrderBody) => withSession((t, c) => c.createOrder(body, t));
   /** 201 (confirmed), 202 (identity recorded, creation not confirmed) or a 502 that names the order: the card shows that order — never "nothing was changed" */
@@ -307,9 +320,9 @@ export default function Developer() {
     void refreshOrder(view.orderId); void loadMine();
   };
   /** owner-only bounded reconciliation of an unconfirmed creation (may hand the node the same signed transaction again; never a second order) */
-  const adoptOrder = (o: OrderView) => { setOrder((cur) => (cur && same(cur.orderId, o.orderId) ? o : cur)); setMine((m) => ({ ...m, orders: m.orders.map((x) => (same(x.orderId, o.orderId) ? o : x)) })); };
-  const recoverOrder = (id: string) => run("recover-order", async () => adoptOrder(await withSession((t, c) => c.recoverOrder(id, t))));
-  const recoverOrderRow = (id: string) => rowAction(id, async () => adoptOrder(await withSession((t, c) => c.recoverOrder(id, t))));
+  const adoptOrder = (o: OrderView, s: ReturnType<typeof stamp>) => { if (!sameListing(s) || !same(o.payer, accountRef.current)) return; if (stillLive(s)) setOrder((cur) => (cur && same(cur.orderId, o.orderId) ? o : cur)); setMine((m) => ({ ...m, orders: m.orders.map((x) => (same(x.orderId, o.orderId) ? o : x)) })); };
+  const recoverOrder = (id: string) => run("recover-order", async () => { const s = stamp(); adoptOrder(await withSession((t, c) => c.recoverOrder(id, t)), s); });
+  const recoverOrderRow = (id: string) => rowAction(id, async (s) => adoptOrder(await withSession((t, c) => c.recoverOrder(id, t)), s));
   const approve = () => { if (orderConfirmed) setApproved(true); };
   const getQuote = () => run("quote", async () => {
     if (!devOrder || !policy || !account || !net) return;
@@ -348,9 +361,9 @@ export default function Developer() {
     return run("execute", async () => {
       if (!w.provider || !account || !check || !delivered || !order || !policy) return;
       if (budgetExec.enough === false) throw new Error(`Not enough USDC in your wallet: ${budgetExec.sentence}.`);
-      const g = wf.current;
+      const g = wf.current; const session = sessionFor(); // review of 0d1088e (P1): validate, prompt, report the hash, poll and recover on ONE instance
       setExec({ phase: "validating", txHash: null, refusal: null, err: null }); setPassport(null); setVerification(null);
-      const ev = await executeAttempt({ provider: w.provider, account, requestId: check.requestId, orderId: order.orderId, policy, withToken: withSession, onEvent: onExecEventFor(g) });
+      const ev = await executeAttempt({ provider: w.provider, account, requestId: check.requestId, orderId: order.orderId, policy, withToken: session, onEvent: onExecEventFor(g) });
       if (!current(g) || !same(ev.attempt?.payer ?? account, accountRef.current)) { void loadMine(); return; } // the account changed or the workflow was reset meanwhile: the attempt is listed under its own payer, never shown here
       if (ev.attempt) setAttempt(ev.attempt);
       void refreshOrder(); void loadMine();
@@ -360,9 +373,9 @@ export default function Developer() {
     if (executionInFlight() || busy) return;
     return run("execute", async () => {
       if (!w.provider || !account) return;
-      const g = wf.current; // review of bf0c800 (P2): a resume that finishes after the payer or the workflow changed reconciles its own record only
+      const g = wf.current; const session = sessionFor(); // review of bf0c800 (P2): a resume that finishes after the payer or the workflow changed reconciles its own record only; one instance for the whole resume (0d1088e, P1)
       setAttempt(a); setExec({ phase: "prompting", txHash: null, refusal: null, err: null });
-      const ev = await sendValidatedAttempt({ provider: w.provider, account, attempt: a, withToken: withSession, onEvent: onExecEventFor(g) });
+      const ev = await sendValidatedAttempt({ provider: w.provider, account, attempt: a, withToken: session, onEvent: onExecEventFor(g) });
       if (!current(g) || !same(ev.attempt?.payer ?? a.payer, accountRef.current)) { void loadMine(); return; }
       if (ev.attempt) setAttempt(ev.attempt);
       void refreshOrder(); void loadMine();
@@ -372,34 +385,37 @@ export default function Developer() {
   const reconcileUncertain = (a: AttemptView) => {
     if (executionInFlight()) return;
     return run("execute", async () => {
-      const g = wf.current;
+      const g = wf.current; const session = sessionFor();
       setAttempt(a); setExec({ phase: "uncertain", txHash: a.txHash, refusal: null, err: null });
-      const ev = await reconcileUncertainAttempt({ attempt: a, withToken: withSession, onEvent: onExecEventFor(g) });
+      const ev = await reconcileUncertainAttempt({ attempt: a, withToken: session, onEvent: onExecEventFor(g) });
       if (!current(g) || !same(ev.attempt?.payer ?? a.payer, accountRef.current)) { void loadMine(); return; }
       if (ev.attempt) setAttempt(ev.attempt);
       void refreshOrder(a.orderId); void loadMine();
     });
   };
-  const adopt = (a: AttemptView) => {
-    if (same(a.payer, accountRef.current)) setAttempt((cur) => (!cur || cur.attemptId === a.attemptId ? a : cur)); // another payer's attempt is listed, never made current
+  const adopt = (a: AttemptView, s: ReturnType<typeof stamp>) => {
+    if (!sameListing(s) || !same(a.payer, accountRef.current)) return; // another payer's, or another instance's listing: nothing on screen is touched
     setMine((m) => ({ ...m, attempts: m.attempts.map((x) => (x.attemptId === a.attemptId ? { ...x, ...a } : x)) }));
+    if (!stillLive(s)) return; // the workflow moved on (start over, another order or attempt picked): the row is updated, nothing is restored
+    // only the attempt that is STILL the selected one takes the answer — an empty slot is never filled by a late answer (review of 0d1088e, P2)
+    setAttempt((cur) => (cur && cur.attemptId === a.attemptId ? a : cur));
     // an attempt still VALIDATED after an unexplained wallet answer keeps that status, and one with a prompt marker stays uncertain: no second prompt is offered until it closes or the visitor abandons it
-    setExec((x) => (attempt && attempt.attemptId !== a.attemptId ? x : { ...x, phase: isTerminal(a.state) ? "done" : x.phase === "unresolved" ? "unresolved" : x.phase === "unknown-submission" ? "unknown-submission" : x.phase === "uncertain" || isUncertain(a) ? "uncertain" : "idle", err: x.phase === "unknown-submission" && !isTerminal(a.state) ? x.err : null }));
-    void refreshOrder(a.orderId);
+    setExec((x) => (!attempt || attempt.attemptId !== a.attemptId ? x : { ...x, phase: isTerminal(a.state) ? "done" : x.phase === "unresolved" ? "unresolved" : x.phase === "unknown-submission" ? "unknown-submission" : x.phase === "uncertain" || isUncertain(a) ? "uncertain" : "idle", err: x.phase === "unknown-submission" && !isTerminal(a.state) ? x.err : null }));
+    if (attempt && attempt.attemptId === a.attemptId) void refreshOrder(a.orderId);
   };
-  const abandon = (id: string) => rowAction(id, async () => adopt(await withSession((t, c) => c.attemptAbandon(id, t))));
-  const recover = (id: string) => rowAction(id, async () => adopt(await withSession((t, c) => c.attemptRecover(id, t))));
-  const observe = (id: string) => rowAction(id, async () => adopt(await withSession((t, c) => c.attempt(id, t))));
+  const abandon = (id: string) => rowAction(id, async (s) => adopt(await withSession((t, c) => c.attemptAbandon(id, t)), s));
+  const recover = (id: string) => rowAction(id, async (s) => adopt(await withSession((t, c) => c.attemptRecover(id, t)), s));
+  const observe = (id: string) => rowAction(id, async (s) => adopt(await withSession((t, c) => c.attempt(id, t)), s));
   /** make a listed attempt (or one remembered by this browser) the current one — the order follows it; only for this account's own attempts */
   const pick = (id: string) => rowAction(id, async () => {
-    const g = nextWorkflow(); // W03: picking another attempt is a new workflow on screen
-    const full = await withSession((t, c) => c.attempt(id, t));
+    const g = nextWorkflow(); const session = sessionFor(); // W03: picking another attempt is a new workflow on screen; its reads on one instance
+    const full = await session((t, c) => c.attempt(id, t));
     if (!current(g)) return; // the workflow moved on while the attempt was read (review of bf0c800, P2)
     if (!same(full.payer, accountRef.current)) throw new Error(`This attempt belongs to wallet ${short(full.payer, 4)}; connect that wallet to continue it. It stays listed under "other wallets in this browser".`);
     const pickedUncertain = isUncertain(full);
     setAttempt(full); setExec({ phase: isTerminal(full.state) ? "done" : pickedUncertain ? "uncertain" : "idle", txHash: full.txHash, refusal: null, err: null }); setPassport(null); setVerification(null); setOpenSteps({});
     if (!order || order.orderId.toLowerCase() !== full.orderId.toLowerCase()) {
-      const o = await withSession((t, c) => c.order(full.orderId, t));
+      const o = await session((t, c) => c.order(full.orderId, t));
       if (!current(g)) return;
       setOrder(o); setOrderMeta({ baselineDigest: baselineDigestFor(net, o.proxy), proxy: o.proxy }); setApproved(true); setCheck(null);
     }
@@ -412,10 +428,10 @@ export default function Developer() {
     if (check?.delivered) { const { __status: _s, ...bundle } = (await withSession((t, c) => c.requestPassport(check.requestId, t))) as any; if (!current(g)) return; const name = `arcpreflight-check-passport-${check.requestId.slice(0, 8)}.json`; saveJson(name, bundle); setPassport({ bundle, name, kind: "check" }); setVerification(null); }
   });
   // my checks (fee history) rows
-  const checkRow = async (id: string, fn: () => Promise<void>) => { setChecks((c) => ({ ...c, rowBusy: id, rowErr: null })); try { await fn(); setChecks((c) => ({ ...c, rowBusy: null })); } catch (e) { setChecks((c) => ({ ...c, rowBusy: null, rowErr: describeError(e) })); } };
-  const patchRow = (id: string, r: any) => setChecks((c) => ({ ...c, rows: c.rows.map((row) => (row.requestId === id ? foldRequest(row, r) : row)) }));
-  const refreshRow = (id: string) => checkRow(id, async () => patchRow(id, await withSession((t, c) => c.request(id, t))));
-  const recoverRow = (id: string) => checkRow(id, async () => patchRow(id, await withSession((t, c) => c.recoverRequest(id, t))));
+  const checkRow = async (id: string, fn: (s: ReturnType<typeof stamp>) => Promise<void>) => { const s = stamp(); setChecks((c) => ({ ...c, rowBusy: id, rowErr: null })); try { await fn(s); if (sameListing(s)) setChecks((c) => ({ ...c, rowBusy: null })); } catch (e) { if (sameListing(s)) setChecks((c) => ({ ...c, rowBusy: null, rowErr: describeError(e) })); } };
+  const patchRow = (id: string, r: any, s: ReturnType<typeof stamp>) => { if (sameListing(s)) setChecks((c) => ({ ...c, rows: c.rows.map((row) => (row.requestId === id ? foldRequest(row, r) : row)) })); };
+  const refreshRow = (id: string) => checkRow(id, async (s) => patchRow(id, await withSession((t, c) => c.request(id, t)), s));
+  const recoverRow = (id: string) => checkRow(id, async (s) => patchRow(id, await withSession((t, c) => c.recoverRequest(id, t)), s));
   const passportRow = (id: string) => checkRow(id, async () => { const { __status: _s, ...bundle } = (await withSession((t, c) => c.requestPassport(id, t))) as any; saveJson(`arcpreflight-check-passport-${id.slice(0, 8)}.json`, bundle); });
 
   const anchors = useMemo(() => ({ baselineDigests: orderMeta.baselineDigest ? [orderMeta.baselineDigest] : [], policyDigests: pDigest ? [pDigest] : [] }), [orderMeta.baselineDigest, pDigest]);
@@ -590,7 +606,7 @@ export default function Developer() {
               <div className="tablewrap"><table className="t attempts" data-testid="my-attempts">
                 <thead><tr><th>when (UTC)</th><th>attempt</th><th>state</th><th>transaction</th><th>next action</th><th></th></tr></thead>
                 <tbody>
-                  {myAttempts.map((a) => (
+                  {page("my-attempts", myAttempts).shown.map((a) => (
                     <tr key={a.attemptId} className={attempt?.attemptId === a.attemptId ? "on" : ""}>
                       <td className="when" title={ago(a.createdAt)}>{utc(a.createdAt)}</td>
                       <td><code>{a.attemptId.slice(0, 8)}</code><div className="tiny dim">order <Hex value={a.orderId} n={4} /> · {usdc6(a.amountNativeAtomic)}</div></td>
@@ -605,16 +621,16 @@ export default function Developer() {
                       </td>
                     </tr>
                   ))}
-                  {remembered.map((a) => (
+                  {page("remembered", remembered).shown.map((a) => (
                     <tr key={a.attemptId}><td className="when">{utc(a.createdAt)}</td><td><code>{a.attemptId.slice(0, 8)}</code><div className="tiny dim">order <Hex value={a.orderId} n={4} /></div></td><td><Chip>{String(a.state ?? "remembered").replace(/_/g, " ").toLowerCase()}</Chip><div className="tiny dim">remembered in this browser, not under this session</div></td><td><span className="dim">—</span></td><td className="small muted">reconnect the session that created it</td><td className="actions"><button className="btn sm ghost" disabled={mine.rowBusy === a.attemptId} onClick={() => pick(a.attemptId)}>try</button></td></tr>
                   ))}
                 </tbody>
-              </table></div>
+              </table>{page("my-attempts", myAttempts).footer}{page("remembered", remembered).footer}</div>
             )}
             {myOrders.length > 0 && (
               <div className="tablewrap"><table className="t orders" data-testid="my-orders">
                 <thead><tr><th>when (UTC)</th><th>order</th><th>amount</th><th>payment</th><th>next action</th><th></th></tr></thead>
-                <tbody>{myOrders.map((o) => (
+                <tbody>{page("my-orders", myOrders).shown.map((o) => (
                   <tr key={o.orderId} className={order?.orderId === o.orderId ? "on" : ""}>
                     <td className="when" title={ago(o.createdAt)}>{utc(o.createdAt)}</td>
                     <td><Hex value={o.orderId} n={5} />{o.tx && <> · <Hex value={o.tx} n={4} link={explorerTx(net, o.tx)} /></>}{o.state !== "CONFIRMED" && <> <Chip tone={creationUnconfirmed(o) ? "warn" : "bad"}>{creationUnconfirmed(o) ? "creation not confirmed" : o.state.toLowerCase().replace(/_/g, " ")}</Chip></>}<div className="tiny dim">{o.proxy ?? "?"} · {o.source}{o.reference ? ` · “${o.reference}”` : ""}</div></td>
@@ -624,7 +640,7 @@ export default function Developer() {
                     <td className="actions">{creationUnconfirmed(o) && <button className="btn sm" disabled={mine.rowBusy === o.orderId} onClick={() => recoverOrderRow(o.orderId)}>Recover order</button>}{order?.orderId !== o.orderId && <button className="btn sm ghost" onClick={() => pickOrder(o)}>use</button>}</td>
                   </tr>
                 ))}</tbody>
-              </table></div>
+              </table>{page("my-orders", myOrders).footer}</div>
             )}
             {session && mine.loaded && myOrders.length === 0 && myAttempts.length === 0 && !mine.err && <p className="dim small">no orders or attempts yet for this wallet in this browser's session</p>}
             {(otherAttempts.length > 0 || otherOrders.length > 0 || otherSaved.length > 0) && (
@@ -635,7 +651,7 @@ export default function Developer() {
                   {otherAttempts.length > 0 && (
                     <div className="tablewrap"><table className="t attempts">
                       <thead><tr><th>when (UTC)</th><th>wallet</th><th>attempt</th><th>state</th><th>transaction</th><th></th></tr></thead>
-                      <tbody>{otherAttempts.map((a) => (
+                      <tbody>{page("other-attempts", otherAttempts).shown.map((a) => (
                         <tr key={a.attemptId}>
                           <td className="when" title={ago(a.createdAt)}>{utc(a.createdAt)}</td>
                           <td><Hex value={a.payer} n={4} link={explorerAddr(net, a.payer)} /></td>
@@ -648,12 +664,12 @@ export default function Developer() {
                           </td>
                         </tr>
                       ))}</tbody>
-                    </table></div>
+                    </table>{page("other-attempts", otherAttempts).footer}</div>
                   )}
                   {otherOrders.length > 0 && (
                     <div className="tablewrap"><table className="t orders">
                       <thead><tr><th>when (UTC)</th><th>wallet</th><th>order</th><th>amount</th><th>payment</th></tr></thead>
-                      <tbody>{otherOrders.map((o) => (
+                      <tbody>{page("other-orders", otherOrders).shown.map((o) => (
                         <tr key={o.orderId}>
                           <td className="when" title={ago(o.createdAt)}>{utc(o.createdAt)}</td>
                           <td><Hex value={o.payer} n={4} link={explorerAddr(net, o.payer)} /></td>
@@ -662,7 +678,7 @@ export default function Developer() {
                           <td><Chip tone={paymentLabel(o).tone}>{paymentLabel(o).text}</Chip></td>
                         </tr>
                       ))}</tbody>
-                    </table></div>
+                    </table>{page("other-orders", otherOrders).footer}</div>
                   )}
                 </div>
               </details>
@@ -677,7 +693,7 @@ export default function Developer() {
                 {checks.rows.length > 0 && (
                   <div className="tablewrap"><table className="t checks">
                     <thead><tr><th>when (UTC)</th><th>subject</th><th>value</th><th>state</th><th>payment</th><th>report</th><th></th></tr></thead>
-                    <tbody>{checks.rows.map((c) => (
+                    <tbody>{page("checks", checks.rows).shown.map((c) => (
                       <tr key={c.requestId}>
                         <td className="when" title={ago(c.createdAt)}>{utc(c.createdAt)}</td>
                         <td>{c.subject ? <Hex value={c.subject} n={5} link={explorerAddr(net, c.subject)} /> : "—"}<div className="tiny dim">request <code>{c.requestId.slice(0, 8)}</code></div></td>
@@ -692,7 +708,7 @@ export default function Developer() {
                         </td>
                       </tr>
                     ))}</tbody>
-                  </table></div>
+                  </table>{page("checks", checks.rows).footer}</div>
                 )}
                 <ErrorBanner err={checks.rowErr} />
               </div>

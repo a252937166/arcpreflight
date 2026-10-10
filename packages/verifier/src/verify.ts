@@ -211,6 +211,11 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
   if (!report) digestProblems.push("report.json missing or unreadable");
   const subjectMode = manifest.subject?.executionMode;
   if (subjectMode !== undefined && subjectMode !== "runner" && subjectMode !== "wallet") digestProblems.push(`manifest subject.executionMode ${JSON.stringify(subjectMode)} is not runner or wallet`);
+  // review of 0d1088e (P2): what kind of workflow this passport records is read from its RECORDS, never from the label alone — a decision,
+  // a plan, a final validation or an execution receipt make it a run; a label that says otherwise is a conflict, not a lighter set of rules
+  const runRecords = [decision && "decision.json", plan && "transaction-plan.json", fv && "final-validation.json", execution && "execution.json"].filter(Boolean) as string[];
+  if (manifest.subject?.kind === "paid-check" && runRecords.length) digestProblems.push(`manifest subject.kind paid-check conflicts with the run records present (${runRecords.join(", ")})`);
+  if ((manifest.subject?.kind === "demo-run" || manifest.subject?.kind === "wallet-run") && !execution && files["execution.json"] === undefined) digestProblems.push(`manifest subject.kind ${manifest.subject.kind} without execution.json`);
   if ((manifest.subject?.kind === "wallet-run" && subjectMode !== undefined && subjectMode !== "wallet") || (manifest.subject?.kind === "demo-run" && subjectMode === "wallet")) digestProblems.push(`manifest subject.kind ${manifest.subject.kind} is inconsistent with executionMode ${subjectMode}`);
   set("DIGEST_INTEGRITY", digestProblems.length ? "FAIL" : "PASS", digestProblems.length ? list(digestProblems) : `${recomputed.size} digested objects re-hashed under accepted profiles; cross-links hold`);
 
@@ -487,7 +492,9 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
     // settlement. A required source that the passport does not record at all is missing evidence: the recomputed total is incomplete (a
     // statement that still claims completeness differs from the recomputation and fails), and the finding is never a PASS.
     const settledFee = payment?.settlement?.state === "COMPLETED" || !!feeSrc;
-    const expected = { createOrderTx: manifest.subject?.kind !== "paid-check", feeTx: settledFee, businessTx: execution.businessStatus === "SUCCESS" };
+    // the requirements come from the execution records (review of 0d1088e, P2): an execution receipt exists, so this run created its order —
+    // whatever the manifest's subject label says (a conflicting label is already a DIGEST_INTEGRITY failure)
+    const expected = { createOrderTx: true, feeTx: settledFee, businessTx: execution.businessStatus === "SUCCESS" };
     const requiredMissing: string[] = [];
     if (expected.createOrderTx && !createSrc) requiredMissing.push("order creation: no creation transaction is recorded (a run always created its order) — the operator total is a known subtotal, not the cost");
     if (expected.businessTx && !bizSrc) requiredMissing.push("business payment: recorded as SUCCESS without a transaction hash — the buyer total is a known subtotal");

@@ -80,10 +80,12 @@ export const SUM = 65n * E18 / 10n;
 export const planPath = (root: string) => join(root, "evidence", "spend", "mainnet-plan-test-plan.json");
 export const readPlan = (root: string) => parsePlan(readFileSync(planPath(root), "utf8"));
 /** a plan record as a previous invocation left it: measured outflow `outflow` (from the carried baseline), `settled` positions with run ids, `open` ones with their key */
-export function seedPlan(root: string, o: { outflow: bigint; settled?: { round: number; fixture: FixtureId; key: string; runId: string }[]; open?: { round: number; fixture: FixtureId; key: string; worst: bigint }[] }) {
+export function seedPlan(root: string, o: { outflow: bigint; settled?: { round: number; fixture: FixtureId; key: string; runId: string | null }[]; open?: { round: number; fixture: FixtureId; key: string; worst: bigint }[]; released?: { round: number; fixture: FixtureId; key: string }[]; sum?: bigint }) {
+  const SUM_ = o.sum ?? SUM;
   let p: PlanLedger = createPlan({ planId: "test-plan", network: "mainnet", approved: APPROVED_CAPS, now: "2026-10-11T00:00:00.000Z" });
-  p = beginMeasured(p, "acceptance", addrs, SUM + o.outflow); p = updateMeasured(p, "acceptance", SUM);
-  for (const s of o.settled ?? []) { const id = `run-${s.round}-${s.fixture}:key:${s.key}`; p = noteOpen(p, "acceptance", id, true, 1n); p = relabelOpen(p, "acceptance", id, `${id}:run:${s.runId}`); p = noteOpen(p, "acceptance", `${id}:run:${s.runId}`, false, 1n); }
+  p = beginMeasured(p, "acceptance", addrs, SUM_ + o.outflow); p = updateMeasured(p, "acceptance", SUM_);
+  for (const s of o.settled ?? []) { const id = `run-${s.round}-${s.fixture}:key:${s.key}`; p = noteOpen(p, "acceptance", id, true, 1n); if (s.runId) { p = relabelOpen(p, "acceptance", id, `${id}:run:${s.runId}`); p = noteOpen(p, "acceptance", `${id}:run:${s.runId}`, false, 1n); } else p = noteOpen(p, "acceptance", id, false, 1n); }
+  for (const r of o.released ?? []) { const id = `run-${r.round}-${r.fixture}:key:${r.key}`; p = noteOpen(p, "acceptance", id, true, 1n); p = noteOpen(p, "acceptance", id, false, 1n, undefined, "released"); }
   for (const x of o.open ?? []) p = noteOpen(p, "acceptance", `run-${x.round}-${x.fixture}:key:${x.key}`, true, x.worst);
   mkdirSync(join(root, "evidence", "spend"), { recursive: true }); writeFileSync(planPath(root), serializePlan(p));
   return p;

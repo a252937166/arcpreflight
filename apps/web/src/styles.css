@@ -567,3 +567,17 @@ table.t.findings tr.fail td { background: rgba(251,113,133,0.06); }
 }
 .wp-hint { font-size: 0.72rem; color: var(--ink-3); margin: 2px 0 0; line-height: 1.4; }
 .wp-hint a { color: var(--sky); }
+
+/* long lists (review of 2026-10-10): folders of files, compact rows, a footer that grows the list on request */
+.filegroup { border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; }
+.filegroup > summary { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 0; list-style: none; }
+.filegroup > summary::-webkit-details-marker { display: none; }
+.filegroup > summary::before { content: "▸"; color: var(--ink-3); margin-right: 8px; font-size: 0.8rem; }
+.filegroup[open] > summary::before { content: "▾"; }
+.filegroup[open] > summary { border-bottom: 1px solid var(--line); }
+.filelist { display: flex; flex-direction: column; padding: 6px 0 4px; }
+.filerow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 12px; align-items: baseline; padding: 3px 0; }
+.filerow .name { font-family: var(--mono); font-size: 0.78rem; overflow-wrap: anywhere; min-width: 0; }
+.filerow .size { font-size: 0.72rem; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.filerow .extra { min-width: 52px; text-align: right; }
+.showmore { padding: 6px 0 8px; }

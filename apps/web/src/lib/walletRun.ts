@@ -12,7 +12,7 @@ import { TRANSFER_WITH_AUTHORIZATION_TYPES, usdcDomain, type ArcNet } from "@arc
 import { api, ApiError, type ApiClient, type BaselineRecord, type Fixture, type FixtureInfo, type NetworkInfo, type Report, type Step } from "./api";
 import { approvedBaseline, developerIntent, developerPolicy, prepareOrderQuote, type DeveloperOrder, type PreparedQuote } from "./preflight";
 import { signTypedDataV4, type Eip1193 } from "./wallet";
-import { withSession } from "./session";
+import { sessionFor } from "./session";
 import { rememberCheck } from "./checks";
 import { saveWorkflow } from "./workflow";
 import { describeError, describedError, ORDER_RESPONSE_LOST_TEXT, type Described } from "./errors";
@@ -78,6 +78,7 @@ export function useWalletRun(net: NetworkInfo | null, wallet: WalletLike) {
     const patch = (p: Partial<WalletRun>) => { if (alive()) setRun((r) => ({ ...r, ...p })); };
     const push = (step: string, facts: Record<string, unknown>) => { if (alive()) setRun((r) => ({ ...r, steps: [...r.steps, { step, atMs: Date.now() - t0, ...facts }] })); };
     setRun({ ...EMPTY_WALLET_RUN, phase: "running", fixture: fixture.id, startedAt: t0 });
+    const withSession = sessionFor(); // review of 0d1088e (P1): the order, the quote, the purchase and the approval read all go to the instance this check began on
     try {
       let answer;
       try { answer = await withSession((t, c) => c.createOrder({ payer: account, proxy: fixture.proxy }, t)); }

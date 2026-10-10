@@ -52,8 +52,14 @@ export function getSession(opts: { base?: string; client?: ApiClient; replacing?
 /** Runs a principal-gated call with this browser's session on the instance selected when it started: `fn` receives the token AND the client
  *  bound to that instance, and every request of the operation — the session, the call, the renewal and the one retry after a 401 — goes
  *  there, whatever the visitor selects meanwhile (review of bf0c800, P1: nothing is ever redirected to another instance). */
-export async function withSession<T>(fn: (token: string, client: ApiClient) => Promise<T>): Promise<T> {
-  const base = getApiBase(); const client = apiFor(base);
+export function withSession<T>(fn: (token: string, client: ApiClient) => Promise<T>): Promise<T> { return withSessionOn(getApiBase(), fn); }
+/** The session-bound call of ONE operation (review of 0d1088e, P1): an operation that makes several session calls — validate, prompt, report
+ *  the hash, poll, recover — captures `sessionFor()` once at its start, so every one of those calls, their renewals and their retries go to the
+ *  instance the operation began on; `withSession` alone binds each call to the instance selected at THAT call. */
+export type SessionFn = <T>(fn: (token: string, client: ApiClient) => Promise<T>) => Promise<T>;
+export function sessionFor(base: string = getApiBase()): SessionFn { return (fn) => withSessionOn(base, fn); }
+export async function withSessionOn<T>(base: string, fn: (token: string, client: ApiClient) => Promise<T>): Promise<T> {
+  const client = apiFor(base);
   const s = await getSession({ base, client });
   try { return await fn(s.token, client); }
   catch (e) {
