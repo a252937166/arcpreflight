@@ -7,6 +7,7 @@ import { buildPassport, bundleToString, type PassportFiles } from "@arcpreflight
 import { writePassportDirectory } from "@arcpreflight/passport/node";
 import { verifyPassport, loadBundle, PassportLoadError, utf8Length, type Finding, type VerifierRpc } from "../src/index.js";
 import { syntheticRun, RELAYER, PAYER, MERCHANT, FEE_TX, BIZ_TX, CREATE_TX } from "../../passport/test/fixture.js";
+import { intentDigest, reportDigest, decisionDigest, finalValidationDigest, executionDigest, quoteDigest } from "@arcpreflight/schema";
 
 const statuses = (r: { findings: Finding[] }) => Object.fromEntries(r.findings.map((f) => [f.id, f.status]));
 const finding = (r: { findings: Finding[] }, id: string) => r.findings.find((f) => f.id === id)!;
@@ -405,5 +406,70 @@ describe("review of 0c0d406, P2 — the approval status expiry must agree with t
     expect(finding(await verifyPassport(consistent, { anchors: f.anchors, rpc: f.rpc() }), "APPROVAL_COVERAGE")).toMatchObject({ status: "PASS", detail: expect.stringMatching(/valid until 2026-12-31T00:00:00.000Z, as the baseline says/) });
     const baselineOnly = retouch(files, (c) => { edit(c, "baseline.json", (b) => { b.validUntil = "2026-12-31T00:00:00.000Z"; }); });
     expect(finding(await verifyPassport(baselineOnly, { anchors: f.anchors, rpc: f.rpc() }), "APPROVAL_COVERAGE")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/contradictory expiry evidence: the approval status records validUntil null while the referenced baseline says 2026-12-31/) });
+  });
+});
+
+// ---- audit 2026-10-10: a self-consistent rewrite must not pass; the passport does not choose its asset; creation gas needs its creation
+describe("audit 2026-10-10 · rehashed and lookalike passports", () => {
+  /** Re-export a run whose intent was changed AFTER the fact, with every cross-link recomputed — the exporter and the digest checks are satisfied,
+   *  so only a binding between the plan/transaction and the intent can catch it (VF-01). */
+  function rehashedIntent(mutate: (intent: any) => void) {
+    const f = syntheticRun("APPROVED"); const r: any = f.source.result!;
+    const intent = JSON.parse(JSON.stringify(r.intent)); mutate(intent);
+    const iD = intentDigest(intent);
+    const report = { ...r.report, intentDigest: iD }; const rD = reportDigest(report);
+    const quote = { ...r.quote, intentDigest: iD, reportDigest: rD, coverageDigest: rD };
+    const decision = { ...r.decision, intentDigest: iD, reportDigest: rD }; const dD = decisionDigest(decision);
+    const fv = { ...r.finalValidation, intentDigest: iD, reportDigest: rD, decisionDigest: dD }; const fvD = finalValidationDigest(fv);
+    const execution = { ...r.execution, intentDigest: iD, reportDigest: rD, decisionDigest: dD, finalValidationDigest: fvD }; const eD = executionDigest(execution);
+    const result = { ...r, intent, intentDigest: iD, report, reportDigest: rD, quote, quoteDigest: quoteDigest(quote), decision, decisionDigest: dD, finalValidation: fv, execution, executionDigest: eD };
+    const source = { ...f.source, result, payment: { ...f.source.payment!, quote } };
+    return { f, files: roundTrip(buildPassport(source as any).files) };
+  }
+  it("VF-01: a rewritten intent whose value differs from the executed plan and transaction fails DIGEST_INTEGRITY naming the plan — the unchanged control passes", async () => {
+    const { f, files } = rehashedIntent((i) => { i.valueNativeAtomic = "1"; i.businessExpectation = { ...i.businessExpectation, amountNativeAtomic: "1" }; });
+    const r = await verifyPassport(files, { rpc: f.rpc(), anchors: f.anchors });
+    expect(finding(r, "DIGEST_INTEGRITY")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/transaction-plan\.json is not the intent's exact call \(differs in value\)/) });
+    expect(r.counts.pass).toBeLessThan(10);
+    const other = rehashedIntent((i) => { i.to = RELAYER; i.businessExpectation = { ...i.businessExpectation, recipient: RELAYER }; });
+    expect(finding(await verifyPassport(other.files, { rpc: other.f.rpc(), anchors: other.f.anchors }), "DIGEST_INTEGRITY").detail).toMatch(/differs in to/);
+    const control = syntheticRun("APPROVED");
+    expect(statuses(await verifyPassport(roundTrip(buildPassport(control.source).files), { rpc: control.rpc(), anchors: control.anchors }))).toEqual(ALL_PASS);
+  });
+  it("VF-01: an intent that contradicts its own business expectation or the anchored policy fails once a plan exists; a blocked run without a plan is not judged on it", async () => {
+    const f = syntheticRun("APPROVED"); const files = roundTrip(buildPassport(f.source).files);
+    const otherOrder = rehashedIntent((i) => { i.businessExpectation = { ...i.businessExpectation, orderId: "0x" + "cc".repeat(32) }; });
+    expect(finding(await verifyPassport(otherOrder.files, { rpc: otherOrder.f.rpc(), anchors: otherOrder.f.anchors }), "DIGEST_INTEGRITY").detail).toMatch(/intent\.data is not pay\(businessExpectation\.orderId\)/);
+    const overCap = retouch(files, (c) => { const p = JSON.parse(c["policy.json"]); p.maxNativePaymentAtomic = "1"; c["policy.json"] = JSON.stringify(p, null, 2) + "\n"; });
+    expect(finding(await verifyPassport(overCap, { rpc: f.rpc(), anchors: f.anchors }), "DIGEST_INTEGRITY").detail).toMatch(/exceeds policy\.maxNativePaymentAtomic/);
+    const review = syntheticRun("REVIEW_REQUIRED"); // no plan: the expectation binding is not applied (a BLOCKED unit mistake legitimately contradicts its expectation)
+    expect(finding(await verifyPassport(roundTrip(buildPassport(review.source).files), { rpc: review.rpc(), anchors: review.anchors }), "DIGEST_INTEGRITY").status).toBe("PASS");
+  });
+  it("VF-02: a passport naming another contract as USDC fails NETWORK_IDENTITY and gets no FEE_ATTRIBUTION PASS, even when a lookalike contract's logs match; the quote's asset is bound too", async () => {
+    const f = syntheticRun("APPROVED"); const files = roundTrip(buildPassport(f.source).files);
+    const lookalike = "0x1111111111111111111111111111111111111111";
+    const forged = editManifest(files, (m) => { m.chain.usdc = lookalike; });
+    const rpc = f.rpc(); // matching chain facts from the lookalike: the fee logs are re-addressed to it
+    const feeRc = JSON.parse(JSON.stringify(f.receipts[FEE_TX.toLowerCase()])); for (const l of feeRc.logs) if (String(l.address).toLowerCase() === "0x3600000000000000000000000000000000000000") l.address = lookalike;
+    const feeTx = { ...f.txs[FEE_TX.toLowerCase()], to: lookalike };
+    const rpc2 = { ...rpc, getTransaction: async (h: `0x${string}`) => (h.toLowerCase() === FEE_TX.toLowerCase() ? feeTx : rpc.getTransaction(h)), getTransactionReceipt: async (h: `0x${string}`) => (h.toLowerCase() === FEE_TX.toLowerCase() ? feeRc : rpc.getTransactionReceipt(h)) };
+    const r = await verifyPassport(forged, { rpc: rpc2 as any, anchors: f.anchors });
+    expect(finding(r, "NETWORK_IDENTITY")).toMatchObject({ status: "FAIL", detail: expect.stringContaining("does not choose which contract counts as USDC") });
+    expect(finding(r, "FEE_ATTRIBUTION").status).toBe("UNVERIFIED"); expect(r.counts.pass).toBeLessThan(10);
+    const quoteForged = retouch(files, (c) => { const p = JSON.parse(c["payment.json"]); p.quote.asset = lookalike; c["payment.json"] = JSON.stringify(p, null, 2) + "\n"; });
+    expect(finding(await verifyPassport(quoteForged, { rpc: f.rpc(), anchors: f.anchors }), "DIGEST_INTEGRITY").detail).toMatch(/quote\.asset .* is not the canonical Arc USDC/);
+  });
+  it("VF-03: the order-creation gas is attributed only to this order's creation: the fee relay named as the creation fails COST_STATEMENT; an unrelated creation (another order, another target) fails too", async () => {
+    const f = syntheticRun("APPROVED"); const files = roundTrip(buildPassport(f.source).files);
+    const swapped = retouch(files, (c) => { const s2 = JSON.parse(c["order-summary.json"]); s2.createOrder.tx = FEE_TX; c["order-summary.json"] = JSON.stringify(s2, null, 2) + "\n"; });
+    const r = await verifyPassport(swapped, { rpc: f.rpc(), anchors: f.anchors });
+    expect(finding(r, "COST_STATEMENT")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/same transaction as the fee relay|not this order's creation/) });
+    const otherCreate = ("0x" + "dd".repeat(32)) as `0x${string}`;
+    const rpc = f.rpc(); const createTx = f.txs[CREATE_TX.toLowerCase()], createRc = f.receipts[CREATE_TX.toLowerCase()];
+    const rpc3 = { ...rpc, getTransaction: async (h: `0x${string}`) => (h.toLowerCase() === otherCreate ? { ...createTx, hash: otherCreate, to: RELAYER } : rpc.getTransaction(h)), getTransactionReceipt: async (h: `0x${string}`) => (h.toLowerCase() === otherCreate ? { ...createRc, transactionHash: otherCreate } : rpc.getTransactionReceipt(h)) };
+    const mistargeted = retouch(files, (c) => { const s2 = JSON.parse(c["order-summary.json"]); s2.createOrder.tx = otherCreate; c["order-summary.json"] = JSON.stringify(s2, null, 2) + "\n"; });
+    expect(finding(await verifyPassport(mistargeted, { rpc: rpc3 as any, anchors: f.anchors }), "COST_STATEMENT")).toMatchObject({ status: "FAIL", detail: expect.stringContaining("not the merchant") });
+    const dropped = await verifyPassport(files, { rpc: f.rpc({ drop: [CREATE_TX.toLowerCase()] }), anchors: f.anchors }); // creation unavailable: UNVERIFIED, never an asserted cost
+    expect(finding(dropped, "COST_STATEMENT").status).toBe("UNVERIFIED");
   });
 });

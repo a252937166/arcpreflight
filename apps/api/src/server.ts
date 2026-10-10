@@ -12,7 +12,8 @@ const principalOf = (req: IncomingMessage) => configuredPrincipalOf(req) ?? sess
 import { buildObjectReport, buildIntentReport, client } from "./report.js";
 import { makeQuote, paymentRequirementsFor, paymentMatchesQuote, settleForRequest, reconcilePending, settlementStatus, resumeSettlements, beginSettlementResume, reconcileOpenPayments, type PaymentInput } from "./payments.js";
 import { fundsPass, FUNDS_CHECK_INTERVAL_MS } from "./funds.js";
-import { networkInfo, startRun, getRun, listRuns, createOrderFor, listOrders, getOrder, recoverOrder, reconcileOrderCreations, chainClient, evidenceIndex, evidenceFile, clientKey, reconcileExecutions, observeExecutions, recoverRun, claimFaucet, faucetInfo, FIXTURES, projectAccounts } from "./demo.js";
+import { evidenceManifest, publishedEvidence } from "./evidence.js";
+import { networkInfo, startRun, getRun, listRuns, createOrderFor, listOrders, getOrder, recoverOrder, reconcileOrderCreations, chainClient, clientKey, reconcileExecutions, observeExecutions, recoverRun, claimFaucet, faucetInfo, FIXTURES, projectAccounts } from "./demo.js";
 import { parseOrderInput } from "./orders.js";
 import { createWalletAttempt, markSent, markPrompted, abandonAttempt, observeAttempt, recoverAttempt, listAttempts, buildWalletPassport, reconcileWalletAttempts, backfillFeeReceipts, walletRpcFromClient } from "./wallet.js";
 import { curatedSubjects, isCuratedSubject } from "./subjects.js";
@@ -190,9 +191,11 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       const list = rows(db, "SELECT report_digest, subject, mode, created_at FROM reports WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50");
       return json(res, 200, { reports: list.map((r: any) => ({ reportDigest: r.report_digest, subject: r.subject, mode: r.mode, createdAt: r.created_at })) });
     }
-    if (req.method === "GET" && path === "/v1/evidence") return json(res, 200, { files: evidenceIndex() });
+    if (req.method === "GET" && path === "/v1/evidence") return json(res, 200, { files: evidenceManifest(cfg.root) });
     if (req.method === "GET" && (m = /^\/v1\/evidence\/(.+)$/.exec(path))) {
-      const f = evidenceFile(decodeURIComponent(m[1]));
+      // audit 2026-10-10 (API-01): only a path in the publish manifest, decoded once, is read — and only from inside the evidence root's real path
+      let rel: string; try { rel = decodeURIComponent(m[1]); } catch { return json(res, 404, { error: "NOT_FOUND" }); }
+      const f = publishedEvidence(cfg.root, rel);
       if (!f) return json(res, 404, { error: "NOT_FOUND" });
       res.writeHead(200, { "content-type": "application/json", "cache-control": "public, max-age=60", ...CORS }); return res.end(f);
     }

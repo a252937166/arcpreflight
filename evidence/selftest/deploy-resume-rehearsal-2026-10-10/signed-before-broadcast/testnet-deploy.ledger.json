@@ -1,0 +1,21 @@
+{
+  "updatedAt": "2026-10-10T07:20:59.188Z",
+  "label": "deploy",
+  "network": "testnet",
+  "perTxCapUsdc": "0.05",
+  "totalCapUsdc": "0.15",
+  "maxFeeCeilingGwei": "40",
+  "committedUsdc": "0.026676775",
+  "remainingUsdc": "0.123323225",
+  "entries": [
+    {
+      "purpose": "deploy implementation A (DemoMerchantV1)",
+      "to": null,
+      "worstNativeAtomic": "37469421000000000",
+      "actualNativeAtomic": "26676775000000000",
+      "status": "settled",
+      "txHash": "0x1d448e0060e7ffcb1afbd195ce4b445089b6d2cc846801930ad7ca1038443508",
+      "at": "2026-10-10T07:20:47.876Z"
+    }
+  ]
+}

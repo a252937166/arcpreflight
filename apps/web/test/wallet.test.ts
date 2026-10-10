@@ -209,6 +209,38 @@ function lateWallet(name: string, rdns: string, provider: any, o: { answerFrom?:
   win.addEventListener("eip6963:requestProvider", () => { requests++; if (requests < (o.answerFrom ?? 1)) return; const fire = () => announce(`uuid-${rdns}`, name, rdns, provider); if (o.delayMs) setTimeout(fire, o.delayMs); else fire(); });
   return { requests: () => requests };
 }
+describe("audit 2026-10-10 (W09): a late completion never overrides the wallet the visitor chose", () => {
+  it("remembered MetaMask's silent reconnect is held on its chain read; the visitor explicitly connects OKX; MetaMask's read lands → the connection stays OKX, the remembered wallet stays OKX", async () => {
+    storage.set("arcpreflight.wallet", "io.metamask"); walletStore.setTargetNetwork(NET);
+    let releaseChain!: (cid: string) => void;
+    const mm = chainProvider({ chain: 5042002, authorized: true });
+    const mmRequest = mm.request.getMockImplementation()!;
+    mm.request.mockImplementation(async (a: any) => (a.method === "eth_chainId" ? new Promise<string>((r) => { releaseChain = r; }) : mmRequest(a)));
+    const okx = chainProvider({ chain: 5042002, authorized: true });
+    announce("u-mm", "MetaMask", "io.metamask", mm); announce("u-okx", "OKX Wallet", "com.okex.wallet", okx);
+    const reconnect = walletStore.silentReconnect(); await new Promise((r) => setTimeout(r, 0)); // eth_accounts answered, eth_chainId held
+    expect(walletStore.getState().account).toBeNull();
+    await walletStore.connect("u-okx"); // the explicit choice
+    expect(walletStore.getState()).toMatchObject({ account: ADDR, chainId: 5042002 }); expect(walletStore.getState().info?.rdns).toBe("com.okex.wallet");
+    releaseChain(`0x${(5042002).toString(16)}`); await reconnect; await new Promise((r) => setTimeout(r, 0));
+    expect(walletStore.getState().info?.rdns).toBe("com.okex.wallet"); expect(walletStore.getState().provider).toBe(okx); // MetaMask's late answer bound nothing
+    expect(storage.get("arcpreflight.wallet")).toBe("com.okex.wallet");
+    expect(mm.calls).not.toContain("eth_requestAccounts"); // the wallet that lost was never prompted and bound nothing
+  });
+  it("a connect held on the wallet's answer, then a disconnect: the late answer does not reconnect anything", async () => {
+    let release!: (accs: string[]) => void;
+    const p = chainProvider({ chain: 5042002, authorized: true });
+    const orig = p.request.getMockImplementation()!;
+    p.request.mockImplementation(async (a: any) => (a.method === "eth_requestAccounts" ? new Promise<string[]>((r) => { release = r; }) : orig(a)));
+    announce("u1", "OKX Wallet", "com.okex.wallet", p);
+    const pending = walletStore.connect("u1"); await new Promise((r) => setTimeout(r, 0));
+    expect(walletStore.getState().connecting).toBe(true);
+    await walletStore.disconnect();
+    release([ADDR]); await pending; await new Promise((r) => setTimeout(r, 0));
+    expect(walletStore.getState()).toMatchObject({ account: null, provider: null, connecting: false }); expect(storage.get("arcpreflight.wallet")).toBeUndefined();
+  });
+});
+
 describe("discovery in fresh and duplicated tabs, and an honest legacy fallback", () => {
   it("Connect re-asks the wallets and waits: a wallet announcing 300 ms after the request is found while the picker reads 'looking for wallets…'", async () => {
     vi.useFakeTimers();

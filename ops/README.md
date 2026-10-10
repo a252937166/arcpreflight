@@ -102,6 +102,9 @@ The plan, budget and stop conditions are in `docs/MAINNET-PLAN.md`. `preflight` 
   after every receipt; re-running `--execute` after an interruption reconciles the journal against the chain and continues with the
   unfinished steps only. Testnet rehearsal hooks: `DEPLOY_OUT_DIR` (keeps the journal, manifest and evidence out of `fixtures/`),
   `DEPLOY_STOP_AFTER=<step>` (exit after that step's confirmation), `DEPLOY_STOP_AFTER_SEND=<step>` (exit after its broadcast); refused on mainnet.
+- **Evidence route containment (2026-10-10):** `/etc/nginx/conf.d/arcpreflight.conf` carries `location ^~ /v1/evidence/ { return 404; }` since the audit's
+  API-01; remove that line (and `nginx -t && systemctl reload nginx`) only after a release with `apps/api/src/evidence.ts` is deployed and the live
+  checks pass (an encoded absolute path → 404, a manifest file → 200).
 - **Plan ledger:** `evidence/spend/<net>-plan-<id>.json` (`PLAN_ID`; mainnet defaults to `gate-d-mainnet-2026-10`, testnet has none unless set)
   carries every step's settled outflow, pending commitments and first baseline across restarts, with the approved caps pinned; environment
   cap overrides may lower, never raise. `pnpm exec tsx scripts/lib/plan-status.ts` prints it (read-only; part of `preflight`).

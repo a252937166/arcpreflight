@@ -20,6 +20,7 @@ const FIXTURE_TITLES: Record<string, string> = { APPROVED_PAYMENT: "approved pay
 /** The primary message (design §7) keyed on what was recorded — never preset success copy. */
 export function walletMessageOf(run: WalletRun): { text: string; tone: "ok" | "warn" | "bad" | "info" | "neutral" } {
   if (run.phase === "running") return { text: "Check in progress — your wallet signs the check fee only.", tone: "info" };
+  if (run.phase === "error" && run.approvalReadFailed) return { text: run.err?.text ?? "The referenced approval could not be read; no decision was made. The paid report is kept under My workflow.", tone: "warn" };
   if (run.phase === "error") return { text: run.err?.text ?? "The check stopped.", tone: "bad" };
   const d = run.decision?.decision;
   if (d === "BLOCKED" || d === "REVIEW_REQUIRED") return { text: "This payment is outside the referenced approval.", tone: d === "BLOCKED" ? "bad" : "warn" };
@@ -33,7 +34,7 @@ export function lifecycleFromWalletRun(run: WalletRun): LifecycleStage[] {
   return [
     st("order", run.order ? "done" : running ? "active" : "todo", run.order ? `${run.order.proxy} proxy` : null),
     st("approve", run.intent ? "done" : run.order && running ? "active" : "todo", run.intent ? "approval referenced" : null),
-    st("check", d ? (d === "BLOCKED" ? "stop" : d === "REVIEW_REQUIRED" ? "review" : "done") : run.phase === "error" ? "stop" : run.intent && running ? "active" : "todo", d ? d.toLowerCase().replace(/_/g, " ") : run.phase === "error" ? "stopped" : null),
+    st("check", d ? (d === "BLOCKED" ? "stop" : d === "REVIEW_REQUIRED" ? "review" : "done") : run.phase === "error" ? (run.approvalReadFailed ? "warn" : "stop") : run.intent && running ? "active" : "todo", d ? d.toLowerCase().replace(/_/g, " ") : run.phase === "error" ? (run.approvalReadFailed ? "approval not read — no decision; report kept" : "stopped") : null),
     st("execute", run.handoff ? "todo" : d ? "skipped" : "todo", run.handoff ? "continues in the Developer workflow" : d ? "nothing executed" : null),
     st("recover", "skipped", "not needed"),
     st("passport", "todo", run.delivered ? "check passport in the Developer workflow" : null),

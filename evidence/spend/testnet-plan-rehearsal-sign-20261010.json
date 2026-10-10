@@ -1,0 +1,90 @@
+{
+  "planVersion": 1,
+  "planId": "rehearsal-sign-20261010",
+  "network": "testnet",
+  "createdAt": "2026-10-10T07:20:42.807Z",
+  "updatedAt": "2026-10-10T07:20:59.188Z",
+  "approved": {
+    "budgetCapNativeAtomic": "690000000000000000",
+    "maxFeePerGasCeiling": "40000000000",
+    "steps": {
+      "deploy": {
+        "totalNativeAtomic": "150000000000000000",
+        "perTxNativeAtomic": "50000000000000000"
+      },
+      "fund": {
+        "totalNativeAtomic": "200000000000000000",
+        "perTxNativeAtomic": "200000000000000000"
+      },
+      "probe": {
+        "totalNativeAtomic": "20000000000000000",
+        "perTxNativeAtomic": "16000000000000000"
+      },
+      "acceptance": {
+        "totalNativeAtomic": "350000000000000000",
+        "perTxNativeAtomic": null
+      },
+      "lifecycle": {
+        "totalNativeAtomic": "120000000000000000",
+        "perTxNativeAtomic": null
+      }
+    }
+  },
+  "steps": {
+    "deploy": {
+      "status": "running",
+      "outflowNativeAtomic": "26676775000000000",
+      "pendingNativeAtomic": "0",
+      "internalNativeAtomic": "0",
+      "baselineTotalNativeAtomic": null,
+      "measuredAddresses": null,
+      "openRuns": [],
+      "invocations": 2,
+      "updatedAt": "2026-10-10T07:20:59.188Z"
+    },
+    "fund": {
+      "status": "pending",
+      "outflowNativeAtomic": "0",
+      "pendingNativeAtomic": "0",
+      "internalNativeAtomic": "0",
+      "baselineTotalNativeAtomic": null,
+      "measuredAddresses": null,
+      "openRuns": [],
+      "invocations": 0,
+      "updatedAt": null
+    },
+    "probe": {
+      "status": "pending",
+      "outflowNativeAtomic": "0",
+      "pendingNativeAtomic": "0",
+      "internalNativeAtomic": "0",
+      "baselineTotalNativeAtomic": null,
+      "measuredAddresses": null,
+      "openRuns": [],
+      "invocations": 0,
+      "updatedAt": null
+    },
+    "acceptance": {
+      "status": "pending",
+      "outflowNativeAtomic": "0",
+      "pendingNativeAtomic": "0",
+      "internalNativeAtomic": "0",
+      "baselineTotalNativeAtomic": null,
+      "measuredAddresses": null,
+      "openRuns": [],
+      "invocations": 0,
+      "updatedAt": null
+    },
+    "lifecycle": {
+      "status": "pending",
+      "outflowNativeAtomic": "0",
+      "pendingNativeAtomic": "0",
+      "internalNativeAtomic": "0",
+      "baselineTotalNativeAtomic": null,
+      "measuredAddresses": null,
+      "openRuns": [],
+      "invocations": 0,
+      "updatedAt": null
+    }
+  }
+}

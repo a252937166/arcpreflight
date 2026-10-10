@@ -17,7 +17,7 @@ const abi = parseAbi([
 const snapshot = () => ({ chainId: 5042002 as const, blockNumber: "150", blockHash: D, observedAt: new Date().toISOString(), providerId: "mock-rpc", pinningMode: "BLOCK_HASH" as const });
 const state = vi.hoisted(() => ({ paused: false, malformedPaused: false, malformedOrder: false, implChanged: false }));
 
-vi.mock("../src/config.js", () => ({ cfg: { rpc: "http://mock-rpc.invalid", reportTtlSeconds: 60 } }));
+vi.mock("../src/config.js", () => ({ cfg: { rpc: "https://keyed.rpc.invalid/v1/SECRET-PROVIDER-TOKEN", net: "testnet", reportTtlSeconds: 60 } }));
 vi.mock("../src/manifests.js", async () => {
   const { parseAbi } = await import("viem");
   const d = `0x${"11".repeat(32)}`;
@@ -102,5 +102,14 @@ describe("report approval scope and supported state", () => {
     state.malformedOrder = true;
     const built = await build();
     expect(built.report.signals.find((s) => s.id === "SUPPORTED_STATE_ORDER_PAYABLE")?.state).toBe("unknown");
+  });
+});
+
+describe("audit 2026-10-10 (API-03): the configured RPC URL never enters a report", () => {
+  it("captures the snapshot under the stable provider name rpc.<net>; the keyed URL appears nowhere in the built report", async () => {
+    const built = await build();
+    const observer = await import("@arcpreflight/observer");
+    expect(vi.mocked(observer.captureSnapshot)).toHaveBeenCalledWith(expect.anything(), { providerId: "rpc.testnet" });
+    expect(JSON.stringify(built)).not.toContain("SECRET-PROVIDER-TOKEN"); expect(JSON.stringify(built)).not.toContain("keyed.rpc.invalid");
   });
 });

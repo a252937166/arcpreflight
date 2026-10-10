@@ -15,7 +15,7 @@ import { signTypedDataV4, type Eip1193 } from "./wallet";
 import { withSession } from "./session";
 import { rememberCheck } from "./checks";
 import { saveWorkflow } from "./workflow";
-import { describeError, ORDER_RESPONSE_LOST_TEXT, type Described } from "./errors";
+import { describeError, describedError, ORDER_RESPONSE_LOST_TEXT, type Described } from "./errors";
 import { isPendingOrder } from "./orders";
 
 /** the truthful line a check-only wallet run ends with (v3.3): what the check decided, and where execution happens */
@@ -57,10 +57,12 @@ export type WalletRun = {
   phase: WalletRunPhase; fixture: Fixture | null; startedAt: number | null; finishedAt: number | null;
   steps: Step[]; order: (DeveloperOrder & { proxy: "MAIN" | "CHANGED" }) | null; intent: IntentCore | null; quote: PreparedQuote | null;
   delivered: Delivered | null; baseline: BaselineRecord | null; decision: ReturnType<typeof decide> | null; err: Described | null;
+  /** the referenced approval could not be read (not a 404): the paid report is kept, no decision was made (audit 2026-10-10, W07) */
+  approvalReadFailed?: Described | null;
   /** the check handed over to the Developer workflow for execution (NO_POLICY_VIOLATION only) */
   handoff: boolean;
 };
-export const EMPTY_WALLET_RUN: WalletRun = { phase: "idle", fixture: null, startedAt: null, finishedAt: null, steps: [], order: null, intent: null, quote: null, delivered: null, baseline: null, decision: null, err: null, handoff: false };
+export const EMPTY_WALLET_RUN: WalletRun = { phase: "idle", fixture: null, startedAt: null, finishedAt: null, steps: [], order: null, intent: null, quote: null, delivered: null, baseline: null, decision: null, err: null, handoff: false, approvalReadFailed: null };
 export type WalletLike = { provider: Eip1193 | null; account: string | null; chainId: number | null };
 
 /** The one-flow hook: `start(fixture)` runs the check with the connected wallet under this browser's anonymous session (created on
@@ -104,7 +106,20 @@ export function useWalletRun(net: NetworkInfo | null, wallet: WalletLike) {
       if (!alive()) return;
       patch({ delivered });
       push("reportDelivered", { who: "ArcPreflight relayer → API", why: "the fee settled on Arc (gas in USDC paid by the project's merchant account); the report's digest is recomputed here", serviceFeeTx: delivered.serviceFeeTx, reportDigest: delivered.digest, baselineResult: delivered.report.baselineResult, pinnedBlock: delivered.report.observation.blockNumber });
-      const baseline = order.baselineDigest ? await withSession((t) => approvedBaseline(order.baselineDigest!, t)).catch(() => null) : null;
+      // audit 2026-10-10 (W07): a 404 is an answer (no approved baseline → the decision is made without one); any other failure is NOT a decision —
+      // the paid report is kept, handed to the Developer workflow as this wallet's check, and the error says to retry the same report (no new fee)
+      let baseline: BaselineRecord | null = null;
+      if (order.baselineDigest) {
+        try { baseline = await withSession((t) => approvedBaseline(order.baselineDigest!, t)); }
+        catch (e) {
+          if (!alive()) return;
+          if (!(e instanceof ApiError && e.status === 404)) {
+            saveWorkflow({ payer: account, orderId: order.orderId, proxy: order.proxy, baselineDigest: order.baselineDigest, approved: true, requestId: delivered.requestId, intent: quote.intent, attemptId: null, handoff: "demo" });
+            patch({ approvalReadFailed: describeError(e) });
+            throw describedError(`The referenced approval could not be read (${describeError(e).text}) — no decision was made. Your paid report (request ${delivered.requestId.slice(0, 8)}…) is kept under My workflow on the Developer page; the decision is retried there from the same report, with no new fee.`, "APPROVAL_UNREAD", e);
+          }
+        }
+      }
       if (!alive()) return;
       patch({ baseline });
       const decision = decide({ intent: quote.intent, policy, policyDigest: policyDigest(policy), baseline: baseline?.baseline ?? null, baselineDigest: (baseline?.baselineDigest as Hex | undefined) ?? null, baselineRevoked: baseline?.revoked ?? false, report: delivered.report as any, reportDigest: delivered.digest as Hex, now: new Date(), simulation: delivered.simulation });

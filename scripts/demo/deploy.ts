@@ -13,12 +13,13 @@
 //   ARC_NET=mainnet MAINNET_GO=1 pnpm exec tsx scripts/demo/deploy.ts --execute   # deploy (spends gas); re-run after an interruption to resume
 // Rehearsal hooks (testnet only): DEPLOY_OUT_DIR=<dir> keeps the journal, manifest and evidence out of fixtures/ and evidence/;
 // DEPLOY_STOP_AFTER=<step key> ends the process right after that step is confirmed (before the manifest); DEPLOY_STOP_AFTER_SEND=<step key>
-// ends it right after that step's broadcast (before its receipt) — the two interruptions a restart must survive.
+// ends it right after that step's broadcast (before its receipt); DEPLOY_STOP_AFTER_SIGN=<step key> ends it after the step is signed and journaled
+// but BEFORE the broadcast — the three interruptions a restart must survive.
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { encodeDeployData, encodeFunctionData, getAddress, getContractAddress, keccak256, type Hex } from "viem";
 import { SpendRefused, waitForReceiptPatiently, sendIdentical, usdc18, checkStep, pinCaps, recordGuard, beginStep, endStep,
-  newJournal, journalMatches, markSigned, markConfirmed, markReverted, markManifestWritten, unfinished, complete, confirmedAddress, reconcileSigned, nextNonce, summarize, type DeployJournal, type JournalStep } from "@arcpreflight/client";
+  newJournal, journalMatches, markSigned, markConfirmed, markReverted, markManifestWritten, unfinished, complete, confirmedAddress, reconcileSigned, nextNonce, plannedNonce, summarize, type DeployJournal, type JournalStep } from "@arcpreflight/client";
 import { ROOT, net, chain, publicClient, walletFor, artifact, deploymentsPath, writeJson, evidenceDir, feeParams } from "./common.js";
 import { limitsFrom, openGuard } from "../lib/spend-ledger.js";
 import { openPlan } from "../lib/plan-ledger.js";
@@ -26,15 +27,16 @@ import { openPlan } from "../lib/plan-ledger.js";
 const EXECUTE = process.argv.includes("--execute");
 const addressOf = (role: string): Hex => getAddress(JSON.parse(readFileSync(resolve(ROOT, "keys", `${role}.json`), "utf8")).address) as Hex; // the address field only; no key is loaded in a preflight
 if (EXECUTE && net === "mainnet" && process.env.MAINNET_GO !== "1") throw new SpendRefused("mainnet --execute needs MAINNET_GO=1, set only after the typed go for the deploy step");
-const REHEARSAL = { outDir: process.env.DEPLOY_OUT_DIR ?? null, stopAfter: process.env.DEPLOY_STOP_AFTER ?? null, stopAfterSend: process.env.DEPLOY_STOP_AFTER_SEND ?? null };
-if (net === "mainnet" && (REHEARSAL.outDir || REHEARSAL.stopAfter || REHEARSAL.stopAfterSend)) throw new SpendRefused("DEPLOY_OUT_DIR / DEPLOY_STOP_AFTER / DEPLOY_STOP_AFTER_SEND are testnet rehearsal hooks and are refused on mainnet");
+const REHEARSAL = { outDir: process.env.DEPLOY_OUT_DIR ?? null, stopAfter: process.env.DEPLOY_STOP_AFTER ?? null, stopAfterSend: process.env.DEPLOY_STOP_AFTER_SEND ?? null, stopAfterSign: process.env.DEPLOY_STOP_AFTER_SIGN ?? null };
+if (net === "mainnet" && (REHEARSAL.outDir || REHEARSAL.stopAfter || REHEARSAL.stopAfterSend || REHEARSAL.stopAfterSign)) throw new SpendRefused("DEPLOY_OUT_DIR / DEPLOY_STOP_AFTER / DEPLOY_STOP_AFTER_SEND / DEPLOY_STOP_AFTER_SIGN are testnet rehearsal hooks and are refused on mainnet");
 const outDir = REHEARSAL.outDir ? resolve(REHEARSAL.outDir) : evidenceDir;
 const manifestPath = REHEARSAL.outDir ? resolve(outDir, `deployments-${net}.json`) : deploymentsPath;
 const journalPath = resolve(outDir, `deploy-${net}-journal.json`);
 const limits = limitsFrom({ label: "deploy", network: net, perTxUsdc: "0.05", totalUsdc: "0.15", maxFeeGwei: 40, envPrefix: "DEPLOY", maxPerTxUsdc: "0.10", maxTotalUsdc: "0.30" });
 const { guard, save, path: ledger, priorEntries } = openGuard(ROOT, limits, { write: EXECUTE });
 const book = openPlan(ROOT, net, { write: EXECUTE });
-if (book) pinCaps(book.plan, "deploy", { totalNativeAtomic: limits.totalNativeAtomic, perTxNativeAtomic: limits.perTxNativeAtomic }); // an environment override cannot raise an approved cap
+if (net === "mainnet" && !book) throw new SpendRefused("mainnet needs the plan ledger (PLAN_ID must name the approved plan)");
+if (book) pinCaps(book.plan, "deploy", { totalNativeAtomic: limits.totalNativeAtomic, perTxNativeAtomic: limits.perTxNativeAtomic, maxFeePerGasCeiling: limits.maxFeePerGasCeiling }); // an environment override cannot raise an approved cap or the fee ceiling
 const syncPlan = () => { if (book) book.apply((p) => recordGuard(p, "deploy", guard.entries)); };
 
 const deployer = addressOf("deployer-admin");
@@ -79,7 +81,10 @@ const est = async (data: Hex, to?: Hex) => publicClient.estimateGas({ account: d
 const [estA, estB] = await Promise.all([est(V1.bytecode.object), est(V2.bytecode.object)]);
 const liveGas: Record<string, bigint | null> = { implA: estA, implB: estB };
 const todo = unfinished(journal).filter((s) => s.status === "pending"); // signed ones are reconciled, never planned again
-const nonceNext = (() => { try { return problems.length ? noncePending : nextNonce(journal, noncePending); } catch (e: any) { problems.push(e.message); return noncePending; } })();
+// audit 2026-10-10 (OP-01): the plan is laid out from the JOURNAL's next nonce; the chain's pending nonce is compared only in execute, after
+// every signed step was reconciled — a step signed and never broadcast leaves the chain one nonce behind, which a restart resolves by re-sending
+const nonceNext = plannedNonce(journal, noncePending);
+if (!signedSteps.length) { try { nextNonce(journal, noncePending); } catch (e: any) { problems.push(e.message); } }
 let n = nonceNext; const predicted: Record<string, Hex> = {};
 for (const s of todo) { if (s.key.startsWith("impl") || s.key.startsWith("proxy")) predicted[s.key] = getContractAddress({ from: deployer, nonce: BigInt(n) }); n++; }
 const steps = todo.map((s) => { const gas = liveGas[s.key] ?? MEASURED[s.key]; return { key: s.key, label: s.label, gas, source: liveGas[s.key] ? "live estimate" : "measured on testnet", gasLimit: margin(gas), worst: margin(gas) * fees.maxFeePerGas, expected: gas * (baseFee + fees.maxPriorityFeePerGas) }; });
@@ -157,6 +162,7 @@ try {
     // the identity is durable BEFORE the broadcast: ledger (worst case committed) and journal (nonce, hash, the identical bytes)
     guard.sent(idx, hash); save(); syncPlan();
     journal = markSigned(journal, key, { nonce, txHash: hash, raw }); persistJournal();
+    if (REHEARSAL.stopAfterSign === key) stopHere(`DEPLOY_STOP_AFTER_SIGN=${key}: signed and journaled, nothing broadcast`);
     const sent = await sendIdentical(publicClient, raw, () => true, 3, 1500);
     if (!sent.accepted && !(await publicClient.getTransaction({ hash }).catch(() => null))) throw new SpendRefused(`${label}: the node did not accept ${hash} after ${sent.attempts} attempt(s) (${sent.sendError}); it stays committed at its worst case in the ledger and signed in the journal — stopping; re-run the step to reconcile and continue`);
     if (REHEARSAL.stopAfterSend === key) stopHere(`DEPLOY_STOP_AFTER_SEND=${key}: broadcast, receipt not awaited`);

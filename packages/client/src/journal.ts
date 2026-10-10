@@ -69,8 +69,17 @@ export function reconcileSigned(step: JournalStep, chain: ChainView): ReconcileA
   if (step.nonce !== null && step.nonce < chain.nonceLatest) return { action: "conflict", reason: `${step.label}: nonce ${step.nonce} was consumed by a transaction that is not ${step.txHash} — stopping; the step needs a manual check (never re-signed automatically)` };
   return { action: "resend", reason: `${step.label}: the node does not hold ${step.txHash} and nonce ${step.nonce} is still free — the identical signed bytes are handed to the node again` };
 }
-/** the nonce the next unfinished step must use: the journal's last signed/confirmed nonce + 1, which must equal the chain's pending nonce */
+/** the nonce the journal says the next unfinished step will use (its last signed/confirmed nonce + 1, or `noncePending` for a fresh journal):
+ *  for planning and preflight display; it asks the chain nothing (audit 2026-10-10, OP-01) */
+export function plannedNonce(j: DeployJournal, noncePending: number): number {
+  const used = j.steps.filter((s) => s.nonce !== null && s.status !== "pending").map((s) => s.nonce as number);
+  return used.length ? Math.max(...used) + 1 : noncePending;
+}
+/** the nonce the next unfinished step must use: the journal's last signed/confirmed nonce + 1, which must equal the chain's pending nonce.
+ *  Call it only once every signed step is reconciled (confirmed, or re-sent and confirmed): a step signed but never broadcast leaves the
+ *  chain's pending nonce one behind the journal, which is exactly the state a restart must resolve by re-sending — not refuse. */
 export function nextNonce(j: DeployJournal, noncePending: number): number {
+  if (j.steps.some((s) => s.status === "signed")) throw new SpendRefused("a signed step is not reconciled yet: reconcile (confirm, wait or re-send the identical bytes) before planning the next nonce");
   const used = j.steps.filter((s) => s.nonce !== null && s.status !== "pending").map((s) => s.nonce as number);
   if (!used.length) return noncePending;
   const expected = Math.max(...used) + 1;

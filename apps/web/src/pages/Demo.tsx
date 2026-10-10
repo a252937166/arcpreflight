@@ -59,6 +59,11 @@ export default function Demo() {
   const [visited, setVisited] = useState<CheckpointId[]>([]);
   const { local, onLocal, reset: resetLocal } = useRunLocal(run?.runId ?? null); // guarded: a late callback for another run never overwrites this run's state
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // audit 2026-10-10 (W08): the run on screen has a generation; a poll, a history read or a recovery update that belongs to an earlier
+  // selection is dropped when it lands — selecting a recorded run while a live one polls never shows the live one again
+  const runGen = useRef(0); const shownRunId = useRef<string | null>(null);
+  const selectRun = (id: string | null) => { runGen.current++; shownRunId.current = id; if (timer.current) { clearTimeout(timer.current); timer.current = null; } return runGen.current; };
+  const showRun = (gen: number, r: Run | null) => { if (gen !== runGen.current) return false; if (r && shownRunId.current && r.runId !== shownRunId.current) return false; setRun(r); return true; };
   const panelRef = useRef<HTMLDivElement>(null);
 
   // wallet check (P3/v3.3): runs under this browser's anonymous session; it stops at the decision and hands over to the Developer workflow
@@ -88,47 +93,57 @@ export default function Demo() {
   useEffect(() => { loadRuns(); }, [loadRuns]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   useEffect(() => { if (scrollKey) panelRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); }, [scrollKey]);
-  const poll = useCallback((id: string) => {
+  const poll = useCallback((id: string, gen: number) => {
     if (timer.current) clearTimeout(timer.current);
     const started = Date.now();
     const tick = async () => {
+      if (gen !== runGen.current) { timer.current = null; return; } // another run was selected: this loop ends
       let next: number | null = POLL_MS.RUNNING;
       try {
-        const r = await api.run(id); setRun(r);
+        const r = await api.run(id);
+        if (!showRun(gen, r)) { timer.current = null; return; } // landed after a new selection: dropped, nothing rescheduled
         if (r.state === "RUNNING") next = POLL_MS.RUNNING;
         else if (r.state === "RECONCILE_REQUIRED" && Date.now() - started < RECONCILE_WATCH_MS) { next = POLL_MS.RECONCILE_REQUIRED; setBusy(false); }
         else { next = null; setBusy(false); loadRuns(); refresh(); }
       } catch { /* keep polling */ }
+      if (gen !== runGen.current) { timer.current = null; return; }
       if (next !== null) timer.current = setTimeout(tick, next); else timer.current = null;
     };
     void tick();
   }, [loadRuns, refresh]);
   const fresh = () => { setOrigin(null); setReason(null); setVisited([]); resetLocal(); };
   const start = async (opts: DemoOptions = {}) => {
+    const gen = selectRun(null);
     setBusy(true); setNotice(null); setSample(false); setRun(null); walletRun.reset(); fresh();
     try {
       const r = await startDemo(effective, undefined, opts);
+      if (gen !== runGen.current) return; // the visitor moved on while the admission was pending: this start is not shown
       if (r.mode === "live") {
+        shownRunId.current = r.runId;
         setOrigin("live");
         setNotice(r.admission === "existing"
           ? { tone: "warn", text: "Same admission key: showing the original run — no second order was created." }
           : { tone: "info", text: opts.interruptAfterBroadcast ? "Started with a simulated interruption: a real transaction is broadcast, then the runner stops waiting; recovery resolves the outcome." : `Started on ${netLabel}: the project runner pays from project funds.` });
-        poll(r.runId); return;
+        poll(r.runId, gen); return;
       }
       setBusy(false);
       const why = describeBody(r.body);
       setOrigin("sample"); setReason(why.text);
-      setNotice({ tone: "warn", text: `${why.text} Showing the latest recorded run instead (RECORDED_SAMPLE) — no new transaction was initiated.`, raw: why }); setSample(true); setRun(r.run);
+      setNotice({ tone: "warn", text: `${why.text} Showing the latest recorded run instead (RECORDED_SAMPLE) — no new transaction was initiated.`, raw: why }); setSample(true); shownRunId.current = r.run?.runId ?? null; showRun(gen, r.run);
     } catch (e: any) { setBusy(false); const d = describeError(e); setNotice({ tone: "bad", text: d.text, raw: d }); }
   };
   const startWallet = async () => {
     if (!f) return;
+    selectRun(null);
     setNotice({ tone: "info", text: `Checking with your wallet on ${netLabel}: it signs the ${feeText} USDC check fee only — that fee is yours. Execution continues in the Developer workflow.` });
     setSample(false); setRun(null); fresh();
     await walletRun.start(f);
     refreshBal(); loadRuns();
   };
-  const open = async (id: string) => { setSample(false); setNotice(null); walletRun.reset(); fresh(); setOrigin("history"); try { const r = await api.run(id); setRun(r); if (r.state === "RUNNING" || r.state === "RECONCILE_REQUIRED") { setBusy(r.state === "RUNNING"); poll(id); } } catch { /* ignore */ } };
+  const open = async (id: string) => {
+    const gen = selectRun(id); setSample(false); setNotice(null); walletRun.reset(); fresh(); setOrigin("history");
+    try { const r = await api.run(id); if (!showRun(gen, r)) return; if (r.state === "RUNNING" || r.state === "RECONCILE_REQUIRED") { setBusy(r.state === "RUNNING"); poll(id, gen); } } catch { /* ignore */ }
+  };
   const guide = useMemo(() => guideFor(run, net, { ...(local ?? {}), visited }), [run, net, local, visited]);
   const onGo = useCallback((id: CheckpointId | null) => { if (id) setVisited((v) => (v.includes(id) ? v : [...v, id])); }, []);
   // the element the guide points at gets the highlight (review of 2026-10-09, item 2)
@@ -248,7 +263,7 @@ export default function Demo() {
         {!walletShowing && <GuidePanel guide={guide} origin={run ? origin : null} reason={reason} network={netLabel} onGo={onGo} link={link} underStrip={running} />}
         {notice && <div className={`banner ${notice.tone === "info" ? "info" : notice.tone === "bad" ? "bad" : ""}`}>{notice.text}{notice.raw?.code && <details className="error-raw"><summary>raw response ({notice.raw.code})</summary><pre className="json">{JSON.stringify(notice.raw.raw, null, 2)}</pre></details>}</div>}
         <div ref={panelRef} className="scroll-target stack" style={{ gap: 28 }}>
-          {run && <><HandRule /><RunPanel key={run.runId} run={run} net={net} sample={sample} onUpdate={setRun} origin={origin} reason={reason} onLocal={onLocal} /></>}
+          {run && <><HandRule /><RunPanel key={run.runId} run={run} net={net} sample={sample} onUpdate={(r) => { if (r.runId === shownRunId.current) setRun(r); }} origin={origin} reason={reason} onLocal={onLocal} /></>}
           {!run && walletShowing && <><HandRule /><WalletRunPanel run={walletRun.run} net={net} account={w.account} fixture={f ?? null} /></>}
         </div>
 

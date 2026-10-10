@@ -75,6 +75,8 @@ export function openDb(path: string) {
     // settlement backend per row: NULL/'circle' = settled through the hosted facilitator (legacy), 'relay' = self-relayed EIP-3009
     "ALTER TABLE payments ADD COLUMN backend TEXT", "ALTER TABLE payments ADD COLUMN relay_nonce INTEGER", "ALTER TABLE payments ADD COLUMN relay_raw_tx_encrypted TEXT",
     "ALTER TABLE payments ADD COLUMN created_block INTEGER", "ALTER TABLE payments ADD COLUMN scanned_to_block INTEGER", "ALTER TABLE payments ADD COLUMN settlement_evidence_json TEXT",
+    // audit 2026-10-10 (API-02): a settlement transaction found by the event search whose receipt was not readable yet; re-examined before the scan moves on
+    "ALTER TABLE payments ADD COLUMN candidate_tx_hash TEXT",
     // v3.2: head block at the broadcast marker (bounds the nonce-consumer search) and the transaction that consumed the nonce
     "ALTER TABLE business_executions ADD COLUMN broadcast_block TEXT", "ALTER TABLE business_executions ADD COLUMN consumed_by TEXT",
     // v3.3: every artefact persisted as soon as it exists (a run that stops after the broadcast still exports a complete passport)
@@ -97,6 +99,8 @@ export function openDb(path: string) {
   db.exec(`UPDATE demo_runs SET state = 'RECONCILE_REQUIRED', updated_at = ${ts} WHERE state = 'RUNNING' AND run_id IN (SELECT run_id FROM business_executions WHERE state IN ('BROADCAST_ATTEMPTED','CONFIRMED','REVERTED','NOT_MINED','SUPERSEDED'))`);
   // one open wallet attempt per order, enforced by the database even under concurrent requests (review round 2)
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS wallet_attempts_one_open ON wallet_attempts(order_id) WHERE state IN ('VALIDATED','BROADCAST_ATTEMPTED')");
+  // audit 2026-10-10 (API-04): wallet-validation admissions per client and day, reserved atomically before any RPC work and never given back
+  db.exec("CREATE TABLE IF NOT EXISTS wallet_admissions (client_key TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (client_key, day))");
   db.exec(`UPDATE business_executions SET state = 'INTERRUPTED', business_status = 'NOT_EXECUTED', note = 'process stopped after signing and before any broadcast; nothing was sent', updated_at = ${ts} WHERE state = 'SIGNED'`);
   db.exec(`UPDATE demo_runs SET state = 'FAILED', steps_json = json_insert(steps_json, '$[#]', json('{"step":"interruptedBeforeBroadcast","atMs":-1,"why":"the process stopped after signing and before any broadcast; nothing reached the network and the order stays unpaid"}')), updated_at = ${ts} WHERE state = 'RUNNING' AND run_id IN (SELECT run_id FROM business_executions WHERE state = 'INTERRUPTED')`);
   db.exec(`UPDATE demo_runs SET state = 'FAILED', steps_json = json_insert(steps_json, '$[#]', json('{"step":"interrupted","atMs":-1,"why":"the process stopped before any business transaction was signed; nothing reached the network (a paid check fee, if any, is reconciled by the payments path)"}')), updated_at = ${ts} WHERE state = 'RUNNING'`);

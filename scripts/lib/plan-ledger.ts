@@ -5,11 +5,13 @@
 // has no plan unless PLAN_ID names one (rehearsals of the mechanism). A dry run or preflight reads the record and never writes it.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { SpendRefused, createPlan, parsePlan, parseUsdc18, sameCaps, serializePlan, summarizePlan, type PlanCaps, type PlanLedger } from "@arcpreflight/client";
+import { SpendRefused, createPlan, parsePlan, parseUsdc18, resolvePlanId, sameCaps, serializePlan, summarizePlan, type PlanCaps, type PlanLedger } from "@arcpreflight/client";
 
 /** the caps of docs/MAINNET-PLAN.md: step caps 0.15 + 0.20 + 0.02 + 0.35 + 0.12 = 0.84; budget cap 0.69 = that sum minus the 0.15 the fund step only moves between project keys */
 export const APPROVED_CAPS: PlanCaps = {
   budgetCapNativeAtomic: parseUsdc18("0.69"),
+  /** docs/MAINNET-PLAN.md: every script-signed transaction is capped at a 40 gwei max fee; MAX_FEE_GWEI may lower it, never raise it (audit 2026-10-10, OP-04) */
+  maxFeePerGasCeiling: 40n * 10n ** 9n,
   steps: {
     deploy: { totalNativeAtomic: parseUsdc18("0.15"), perTxNativeAtomic: parseUsdc18("0.05") },
     fund: { totalNativeAtomic: parseUsdc18("0.20"), perTxNativeAtomic: parseUsdc18("0.20") },
@@ -19,8 +21,9 @@ export const APPROVED_CAPS: PlanCaps = {
   },
 };
 export const DEFAULT_MAINNET_PLAN_ID = "gate-d-mainnet-2026-10";
-/** PLAN_ID, else the Gate D plan on mainnet, else none (testnet runs are not budgeted by the plan unless a rehearsal names one) */
-export function planIdFor(network: string): string | null { return process.env.PLAN_ID ?? (network === "mainnet" ? DEFAULT_MAINNET_PLAN_ID : null); }
+/** PLAN_ID, else the Gate D plan on mainnet, else none (testnet runs are not budgeted by the plan unless a rehearsal names one). A blank PLAN_ID
+ *  on mainnet is refused — mainnet is never unbudgeted (audit 2026-10-10, OP-02). */
+export function planIdFor(network: string): string | null { return resolvePlanId(network, process.env.PLAN_ID, DEFAULT_MAINNET_PLAN_ID); }
 export const planPath = (root: string, network: string, planId: string) => resolve(root, "evidence", "spend", `${network}-plan-${planId}.json`);
 
 /** the open record: `apply` runs a pure update and persists the result (unless opened read-only) */
@@ -35,7 +38,7 @@ export class PlanBook {
 }
 export function openPlan(root: string, network: string, opts: { write: boolean; planId?: string | null }): PlanBook | null {
   const planId = opts.planId === undefined ? planIdFor(network) : opts.planId;
-  if (!planId) return null;
+  if (!planId) { if (network === "mainnet") throw new SpendRefused("mainnet runs must belong to a named plan"); return null; }
   const path = planPath(root, network, planId);
   if (existsSync(path)) {
     const plan = parsePlan(readFileSync(path, "utf8"));

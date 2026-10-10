@@ -13,7 +13,7 @@ import { api, apiPath, ApiError, explorerAddr, explorerTx, type AttemptView, typ
 import { approvedBaseline, developerIntent, developerPolicy, prepareOrderQuote, quoteReady, WALLET_VALIDATION_WINDOW_SECONDS, type PreparedQuote, WALLET_REPORT_AGE_SECONDS } from "../lib/preflight";
 import { useWallet } from "../lib/wallet";
 import { purchaseReport, signFeeAuthorization, type Delivered } from "../lib/walletRun";
-import { describeBody, describeError, type Described } from "../lib/errors";
+import { describeBody, describeError, describedError, purchaseUncertainText, type Described } from "../lib/errors";
 import { storedSession, withSession, type Session } from "../lib/session";
 import { rememberedChecks } from "../lib/checks";
 import { saveJson } from "../lib/download";
@@ -97,6 +97,13 @@ export default function Developer() {
   /** the account whose workflow is on screen (null while switching or reading back): the save effect writes under this payer only */
   const owner = useRef<string | null>(null);
   const hydrated = useRef<string | null>(null); const hydrating = useRef<string | null>(null); const quoteSeq = useRef(0);
+  /** audit 2026-10-10 (W03): the workflow on screen has a generation — bumped by an account change, start over, picking another order or
+   *  attempt, and unmount. Every async completion (an execution's hash and polling, a purchase, an export, an order re-read) checks it
+   *  before touching the UI: an operation that belongs to an earlier workflow reconciles its own server records but never repopulates this one. */
+  const wf = useRef(0);
+  const nextWorkflow = () => { wf.current++; return wf.current; };
+  const current = (g: number) => g === wf.current;
+  useEffect(() => () => { wf.current++; }, []);
   // balances on the API's chain (native = gas and the business payment, ERC-20 face = the same balance); re-read after orders, purchases and faucet claims
   const bal = useBalances(w.provider, w.account, onArc && !!net, net?.usdc ?? null);
   const refreshBal = bal.refresh;
@@ -199,8 +206,9 @@ export default function Developer() {
   }, []);
   const refreshOrder = useCallback(async (id?: string) => {
     const oid = id ?? order?.orderId; if (!oid) return;
-    try { const o = await withSession((t) => api.order(oid, t)); setOrder((cur) => (!cur || cur.orderId.toLowerCase() === o.orderId.toLowerCase() ? o : cur)); } catch { /* keep what we have; the card says what was read */ }
-  }, [order?.orderId]);
+    const g = wf.current;
+    try { const o = await withSession((t) => api.order(oid, t)); if (!current(g)) return; setOrder((cur) => (cur && cur.orderId.toLowerCase() === o.orderId.toLowerCase() ? o : cur)); } catch { /* keep what we have; the card says what was read */ }
+  }, [order?.orderId]); // eslint-disable-line react-hooks/exhaustive-deps
   /** everything that belongs to one payer's workflow leaves the screen (the server records stay; My workflow lists them) */
   const resetVisible = () => { setOrder(null); setOrderMeta({ baselineDigest: null, proxy: null }); setApproved(false); setUnitMistake(false); setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null); setOpenSteps({}); setErr(null); };
   // the saved workflow of THIS wallet on this instance: order, check (exact quoted intent), attempt — re-read from the server, never trusted blindly.
@@ -210,6 +218,7 @@ export default function Developer() {
     const key = `${net.chainId}:${account.toLowerCase()}`;
     if (hydrated.current === key) return;
     const switching = hydrated.current !== null; hydrated.current = key; owner.current = null;
+    nextWorkflow(); // W03: whatever was running for the previous account may not land here
     if (switching) resetVisible();
     const saved = loadWorkflow(account);
     if (!saved) { owner.current = account.toLowerCase(); void loadMine(); void loadChecks(); return; }
@@ -281,7 +290,7 @@ export default function Developer() {
   // ---- actions
   const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); setErr(null); try { await fn(); } catch (e: any) { setErr(describeError(e)); } finally { setBusy(null); setSession(storedSession()); } };
   const rowAction = async (id: string, fn: () => Promise<void>) => { setMine((m) => ({ ...m, rowBusy: id, rowErr: null })); try { await fn(); setMine((m) => ({ ...m, rowBusy: null })); } catch (e) { setMine((m) => ({ ...m, rowBusy: null, rowErr: describeError(e) })); } };
-  const resetAll = () => { clearWorkflow(account); resetVisible(); };
+  const resetAll = () => { nextWorkflow(); clearWorkflow(account); resetVisible(); };
   const createOrder = (body: OrderBody) => withSession((t) => api.createOrder(body, t));
   /** 201 (confirmed), 202 (identity recorded, creation not confirmed) or a 502 that names the order: the card shows that order — never "nothing was changed" */
   const onCreated = (o: OrderAnswer) => {
@@ -311,22 +320,32 @@ export default function Developer() {
     // the same helpers the Live Demo's wallet check uses (lib/walletRun.ts): one EIP-3009 authorization for exactly the quote, then the purchase
     const payment = await signFeeAuthorization(w.provider, account, net, check.quote);
     if (!quoteReady(check.quote, devOrder.block)) throw new Error("The quote expired during signing; request a new quote.");
+    const g = wf.current; const requestId = check.requestId;
     let d: Delivered;
-    try { d = await withSession((t) => purchaseReport(check.quote!, t, payment)); } finally { void loadChecks(); }
+    // W05: from here the authorization may reach the service; a lost answer is an uncertain purchase, never "nothing was sent"
+    try { d = await withSession((t) => purchaseReport(check.quote!, t, payment)); }
+    catch (e) { const why = describeError(e); if (why.code === "NETWORK" || why.code === null) throw describedError(purchaseUncertainText(requestId, why.text), "PURCHASE_UNCERTAIN", e); throw e; }
+    finally { void loadChecks(); }
+    if (!current(g)) return; // W03: the workflow moved on (another account, start over); the server record stands, this view is not touched
     setCheck((c) => (c && c.requestId === d.requestId ? { ...c, delivered: d } : c));
     void refreshOrder();
   });
-  const onExecEvent = (e: { phase: ExecutePhase; attempt: AttemptView | null; txHash?: string | null; refusal?: Refusal | null; error?: Described | null }) => {
+  /** W03: events of an execution started under workflow generation `g` touch the UI only while that workflow is still on screen */
+  const onExecEventFor = (g: number) => (e: { phase: ExecutePhase; attempt: AttemptView | null; txHash?: string | null; refusal?: Refusal | null; error?: Described | null }) => {
+    if (!current(g)) return;
     setExec((x) => ({ phase: e.phase, txHash: e.txHash ?? x.txHash, refusal: e.refusal ?? (e.phase === "refused" ? x.refusal : null), err: e.error ?? null }));
     if (e.attempt) setAttempt(e.attempt);
   };
+  const onExecEvent = onExecEventFor(wf.current);
   const execute = () => {
     if (executionInFlight() || busy) return; // a double click joins nothing: one execution at a time
     return run("execute", async () => {
       if (!w.provider || !account || !check || !delivered || !order || !policy) return;
       if (budgetExec.enough === false) throw new Error(`Not enough USDC in your wallet: ${budgetExec.sentence}.`);
+      const g = wf.current;
       setExec({ phase: "validating", txHash: null, refusal: null, err: null }); setPassport(null); setVerification(null);
-      const ev = await executeAttempt({ provider: w.provider, account, requestId: check.requestId, orderId: order.orderId, policy, withToken: withSession, onEvent: onExecEvent });
+      const ev = await executeAttempt({ provider: w.provider, account, requestId: check.requestId, orderId: order.orderId, policy, withToken: withSession, onEvent: onExecEventFor(g) });
+      if (!current(g)) { void loadMine(); return; } // the account changed or the workflow was reset meanwhile: the attempt is listed under its own payer, never shown here
       if (ev.attempt) setAttempt(ev.attempt);
       void refreshOrder(); void loadMine();
     });
@@ -363,6 +382,7 @@ export default function Developer() {
   const observe = (id: string) => rowAction(id, async () => adopt(await withSession((t) => api.attempt(id, t))));
   /** make a listed attempt (or one remembered by this browser) the current one — the order follows it; only for this account's own attempts */
   const pick = (id: string) => rowAction(id, async () => {
+    nextWorkflow(); // W03: picking another attempt is a new workflow on screen
     const full = await withSession((t) => api.attempt(id, t));
     if (!same(full.payer, account)) throw new Error(`This attempt belongs to wallet ${short(full.payer, 4)}; connect that wallet to continue it. It stays listed under "other wallets in this browser".`);
     const pickedUncertain = isUncertain(full);
@@ -373,10 +393,11 @@ export default function Developer() {
     }
     if (pickedUncertain) void reconcileUncertain(full); // §10 item 1: listed or remembered, an attempt whose prompt was opened is reconciled, never handed to the wallet again
   });
-  const pickOrder = (o: OrderView) => { if (!same(o.payer, account)) return; setOrder(o); setOrderMeta({ baselineDigest: baselineDigestFor(net, o.proxy), proxy: o.proxy }); setApproved(false); setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null); setOpenSteps({}); };
+  const pickOrder = (o: OrderView) => { if (!same(o.payer, account)) return; nextWorkflow(); setOrder(o); setOrderMeta({ baselineDigest: baselineDigestFor(net, o.proxy), proxy: o.proxy }); setApproved(false); setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null); setOpenSteps({}); };
   const download = () => run("passport", async () => {
-    if (attempt && attempt.passportAvailable) { const { __status: _s, ...bundle } = (await withSession((t) => api.attemptPassport(attempt.attemptId, t))) as any; const name = `arcpreflight-wallet-passport-${attempt.attemptId.slice(0, 8)}.json`; saveJson(name, bundle); setPassport({ bundle, name, kind: "attempt" }); setVerification(null); return; }
-    if (check?.delivered) { const { __status: _s, ...bundle } = (await withSession((t) => api.requestPassport(check.requestId, t))) as any; const name = `arcpreflight-check-passport-${check.requestId.slice(0, 8)}.json`; saveJson(name, bundle); setPassport({ bundle, name, kind: "check" }); setVerification(null); }
+    const g = wf.current; // W03: an export that lands after start over / an account change saves nothing and marks nothing done
+    if (attempt && attempt.passportAvailable) { const { __status: _s, ...bundle } = (await withSession((t) => api.attemptPassport(attempt.attemptId, t))) as any; if (!current(g)) return; const name = `arcpreflight-wallet-passport-${attempt.attemptId.slice(0, 8)}.json`; saveJson(name, bundle); setPassport({ bundle, name, kind: "attempt" }); setVerification(null); return; }
+    if (check?.delivered) { const { __status: _s, ...bundle } = (await withSession((t) => api.requestPassport(check.requestId, t))) as any; if (!current(g)) return; const name = `arcpreflight-check-passport-${check.requestId.slice(0, 8)}.json`; saveJson(name, bundle); setPassport({ bundle, name, kind: "check" }); setVerification(null); }
   });
   // my checks (fee history) rows
   const checkRow = async (id: string, fn: () => Promise<void>) => { setChecks((c) => ({ ...c, rowBusy: id, rowErr: null })); try { await fn(); setChecks((c) => ({ ...c, rowBusy: null })); } catch (e) { setChecks((c) => ({ ...c, rowBusy: null, rowErr: describeError(e) })); } };

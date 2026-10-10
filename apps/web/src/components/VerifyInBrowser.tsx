@@ -3,7 +3,7 @@
 // that adds up to: passed only when nothing failed and nothing is unverified; any FAIL is a red stop state naming the findings; any
 // UNVERIFIED is an amber partial state. Anchors a page prefills are the site's own digests and are labelled as such; the CLI line is the
 // clean-process path.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Chip, Hex, Spinner } from "./Badges";
 import type { NetworkInfo } from "../lib/api";
 import { anchorsJson, cliCommand, countsLine, findingTone, verificationState, verifyBundleInBrowser, type Anchors, type AnchorsSource, type VerificationResult, type VerificationState } from "../lib/verifyInBrowser";
@@ -11,13 +11,25 @@ import { describeError } from "../lib/errors";
 
 export function VerifyInBrowser({ bundle, name, net, anchors, anchorsSource, onVerified, compact }: { bundle: unknown | null; name?: string | null; net: NetworkInfo | null; anchors: Anchors | null; anchorsSource: AnchorsSource; /** called after every completed run with the result AND its state — "completed" is not "passed" */ onVerified?: (r: VerificationResult, state: VerificationState) => void; compact?: boolean }) {
   const [state, setState] = useState<{ busy: boolean; result: VerificationResult | null; err: string | null }>({ busy: false, result: null, err: null });
-  useEffect(() => { setState({ busy: false, result: null, err: null }); }, [bundle]); // a new bundle: the previous findings no longer apply
   const rpc = net?.rpc ?? null;
+  // audit 2026-10-10 (W02): a result belongs to the exact inputs it was computed for — the bundle, the RPC and the anchors. Any change of
+  // those (or an unmount) moves the generation on: a verification still running for the old inputs is dropped when it lands, its callback
+  // never fires, and the findings shown are only ever those of the inputs on screen.
+  const identity = `${name ?? ""}|${rpc ?? ""}|${(anchors?.baselineDigests ?? []).join(",")}|${(anchors?.policyDigests ?? []).join(",")}|${anchorsSource}`;
+  const gen = useRef(0);
+  const bundleRef = useRef<unknown>(bundle); const identityRef = useRef(identity);
+  if (bundleRef.current !== bundle || identityRef.current !== identity) { bundleRef.current = bundle; identityRef.current = identity; gen.current++; }
+  useEffect(() => { setState({ busy: false, result: null, err: null }); }, [bundle, identity]); // new inputs: the previous findings no longer apply
+  useEffect(() => () => { gen.current++; }, []); // unmounted: nothing in flight may report back
   const run = async () => {
     if (!bundle) return;
+    const mine = gen.current;
     setState({ busy: true, result: null, err: null });
-    try { const r = await verifyBundleInBrowser(bundle, { rpcUrl: rpc, anchors }); setState({ busy: false, result: r, err: null }); onVerified?.(r, verificationState(r)); }
-    catch (e) { setState({ busy: false, result: null, err: describeError(e).text }); }
+    try {
+      const r = await verifyBundleInBrowser(bundle, { rpcUrl: rpc, anchors });
+      if (gen.current !== mine) return; // the inputs changed while verifying: this result is nobody's
+      setState({ busy: false, result: r, err: null }); onVerified?.(r, verificationState(r));
+    } catch (e) { if (gen.current !== mine) return; setState({ busy: false, result: null, err: describeError(e).text }); }
   };
   const r = state.result;
   const vs = r ? verificationState(r) : null;

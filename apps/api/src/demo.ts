@@ -5,7 +5,7 @@
 // recorded run with the RECORDED_SAMPLE label. Business transactions are persisted before broadcast and reconciled from their
 // original context after a crash or timeout (spec D07): nothing is re-signed, no new order or check is bought by recovery.
 import { waitForReceiptPatiently } from "@arcpreflight/client";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createPublicClient, createWalletClient, http, getAddress, keccak256, type Hex, type PublicClient, type WalletClient, type Transport, type Chain, type Account } from "viem";
@@ -553,17 +553,4 @@ export async function recoverOrder(db: Db, owner: string, orderId: string): Prom
 /** The process-wide chain client, for modules that reconcile with reads only. */
 export const chainClient: PublicClient = publicClient;
 
-/** Evidence index: files under evidence/ that are safe to publish (no private material lives there). */
-export function evidenceIndex() {
-  const dir = resolve(cfg.root, "evidence");
-  if (!existsSync(dir)) return [];
-  const out: { path: string; bytes: number }[] = [];
-  const walk = (d: string, rel: string) => { for (const e of readdirSync(d, { withFileTypes: true })) { if (e.name === "private") continue; const p = resolve(d, e.name); const r = rel ? `${rel}/${e.name}` : e.name; if (e.isDirectory()) walk(p, r); else if (e.name.endsWith(".json")) out.push({ path: r, bytes: readFileSync(p).length }); } };
-  walk(dir, "");
-  return out.sort((a, b) => a.path.localeCompare(b.path));
-}
-export function evidenceFile(rel: string): string | null {
-  if (!/^[A-Za-z0-9._\/-]+\.json$/.test(rel) || rel.includes("..") || rel.startsWith("private")) return null;
-  const p = resolve(cfg.root, "evidence", rel);
-  return existsSync(p) ? readFileSync(p, "utf8") : null;
-}
+// evidence publishing moved to ./evidence.ts (audit 2026-10-10, API-01): an explicit manifest with real-path containment

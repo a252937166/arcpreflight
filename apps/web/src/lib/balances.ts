@@ -17,8 +17,8 @@ export const BALANCE_RECHECK_MAX = 8;
 /** the localStorage key other tabs watch; the value is `{ account, native, at, tab }` — a signal to re-read, never a balance to display */
 export const BALANCE_SIGNAL_KEY = "arcpreflight.balances:signal";
 
-type Loop = { untilChanged: boolean; expect: bigint | null; attempts: number; before: bigint | null; joined: Promise<void>; done: () => void; read: () => void; followUp: boolean };
-type Entry = { provider: Eip1193; account: string; usdc: string | null; value: Balances; listeners: Set<() => void>; gen: number; timer: ReturnType<typeof setTimeout> | null; reading: boolean; settle: (() => void) | null; loop: Loop | null };
+type Loop = { untilChanged: boolean; expect: bigint | null; attempts: number; before: bigint | null; joined: Promise<void>; done: () => void; read: () => void; followUp: boolean; inFlight: boolean; wantRead: boolean };
+type Entry = { provider: Eip1193; account: string; usdc: string | null; value: Balances; listeners: Set<() => void>; gen: number; timer: ReturnType<typeof setTimeout> | null; reading: boolean; settle: (() => void) | null; loop: Loop | null; /** every published reading bumps this: a read that started earlier never overwrites a later one (audit 2026-10-10, W04) */ published: number };
 const providerIds = new WeakMap<Eip1193, number>(); let nextProviderId = 1;
 function providerId(p: Eip1193): number { let id = providerIds.get(p); if (id === undefined) { id = nextProviderId++; providerIds.set(p, id); } return id; }
 const keyOf = (p: Eip1193, account: string) => `${providerId(p)}|${account.toLowerCase()}`;
@@ -28,7 +28,7 @@ const TAB = Math.random().toString(36).slice(2, 10);
 function entryOf(p: Eip1193, account: string, usdc: string | null): Entry {
   const key = keyOf(p, account);
   let e = entries.get(key);
-  if (!e) { e = { provider: p, account, usdc, value: EMPTY_BALANCES, listeners: new Set(), gen: 0, timer: null, reading: false, settle: null, loop: null }; entries.set(key, e); }
+  if (!e) { e = { provider: p, account, usdc, value: EMPTY_BALANCES, listeners: new Set(), gen: 0, timer: null, reading: false, settle: null, loop: null, published: 0 }; entries.set(key, e); }
   // the ERC-20 face is read for everyone once one view asks for it; a read already in flight started without it, so one more read follows
   if (usdc && !e.usdc) { e.usdc = usdc; if (e.loop) e.loop.followUp = true; }
   return e;
@@ -51,26 +51,34 @@ export function refreshBalances(p: Eip1193, account: string, opts: RefreshOption
     const l = e.loop;
     if (untilChanged) { l.untilChanged = true; l.attempts = 0; if (expect !== null) l.expect = expect; }
     if (e.timer) { clearTimeout(e.timer); e.timer = null; l.read(); } // read now instead of waiting out the pause; the loop goes on if the value has not moved
+    else if (l.inFlight) l.wantRead = true; // a read is on the wire: one more follows it — never two concurrent reads for one entry
     return l.joined;
   }
   stopLoop(e);
   const gen = e.gen; e.reading = true;
-  const loop: Loop = { untilChanged, expect, attempts: 0, before: e.value.native, joined: Promise.resolve(), done: () => {}, read: () => {}, followUp: false };
+  const loop: Loop = { untilChanged, expect, attempts: 0, before: e.value.native, joined: Promise.resolve(), done: () => {}, read: () => {}, followUp: false, inFlight: false, wantRead: false };
   loop.joined = new Promise<void>((resolve) => {
     let finished = false;
     const done = () => { if (finished) return; finished = true; if (e.settle === done) e.settle = null; if (e.loop === loop) e.loop = null; resolve(); };
     loop.done = done; e.settle = done; e.loop = loop;
-    const read = (): Promise<void> => Promise.all([nativeBalance(p, account), e.usdc ? erc20Balance(p, e.usdc, account) : Promise.resolve<bigint | null>(null)]).then(([native, erc20]) => {
-      if (gen !== e.gen) return done(); // superseded or stopped (stopLoop resolved it already)
-      const changed = loop.before === null || native !== loop.before;
-      const settled = !loop.untilChanged || changed || (loop.expect !== null && native === loop.expect) || loop.attempts >= BALANCE_RECHECK_MAX;
-      if (!settled) { loop.attempts++; e.timer = setTimeout(read, BALANCE_RECHECK_MS); return; } // the node still reports the old value
-      // a token requirement arrived while this read was in flight: read once more so the ERC-20 face is not left unread
-      if (loop.followUp && erc20 === null && e.usdc) { loop.followUp = false; loop.untilChanged = false; e.timer = setTimeout(read, 0); return; }
-      e.timer = null; e.reading = false; e.value = { native, erc20, readAt: Date.now() }; notify(e);
-      if (loop.before !== null && native !== loop.before) signalOtherTabs(account, native);
-      done();
-    }).catch(() => { if (gen === e.gen) { e.timer = null; e.reading = false; } done(); });
+    const read = (): Promise<void> => {
+      e.timer = null; // the timer that scheduled this read is spent: nobody may treat it as pending
+      if (loop.inFlight) { loop.wantRead = true; return Promise.resolve(); } // one read on the wire at a time
+      loop.inFlight = true; const startedAfter = e.published; // a reading published after this read started wins over it
+      return Promise.all([nativeBalance(p, account), e.usdc ? erc20Balance(p, e.usdc, account) : Promise.resolve<bigint | null>(null)]).then(([native, erc20]) => {
+        loop.inFlight = false;
+        if (gen !== e.gen) return done(); // superseded or stopped (stopLoop resolved it already)
+        if (e.published !== startedAfter) { if (loop.wantRead) { loop.wantRead = false; void read(); } return; } // stale: a newer reading is on screen
+        const changed = loop.before === null || native !== loop.before;
+        const settled = !loop.untilChanged || changed || (loop.expect !== null && native === loop.expect) || loop.attempts >= BALANCE_RECHECK_MAX;
+        if (!settled) { loop.attempts++; if (loop.wantRead) { loop.wantRead = false; void read(); } else e.timer = setTimeout(read, BALANCE_RECHECK_MS); return; } // the node still reports the old value
+        // a token requirement arrived while this read was in flight: read once more so the ERC-20 face is not left unread
+        if (loop.followUp && erc20 === null && e.usdc) { loop.followUp = false; loop.untilChanged = false; void read(); return; }
+        e.reading = false; e.value = { native, erc20, readAt: Date.now() }; e.published++; notify(e);
+        if (loop.before !== null && native !== loop.before) signalOtherTabs(account, native);
+        done();
+      }).catch(() => { loop.inFlight = false; if (gen === e.gen) { e.timer = null; e.reading = false; } done(); });
+    };
     loop.read = () => { void read(); };
     read();
   });

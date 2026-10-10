@@ -74,19 +74,24 @@ export async function finalValidate(i: FinalValidationInput): Promise<FinalValid
   if (s2.chainId !== intent.chainId) reasons.push("final validation chain != intent chain");
   if (!implNow || implNow.toLowerCase() !== approvedImpl?.toLowerCase()) reasons.push("implementation changed since report");
   if (!(paused.value.ok && BigInt(paused.value.data ?? "0x1") === 0n)) reasons.push("paused or unreadable");
-  if (!sim2.value.ok) reasons.push(`re-simulation reverted: ${sim2.value.error}`);
+  if (!sim2.value.ok) reasons.push(sim2.value.unavailable ? `re-simulation unavailable (the RPC could not run the call; not a revert): ${sim2.value.error}` : `re-simulation reverted: ${sim2.value.error}`);
   if (balance < BigInt(intent.valueNativeAtomic) + gasReserve) reasons.push("balance < value + gas reserve");
   if (gasReserve > BigInt(policy.maxGasCostNativeAtomic)) reasons.push("gas reserve exceeds policy.maxGasCostNativeAtomic");
   // the validation window counts from the pinned observation, not from the end of the reads: a slow validation cannot buy itself time
   const ageSeconds = i.maxFinalValidationAgeSeconds ?? policy.maxFinalValidationAgeSeconds;
   const observedAtMs = Date.parse(s2.observedAt);
   if (Date.now() - observedAtMs > ageSeconds * 1000) reasons.push(`final validation exceeded its own window: snapshot observed at ${s2.observedAt}, ${Math.round((Date.now() - observedAtMs) / 1000)} s ago, window ${ageSeconds} s`);
+  // audit 2026-10-10 (VF-05): the buyer's report-age policy is re-checked AFTER the awaited work (fee receipt, block wait, reads) — a report
+  // that was fresh at the decision can age out during a slow validation; and the receipt's expiry never outlives that deadline
+  const reportObservedMs = Date.parse(report.observation.observedAt);
+  const reportDeadlineMs = reportObservedMs + policy.maxReportAgeSeconds * 1000;
+  if (Date.now() > reportDeadlineMs) reasons.push(`report aged past policy.maxReportAgeSeconds (${policy.maxReportAgeSeconds} s) during validation: observed at ${report.observation.observedAt}, ${Math.round((Date.now() - reportObservedMs) / 1000)} s ago`);
   const plan = TransactionPlanSchema.parse({ chainId: i.chainId, from: i.signer.address, type: 2, to: merchant, data: intent.data, valueNativeAtomic: intent.valueNativeAtomic, nonce: nonce.toString(), gasLimit: gasLimit.toString(), maxFeePerGasNativeAtomic: fees.maxFeePerGas.toString(), maxPriorityFeePerGasNativeAtomic: fees.maxPriorityFeePerGas.toString(), accessList: [], authorizationList: [] });
   const planDigest = transactionPlanDigest(plan);
   const finalValidation = FinalValidationSchema.parse({ schemaVersion: "1.0", executionAttemptId: i.attemptId, intentDigest: i.intentDigest, reportDigest: i.reportDigest, decisionDigest: i.decisionDigest, baselineDigest: i.baselineDigest, policyDigest: i.policyDigest, snapshot: s2, transactionPlan: plan, transactionPlanDigest: planDigest,
     walletEvidenceDigest, criticalStateEvidenceDigests: [impl.evidenceDigest, paused.evidenceDigest], simulationEvidenceDigest: sim2.evidenceDigest, balanceNativeAtomic: balance.toString(), reservedGasNativeAtomic: gasReserve.toString(), reservedOtherNativeAtomic: "0",
     feeEvidenceDigest: keccak256(toHex(JSON.stringify({ maxFeePerGas: fees.maxFeePerGas.toString(), maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(), gasLimit: gasLimit.toString() }))),
     result: reasons.length ? "REVIEW_REQUIRED" : "PASS", reasons, validatedAt: new Date().toISOString(),
-    expiresAt: new Date(Math.min(observedAtMs + ageSeconds * 1000, Date.parse(intent.expiresAt), Date.parse(report.expiresAt), finalApproval.baseline?.validUntil ? Date.parse(finalApproval.baseline.validUntil) : Infinity)).toISOString() });
+    expiresAt: new Date(Math.min(observedAtMs + ageSeconds * 1000, reportDeadlineMs, Date.parse(intent.expiresAt), Date.parse(report.expiresAt), finalApproval.baseline?.validUntil ? Date.parse(finalApproval.baseline.validUntil) : Infinity)).toISOString() });
   return { finalValidation, finalValidationDigest: finalValidationDigest(finalValidation), plan, planDigest, evidence, approvalStatusAtValidation, fees, gasLimit, nonce, snapshot: s2, reasons };
 }

@@ -349,3 +349,36 @@ describe("review round 3 — durable prompt uncertainty, no closing without the 
     expect(getAttemptRow(db, id)!.fee_receipt_json).toContain("87141");
   });
 });
+
+describe("audit 2026-10-10 (API-04): validation admission is reserved before any RPC work and never given back", () => {
+  it("with one quota slot left, ten concurrent requests start exactly one validation; the others are refused without RPC work; the slot stays taken after the validation", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    run(db, "INSERT INTO wallet_admissions (client_key, day, count) VALUES (?, ?, ?)", "c1", today, 59); // 59 of 60 used today
+    mocks.decide.mockReturnValue({ decision: "NO_POLICY_VIOLATION", reasons: [], checks: [] });
+    let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+    mocks.fv.mockImplementation(async () => { await gate; return passing(); });
+    const results = Promise.all(Array.from({ length: 10 }, () => createWalletAttempt(db, OWNER, "c1", body())));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mocks.fv).toHaveBeenCalledTimes(1); // one validation in flight, nine refused before any RPC work
+    release();
+    const all = await results;
+    expect(all.filter((r) => r.ok)).toHaveLength(1); expect(all.filter((r) => !r.ok && r.status === 429)).toHaveLength(9);
+    expect(mocks.fv).toHaveBeenCalledTimes(1);
+    expect(Number((db as any).prepare("SELECT count FROM wallet_admissions WHERE client_key = ? AND day = ?").get("c1", today).count)).toBe(60); // the slot is consumed
+    expect((db as any).prepare("SELECT COUNT(*) AS c FROM wallet_attempts").get().c).toBe(1);
+  });
+  it("a refused validation keeps its admission; a second concurrent request for the same client is refused while one is in flight even with quota left", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    mocks.decide.mockReturnValue({ decision: "NO_POLICY_VIOLATION", reasons: [], checks: [] });
+    let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+    mocks.fv.mockImplementation(async () => { await gate; return { ...passing(), finalValidation: { ...FV, result: "REVIEW_REQUIRED", reasons: ["paused"] }, reasons: ["paused"] }; });
+    const first = createWalletAttempt(db, OWNER, "c1", body());
+    await new Promise((r) => setTimeout(r, 0));
+    const second = await createWalletAttempt(db, OWNER, "c1", body());
+    expect(second).toMatchObject({ ok: false, status: 429, reason: expect.stringContaining("already in progress") });
+    release();
+    const r1 = await first; expect(r1.ok).toBe(false); // the final validation refused …
+    expect(Number((db as any).prepare("SELECT count FROM wallet_admissions WHERE client_key = ? AND day = ?").get("c1", today).count)).toBe(1); // … and its admission is retained
+    expect(mocks.fv).toHaveBeenCalledTimes(1);
+  });
+});

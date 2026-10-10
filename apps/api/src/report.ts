@@ -7,13 +7,15 @@ import { adapterManifests, adapterManifestDigests, methodologyDigest, arcAdvisor
 
 export const client: PublicClient = createPublicClient({ transport: http(cfg.rpc, { timeout: 15_000 }) });
 
-export type BuiltReport = { report: ReportCore; digest: Hex; evidence: { evidence: RpcEvidence; digest: Hex }[]; simulation: { ok: boolean; error: string | null } | null };
+export type BuiltReport = { report: ReportCore; digest: Hex; evidence: { evidence: RpcEvidence; digest: Hex }[]; simulation: { ok: boolean; error: string | null; unavailable?: boolean } | null };
 
+/** audit 2026-10-10 (API-03): the observation's providerId is a stable non-secret name; ARC_RPC_URL may carry a provider token and never enters a report */
+const PROVIDER_ID = `rpc.${cfg.net}`;
 const addSeconds = (iso: string, s: number) => new Date(new Date(iso).getTime() + s * 1000).toISOString();
 
 /** OBJECT_OBSERVATION: raw facts about any address; never decision-eligible. */
 export async function buildObjectReport(subject: Hex): Promise<BuiltReport> {
-  const snapshot = await captureSnapshot(client, { providerId: cfg.rpc });
+  const snapshot = await captureSnapshot(client, { providerId: PROVIDER_ID });
   const proxy = await observeProxy(client, subject, snapshot, adapterManifests);
   const signals: Signal[] = [...proxy.signals, ...arcAdvisorySignals];
   const report = ReportCore.parse({
@@ -28,7 +30,7 @@ export async function buildObjectReport(subject: Hex): Promise<BuiltReport> {
 /** SUPPORTED_INTENT: pinned observation of the exact target + baseline comparison + supported-state reads + exact-call simulation. */
 export async function buildIntentReport(intent: IntentCore, intentDigest: Hex, baseline: BaselineCore | null, baselineDigest: Hex | null): Promise<BuiltReport> {
   const subject = getAddress(intent.to) as Hex;
-  const snapshot = await captureSnapshot(client, { providerId: cfg.rpc });
+  const snapshot = await captureSnapshot(client, { providerId: PROVIDER_ID });
   const proxy = await observeProxy(client, subject, snapshot, adapterManifests);
   const evidence: { evidence: RpcEvidence; digest: Hex }[] = [...proxy.evidence];
   const signals: Signal[] = [...proxy.signals];
@@ -111,10 +113,11 @@ export async function buildIntentReport(intent: IntentCore, intentDigest: Hex, b
   // CALL_SIMULATION of the exact candidate call (from/to/data/value) at the pinned block
   const sim = await readCall(client, subject, intent.data as Hex, snapshot, intent.from as Hex, BigInt(intent.valueNativeAtomic));
   evidence.push({ evidence: sim.evidence, digest: sim.evidenceDigest });
-  const simError = sim.value.ok ? null : describeRevert(sim.value.revertData, sim.value.error);
+  // audit 2026-10-10 (VF-04): an RPC that could not run the call is missing evidence, not a revert; the report says which it was
+  const simError = sim.value.ok ? null : sim.value.unavailable ? sim.value.error : describeRevert(sim.value.revertData, sim.value.error);
   signals.push({ id: "CALL_SIMULATION", state: sim.value.ok ? "observed" : "not_observed", basis: "simulation",
     scope: "eth_call with the exact sender, target, calldata and value at the pinned block", evidenceDigests: [sim.evidenceDigest],
-    limitations: sim.value.ok ? ["simulation success is not a guarantee of future inclusion or success"] : [`revert: ${simError}`], sourceIds: ["https://ethereum.org/developers/docs/apis/json-rpc/"] });
+    limitations: sim.value.ok ? ["simulation success is not a guarantee of future inclusion or success"] : sim.value.unavailable ? [`unavailable: the RPC could not run the simulation (${simError}); not a revert — retry when the RPC answers`] : [`revert: ${simError}`], sourceIds: ["https://ethereum.org/developers/docs/apis/json-rpc/"] });
   signals.push(...arcAdvisorySignals);
 
   const report = ReportCore.parse({
@@ -123,7 +126,7 @@ export async function buildIntentReport(intent: IntentCore, intentDigest: Hex, b
     exclusions: [...exclusions, "external oracles, delegatecall targets beyond two levels, and full storage are not covered"],
     expiresAt: addSeconds(snapshot.observedAt, cfg.reportTtlSeconds),
   });
-  return { report, digest: reportDigest(report), evidence, simulation: { ok: sim.value.ok, error: simError } };
+  return { report, digest: reportDigest(report), evidence, simulation: { ok: sim.value.ok, error: simError, unavailable: !!sim.value.unavailable } };
 }
 
 /** Decode a DemoMerchant custom error when the revert payload matches the template ABI; otherwise keep the node's message. */

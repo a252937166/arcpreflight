@@ -92,6 +92,30 @@ describe("self-relayed EIP-3009 settlement", () => {
     expect(saved()).toMatchObject({ state: "COMPLETED", tx_hash: OTHER_TX });
     expect(rpc.getLogsCalls[0]).toEqual({ fromBlock: 900n, toBlock: 999n }); // scan starts at the row's created_block
   });
+  it("audit 2026-10-10 (API-02): a matching settlement whose receipt is not readable yet is kept as the candidate; the scan never moves past it, and the receipt appearing later delivers COMPLETED without a new signature", async () => {
+    rpc.authUsed = true; rpc.head = 1_500n; // consumed by another broadcaster at block 950; nothing of ours was sent
+    rpc.txs.set(OTHER_TX, { to: USDC, input: encodeTransferWithAuthorization(payload.authorization, payload.signature) });
+    rpc.logs = logsFor(OTHER_TX, payload.authorization, 950n); // the event and the body are visible …
+    expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("candidate") }); // … the receipt is not (a lagging node)
+    expect(saved()).toMatchObject({ state: "PENDING", candidate_tx_hash: OTHER_TX.toLowerCase() });
+    expect(saved().scanned_to_block ?? null).toBeNull(); // the window was NOT advanced past the found evidence
+    expect(rpc.sent).toHaveLength(0);
+    // a restart between discovery and the receipt: the candidate is re-examined first; still no receipt → still pending, still no scan past it
+    expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("candidate") });
+    expect(rpc.getLogsCalls).toHaveLength(1); expect(saved().scanned_to_block ?? null).toBeNull();
+    // the receipt becomes readable: the original report is delivered — no new authorization, no transaction of ours
+    rpc.receipts.set(OTHER_TX, receipt(OTHER_TX, "success", rpc.logs, 950n));
+    expect(await settle()).toMatchObject({ state: "COMPLETED", txHash: OTHER_TX }); // nothing of ours was ever sent, so no "other than the relayer's" note
+    expect(saved()).toMatchObject({ state: "COMPLETED", tx_hash: OTHER_TX }); expect(rpc.sent).toHaveLength(0);
+  });
+  it("audit 2026-10-10 (API-02): an event whose transaction body is not readable yet is also kept as the candidate (no scan past it); a reverted candidate is dropped and the search continues", async () => {
+    rpc.authUsed = true; rpc.head = 1_500n;
+    rpc.logs = logsFor(OTHER_TX, payload.authorization, 950n); // event visible, body not served
+    expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("body is not readable yet") });
+    expect(saved()).toMatchObject({ candidate_tx_hash: OTHER_TX.toLowerCase() }); expect(saved().scanned_to_block ?? null).toBeNull();
+    rpc.receipts.set(OTHER_TX, receipt(OTHER_TX, "reverted", [], 950n)); // the candidate turns out reverted: not a settlement
+    const r = await settle(); expect(r.state).toBe("PENDING"); expect(saved().candidate_tx_hash ?? null).toBeNull();
+  });
   it("keeps a consumed authorization PENDING until evidence is located, advancing the scan window without rescanning", async () => {
     rpc.authUsed = true; rpc.head = 1_500n; // consumed before we ever sent anything; no logs in range yet
     expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("evidence not located yet") });

@@ -69,6 +69,9 @@ const store = {
   /** the API's network as the nav last reported it: the chain an auto-switch targets */
   target: null as NetworkInfo | null,
   reconnecting: null as Promise<void> | null, timers: [] as ReturnType<typeof setTimeout>[],
+  /** audit 2026-10-10 (W09): the selection generation — bumped by an explicit connect, a disconnect and a reset; a reconnect, chain read or
+   *  network switch that finishes for an older generation binds nothing and publishes nothing */
+  sel: 0,
   /** the window the announce listener is attached to (one listener per page lifetime) */
   listenerOn: null as any,
 };
@@ -141,15 +144,17 @@ function bind(c: ProviderDetail) {
   p.on?.("accountsChanged", onAcc); p.on?.("chainChanged", onChain); p.on?.("disconnect", onDisc);
   store.bound = { provider: p, off: () => { p.removeListener?.("accountsChanged", onAcc); p.removeListener?.("chainChanged", onChain); p.removeListener?.("disconnect", onDisc); store.bound = { provider: null, off: () => {} }; } };
 }
-async function finish(c: ProviderDetail, accs: string[], prompt: boolean): Promise<void> {
+async function finish(c: ProviderDetail, accs: string[], prompt: boolean, sel: number): Promise<void> {
   const cid: string = await c.provider.request({ method: "eth_chainId" });
+  if (sel !== store.sel) return; // the visitor chose another wallet (or disconnected) while this one was answering: it binds nothing
   const account = accs?.[0] ? getAddress(accs[0]) : null;
   if (prompt || account) bind(c);
   set({ provider: c.provider, info: c.info, account, chainId: Number(cid), isTest: !!c.provider.isArcPreflightTestWallet, connecting: false, error: null, picker: false });
 }
-async function read(c: ProviderDetail, prompt: boolean): Promise<void> {
+async function read(c: ProviderDetail, prompt: boolean, sel: number): Promise<void> {
   const accs: string[] = await c.provider.request({ method: prompt ? "eth_requestAccounts" : "eth_accounts" });
-  await finish(c, accs, prompt);
+  if (sel !== store.sel) return;
+  await finish(c, accs, prompt, sel);
 }
 
 /** Reconnect without a prompt when the remembered wallet — that exact wallet, by its remembered identity — is present and still exposes
@@ -162,11 +167,12 @@ export function silentReconnect(): Promise<void> {
     const rdns = remembered(); if (!rdns) return;
     const c = candidates().find((x) => x.info.rdns === rdns);
     if (!c) return; // not present (yet): the announce listener and the ≈2 s re-requests retry; the chip says so if it never appears
+    const sel = store.sel;
     try {
       const accs: string[] = await c.provider.request({ method: "eth_accounts" });
-      if (!accs?.length || store.state.account) return; // not authorized any more (or another path connected meanwhile): stay as we are, never prompt
-      await finish(c, accs, false);
-      void ensureChain();
+      if (sel !== store.sel || !accs?.length || store.state.account || store.state.connecting) return; // the visitor chose meanwhile, or not authorized any more: never prompt, never override
+      await finish(c, accs, false, sel);
+      if (sel === store.sel) void ensureChain(sel);
     } catch { /* not authorized any more: stay disconnected */ }
   })();
   store.reconnecting = attempt.finally(() => { store.reconnecting = null; });
@@ -200,15 +206,17 @@ export async function connect(uuid?: string) {
   set({ picker: true });
 }
 async function connectTo(chosen: ProviderDetail) {
+  const sel = ++store.sel; // an explicit choice: everything older that is still answering is void
   set({ connecting: true, picker: false, error: null });
-  try { await read(chosen, true); remember(chosen.info.rdns); set({ missing: null }); await ensureChain(); }
-  catch (e: any) { set({ connecting: false, error: e?.message ?? String(e) }); }
+  try { await read(chosen, true, sel); if (sel !== store.sel) return; remember(chosen.info.rdns); set({ missing: null }); await ensureChain(sel); }
+  catch (e: any) { if (sel === store.sel) set({ connecting: false, error: e?.message ?? String(e) }); }
 }
 export const closePicker = () => set({ picker: false, searching: false });
 /** the "not detected in this tab" notice can be dismissed; the remembered choice stays */
 export const dismissMissing = () => set({ missing: null });
 /** Disconnect: revoke the site's account permission where the wallet supports it (MetaMask and others), then forget the choice. */
 export async function disconnect() {
+  store.sel++; // nothing that was still connecting or reconnecting may land after this
   const p = store.state.provider;
   if (p) { try { await p.request({ method: "wallet_revokePermissions", params: [{ eth_accounts: {} }] }); } catch { /* wallets without wallet_revokePermissions: a local disconnect is all we can do */ } }
   store.bound.off(); remember(null);
@@ -240,23 +248,23 @@ export function setTargetNetwork(n: NetworkInfo | null) {
 }
 /** One automatic switch per event (connect, silent reconnect, network change): a declined prompt (4001) or an unsupported method is
  *  not an error — the wallet menu and the pages keep the manual "Switch to Arc" fallback. Never prompts while a prompt is open. */
-export async function ensureChain(): Promise<boolean> {
+export async function ensureChain(sel: number = store.sel): Promise<boolean> {
   const p = store.state.provider; const n = store.target;
   if (!p || !n || !store.state.account) return false;
   if (store.state.chainId === n.chainId) return true;
   if (store.state.switching) return false;
   set({ switching: true });
-  try { await switchToArc(p, n); const cid: string = await p.request({ method: "eth_chainId" }); set({ chainId: Number(cid) }); return Number(cid) === n.chainId; }
+  try { await switchToArc(p, n); const cid: string = await p.request({ method: "eth_chainId" }); if (sel !== store.sel || store.state.provider !== p) return false; set({ chainId: Number(cid) }); return Number(cid) === n.chainId; }
   catch { return false; }
-  finally { set({ switching: false }); }
+  finally { if (sel === store.sel) set({ switching: false }); }
 }
 export async function refresh() {
-  const p = store.state.provider; if (!p) return;
-  try { const [accs, cid] = await Promise.all([p.request({ method: "eth_accounts" }) as Promise<string[]>, p.request({ method: "eth_chainId" }) as Promise<string>]); set({ account: accs?.[0] ? getAddress(accs[0]) : null, chainId: Number(cid) }); } catch { /* ignore */ }
+  const p = store.state.provider; if (!p) return; const sel = store.sel;
+  try { const [accs, cid] = await Promise.all([p.request({ method: "eth_accounts" }) as Promise<string[]>, p.request({ method: "eth_chainId" }) as Promise<string>]); if (sel !== store.sel || store.state.provider !== p) return; set({ account: accs?.[0] ? getAddress(accs[0]) : null, chainId: Number(cid) }); } catch { /* ignore */ }
 }
 /** Test seam: forget discovery and state (the module is a singleton); the listener moves to the current window on the next use. */
 export function resetWalletStore() {
-  store.bound.off(); store.state = initial(); store.discovered.clear(); store.started = false; store.target = null; store.reconnecting = null;
+  store.bound.off(); store.state = initial(); store.discovered.clear(); store.started = false; store.target = null; store.reconnecting = null; store.sel++;
   for (const t of store.timers) clearTimeout(t); store.timers = [];
   try { store.listenerOn?.removeEventListener?.("eip6963:announceProvider", onAnnounce); } catch { /* ignore */ }
   store.listenerOn = null; ensureListener();

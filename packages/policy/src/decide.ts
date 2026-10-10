@@ -15,7 +15,8 @@ export type DecisionInput = {
   report: ReportCore;
   reportDigest: `0x${string}`;
   now: Date;
-  simulation?: { ok: boolean; error: string | null } | null;
+  /** `unavailable`: the RPC could not run the call (transport/node failure), which is missing evidence — never a revert (audit 2026-10-10, VF-04) */
+  simulation?: { ok: boolean; error: string | null; unavailable?: boolean } | null;
 };
 
 export type DecisionOutput = { decision: Decision; checks: CheckResult[]; reasons: string[] };
@@ -53,6 +54,7 @@ export function decide(i: DecisionInput): DecisionOutput {
   const sr: string[] = [];
   let simOutcome: CheckResult["outcome"] = "PASS";
   if (i.simulation == null) { sr.push("no simulation evidence"); simOutcome = "REVIEW_REQUIRED"; }
+  else if (!i.simulation.ok && i.simulation.unavailable) { sr.push(`simulation unavailable (the RPC could not run the call, not a revert): ${i.simulation.error}`); simOutcome = "REVIEW_REQUIRED"; }
   else if (!i.simulation.ok) { sr.push(`simulation reverted: ${i.simulation.error}`); simOutcome = "BLOCKED"; }
   checks.push({ id: "CALL_SIMULATION", outcome: simOutcome, reasons: sr });
   // 6. EVIDENCE_FRESHNESS

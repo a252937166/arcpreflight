@@ -3,12 +3,17 @@
 // history yields UNVERIFIED, never an invented success, and there is no single overall PASS.
 import { keccak256, sha256, stringToBytes, toHex, getAddress, isAddressEqual, encodeFunctionData, decodeFunctionData, decodeAbiParameters, type Hex as ViemHex } from "viem";
 import { digest as schemaDigest, intentDigest, policyDigest, baselineDigest, reportDigest, decisionDigest, transactionPlanDigest, finalValidationDigest, executionDigest, quoteDigest } from "@arcpreflight/schema";
-import { findSettlementInLogs, authorizationCallMatches, addressTopic, EIP3009_CALL_ABI } from "@arcpreflight/client";
+import { findSettlementInLogs, authorizationCallMatches, addressTopic, EIP3009_CALL_ABI, ARC } from "@arcpreflight/client";
 import { costStatement, type ReceiptLike, buyerRoleOf } from "@arcpreflight/passport";
 import { ACCEPTED_PROFILES, FINDING_ORDER, type Anchors, type Finding, type FindingId, type FindingStatus, type Hex, type PassportFiles, type VerificationResult, type VerifierRpc } from "./types.js";
 import { fileSetProblems, utf8Length } from "./load.js";
 
 export const ORDER_PAID_TOPIC = keccak256(toHex("OrderPaid(bytes32,address,uint256)"));
+export const ORDER_CREATED_TOPIC = keccak256(toHex("OrderCreated(bytes32,address,uint256)"));
+const PAY_ABI = [{ type: "function", name: "pay", stateMutability: "payable", inputs: [{ name: "orderId", type: "bytes32" }], outputs: [] }] as const;
+const CREATE_ORDER_ABI = [{ type: "function", name: "createOrder", stateMutability: "nonpayable", inputs: [{ name: "orderId", type: "bytes32" }, { name: "payer", type: "address" }, { name: "amountNativeAtomic", type: "uint256" }], outputs: [] }] as const;
+/** the canonical Arc identity of a chain the verifier knows: the passport never chooses which contract counts as USDC (audit 2026-10-10, VF-02) */
+const canonicalArc = (chainId: unknown) => (Number(chainId) === ARC.mainnet.chainId ? ARC.mainnet : Number(chainId) === ARC.testnet.chainId ? ARC.testnet : null);
 const GET_ORDER_ABI = [{ type: "function", name: "getOrder", stateMutability: "view", inputs: [{ name: "orderId", type: "bytes32" }], outputs: [{ type: "address" }, { type: "uint256" }, { type: "bool" }, { type: "uint64" }, { type: "uint64" }] }] as const;
 const CORE_DIGESTS: Record<string, (v: unknown) => Hex> = { intent: intentDigest, policy: policyDigest, baseline: baselineDigest, report: reportDigest, decision: decisionDigest, transactionPlan: transactionPlanDigest, finalValidation: finalValidationDigest, execution: executionDigest, quote: quoteDigest, evidence: (v) => schemaDigest("evidence", "1.0", v) };
 
@@ -140,6 +145,29 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
     if (manifest.subject?.payer && !sameAddr(manifest.subject.payer, intent.from)) digestProblems.push("manifest subject.payer != intent.from");
     if (manifest.subject?.merchant && !sameAddr(manifest.subject.merchant, intent.to)) digestProblems.push("manifest subject.merchant != intent.to");
     if (manifest.subject?.orderId && intent.businessExpectation?.orderId && !same(manifest.subject.orderId, intent.businessExpectation.orderId)) digestProblems.push("manifest subject.orderId != intent order");
+    // audit 2026-10-10 (VF-01): a run that went to execution (a plan exists) must have planned the intent's EXACT call, and the intent must
+    // satisfy its own business expectation and the anchored policy — a rehashed, self-consistent passport cannot describe one call and execute another
+    if (plan) {
+      const dev: string[] = [];
+      if (Number(plan.chainId) !== Number(intent.chainId)) dev.push("chainId"); if (!sameAddr(plan.from, intent.from)) dev.push("from"); if (!sameAddr(plan.to, intent.to)) dev.push("to");
+      if (!same(plan.data, intent.data)) dev.push("data"); if (String(plan.valueNativeAtomic) !== String(intent.valueNativeAtomic)) dev.push("value"); if (!isType2(plan.type)) dev.push("type");
+      if (dev.length) digestProblems.push(`transaction-plan.json is not the intent's exact call (differs in ${dev.join(", ")})`);
+      if (fv?.transactionPlan) { try { if (!same(transactionPlanDigest(fv.transactionPlan), D("transaction-plan.json") ?? transactionPlanDigest(plan))) digestProblems.push("final-validation.json embeds a plan whose digest differs from transaction-plan.json"); } catch { digestProblems.push("final-validation.json embeds a plan that is not a valid schema-1.0 transaction plan"); } }
+      const be = intent.businessExpectation;
+      if (be?.action === "MERCHANT_PAY") {
+        if (!sameAddr(be.recipient, intent.to)) digestProblems.push("intent.to != businessExpectation.recipient");
+        if (String(be.amountNativeAtomic) !== String(intent.valueNativeAtomic)) digestProblems.push("intent.valueNativeAtomic != businessExpectation.amountNativeAtomic");
+        try { if (!same(intent.data, encodeFunctionData({ abi: PAY_ABI, functionName: "pay", args: [be.orderId as ViemHex] }))) digestProblems.push("intent.data is not pay(businessExpectation.orderId)"); } catch { digestProblems.push("businessExpectation.orderId is not a 32-byte id"); }
+      }
+      if (policy) {
+        if (Array.isArray(policy.allowedSenders) && !policy.allowedSenders.some((a: string) => sameAddr(a, intent.from))) digestProblems.push("intent.from is not in policy.allowedSenders");
+        if (Array.isArray(policy.allowedTargets) && !policy.allowedTargets.some((a: string) => sameAddr(a, intent.to))) digestProblems.push("intent.to is not in policy.allowedTargets");
+        const sel = String(intent.data ?? "").slice(0, 10).toLowerCase(); if (Array.isArray(policy.allowedSelectors) && !policy.allowedSelectors.some((x: string) => low(x) === sel)) digestProblems.push("intent.data selector is not in policy.allowedSelectors");
+        const maxNative = big(policy.maxNativePaymentAtomic), val = big(intent.valueNativeAtomic); if (maxNative !== null && val !== null && val > maxNative) digestProblems.push("intent.valueNativeAtomic exceeds policy.maxNativePaymentAtomic");
+      }
+    }
+    // audit 2026-10-10 (VF-02): the quote's asset and network are the canonical USDC and CAIP-2 of the intent's chain, never the passport's own choice
+    { const canon = canonicalArc(intent.chainId); if (canon && payment?.quote) { if (!sameAddr(payment.quote.asset, canon.usdc)) digestProblems.push(`quote.asset ${payment.quote.asset} is not the canonical Arc USDC ${canon.usdc}`); if (low(payment.quote.network) !== canon.caip2) digestProblems.push(`quote.network ${payment.quote.network} != ${canon.caip2}`); } }
     if (report?.intentDigest) link("report.intentDigest", report.intentDigest, D("intent.json"));
     if (baseline) { link("baseline digest vs intent.baselineDigest", D("baseline.json"), intent.baselineDigest); if (!sameAddr(baseline.subject, intent.to)) digestProblems.push("baseline.subject != intent.to"); if (baseline.chainId !== intent.chainId) digestProblems.push("baseline.chainId != intent.chainId"); }
     if (decision) { link("decision.intentDigest", decision.intentDigest, D("intent.json")); link("decision.reportDigest", decision.reportDigest, D("report.json")); link("decision.baselineDigest", decision.baselineDigest, intent.baselineDigest); if (policy) link("decision.policyDigest", decision.policyDigest, D("policy.json")); }
@@ -267,8 +295,14 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
   let chainId: number | null = null;
   try { chainId = await rpc.getChainId(); } catch (e: any) { set("NETWORK_IDENTITY", "UNVERIFIED", `RPC unreachable: ${errText(e).slice(0, 80)}`); for (const id of onlineIds) set(id, "UNVERIFIED", "RPC unreachable"); return finish(manifest); }
   if (chainId !== manifest.chain?.chainId) { set("NETWORK_IDENTITY", "FAIL", `RPC serves chain ${chainId}, passport is for chain ${manifest.chain?.chainId}`); for (const id of onlineIds) set(id, "UNVERIFIED", "network mismatch: online checks skipped"); return finish(manifest); }
-  set("NETWORK_IDENTITY", "PASS", `RPC serves chain ${chainId} (${manifest.chain?.caip2})`);
-  const usdc = manifest.chain?.usdc as Hex | undefined;
+  const canonical = canonicalArc(chainId);
+  if (!canonical) { set("NETWORK_IDENTITY", "FAIL", `chain ${chainId} is not an Arc network this verifier knows (5042, 5042002)`); for (const id of onlineIds) set(id, "UNVERIFIED", "unknown network: online checks skipped"); return finish(manifest); }
+  if (!sameAddr(manifest.chain?.usdc, canonical.usdc) || low(manifest.chain?.caip2) !== canonical.caip2) {
+    set("NETWORK_IDENTITY", "FAIL", `passport names USDC ${manifest.chain?.usdc} on ${manifest.chain?.caip2}; the canonical identity of chain ${chainId} is USDC ${canonical.usdc} on ${canonical.caip2} — a passport does not choose which contract counts as USDC`);
+    for (const id of onlineIds) set(id, "UNVERIFIED", "asset identity mismatch: online checks skipped"); return finish(manifest);
+  }
+  set("NETWORK_IDENTITY", "PASS", `RPC serves chain ${chainId} (${canonical.caip2}); USDC is the canonical ${canonical.usdc}`);
+  const usdc = canonical.usdc as Hex; // the canonical contract, never the passport's word
   /** docs/LIFECYCLE.md §1/§6: wallet mode relaxes the plan agreement to the fields that identify the call; everything else is runner mode. */
   const mode: "runner" | "wallet" = manifest.subject?.executionMode === "wallet" ? "wallet" : "runner";
   // Every rpc.* read goes through `fetched`, which keeps "the RPC threw" apart from "not found": unavailable history is UNVERIFIED, never FAIL.
@@ -445,6 +479,23 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
     const fee = await fetchFor("fee relay", feeSrc, cost.operator?.feeRelay, cost.operator?.feeRelay?.address);
     const biz = await fetchFor("business payment", bizSrc, cost.buyer?.businessGas, cost.buyer?.address);
     const create = await fetchFor("order creation", createSrc, cost.operator?.orderCreation, cost.operator?.orderCreation?.address);
+    // audit 2026-10-10 (VF-03): the order creation's gas is attributed only to THIS order's creation — a transaction to the merchant whose
+    // calldata is createOrder(orderId, payer, amount) for the intent's order, that succeeded and emitted OrderCreated; never the fee relay or the payment
+    if (createSrc) {
+      if ((feeSrc && same(createSrc, feeSrc)) || (bizSrc && same(createSrc, bizSrc))) problems.push("order creation names the same transaction as the fee relay or the business payment");
+      const [ct, cr] = await Promise.all([tx(createSrc), rc(createSrc)]);
+      if (ct.ok && cr.ok && ct.value && cr.value) {
+        const t = ct.value, r = cr.value, be = intent.businessExpectation; const prov: string[] = [];
+        if (!sameAddr(t.to, intent.to)) prov.push(`targets ${t.to}, not the merchant ${intent.to}`);
+        let decoded: { args?: readonly unknown[] } | null = null;
+        try { decoded = decodeFunctionData({ abi: CREATE_ORDER_ABI, data: String(t.input ?? t.data ?? "0x") as ViemHex }) as any; } catch { prov.push("calldata is not createOrder(orderId, payer, amount)"); }
+        if (decoded?.args) { const [oid, payer, amount] = decoded.args as [string, string, bigint]; if (!same(oid, be?.orderId)) prov.push("creates another order id"); if (!sameAddr(payer, intent.from)) prov.push("creates an order for another payer"); if (String(amount) !== String(be?.amountNativeAtomic)) prov.push("creates an order for another amount"); }
+        if (!succeeded(r)) prov.push("the creation transaction did not succeed");
+        const created = ((r.logs as any[]) ?? []).some((l) => sameAddr(l.address, intent.to) && same(l.topics?.[0], ORDER_CREATED_TOPIC) && same(l.topics?.[1], be?.orderId) && same(l.topics?.[2], addressTopic(intent.from as ViemHex)) && l.data && l.data !== "0x" && big(l.data) === big(be?.amountNativeAtomic));
+        if (!created) prov.push("no OrderCreated(orderId, payer, amount) log from the merchant");
+        if (prov.length) problems.push(`order creation ${createSrc} is not this order's creation: ${prov.join("; ")}`);
+      }
+    }
     if (!missing) {
       try {
         const toAddr = (a: string | null): Hex | null => (a && HEX40.test(a) ? (getAddress(a) as Hex) : null);

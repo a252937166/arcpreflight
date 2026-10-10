@@ -90,9 +90,28 @@ export async function createWalletAttempt(db: Db, principal: string, clientKey: 
   if (!rep) return conflict("CHECK_NOT_DELIVERED", "the delivered report is not on record");
   const report = ReportCore.parse(JSON.parse(rep.report_json)); const ev = JSON.parse(rep.evidence_json); const simulation = ev?.simulation ?? null;
   if (row(db, "SELECT 1 FROM wallet_attempts WHERE order_id = ? AND state IN ('VALIDATED','BROADCAST_ATTEMPTED') LIMIT 1", orderId)) return conflict("ATTEMPT_OPEN", "an attempt for this order is still open; abandon it or let it reconcile before validating another");
-  // validation is RPC-heavy (snapshot, reads, simulation, estimate, bounded wait): bounded per client and day
+  // validation is RPC-heavy (snapshot, reads, simulation, estimate, bounded wait): bounded per client and day. Audit 2026-10-10 (API-04):
+  // the admission is RESERVED here, atomically and before any await, and never given back (a refused or failed validation keeps its slot);
+  // one validation runs per client at a time, so a burst of concurrent requests admits only what the quota still allows
   const today = now().slice(0, 10);
-  if ((row(db, "SELECT COUNT(*) AS c FROM wallet_attempts WHERE client_key = ? AND substr(created_at,1,10) = ?", clientKey, today)?.c ?? 0) >= ATTEMPTS_PER_CLIENT_PER_DAY) return { ok: false, status: 429, error: "RATE_LIMITED", reason: `at most ${ATTEMPTS_PER_CLIENT_PER_DAY} wallet attempts per client per day` };
+  const admissionKey = clientKey ?? principal;
+  if (inflightValidations.has(admissionKey)) return { ok: false, status: 429, error: "RATE_LIMITED", reason: "a validation is already in progress for this client; wait for it to finish" };
+  if (!admitValidation(db, admissionKey, today, ATTEMPTS_PER_CLIENT_PER_DAY)) return { ok: false, status: 429, error: "RATE_LIMITED", reason: `at most ${ATTEMPTS_PER_CLIENT_PER_DAY} wallet attempts per client per day` };
+  inflightValidations.add(admissionKey);
+  try { return await validateAdmitted(db, principal, clientKey, req, { requestId, orderId, intent, order, q, p, report, simulation, policy, pDigest }); }
+  finally { inflightValidations.delete(admissionKey); }
+}
+/** the in-flight validations by client (one at a time per client) */
+const inflightValidations = new Set<string>();
+/** one more admission for the client today, if the quota allows: an atomic counter update, so concurrent requests cannot all pass the same check */
+export function admitValidation(db: Db, key: string, day: string, cap: number): boolean {
+  run(db, "INSERT OR IGNORE INTO wallet_admissions (client_key, day, count) VALUES (?, ?, 0)", key, day);
+  const r = db.prepare("UPDATE wallet_admissions SET count = count + 1 WHERE client_key = ? AND day = ? AND count < ?").run(key, day, cap);
+  return Number(r.changes) === 1;
+}
+export const admissionsToday = (db: Db, key: string, day: string): number => Number(row(db, "SELECT count FROM wallet_admissions WHERE client_key = ? AND day = ?", key, day)?.count ?? 0);
+async function validateAdmitted(db: Db, principal: string, clientKey: string | null, req: any, a: { requestId: string; orderId: string; intent: any; order: any; q: any; p: any; report: any; simulation: any; policy: any; pDigest: Hex }): Promise<AttemptResult> {
+  const { requestId, orderId, intent, order, q, p, report, simulation, policy, pDigest } = a;
   const attemptId = randomUUID();
   const approval = () => { const b = row(db, "SELECT * FROM baselines WHERE baseline_digest = ?", intent.baselineDigest); return { baseline: b ? BaselineCore.parse(JSON.parse(b.baseline_json)) : null, baselineDigest: (b?.baseline_digest as Hex | undefined) ?? null, baselineRevoked: !!b?.revoked }; };
   const { decision, reasons } = decide({ intent, policy, policyDigest: pDigest, ...approval(), report, reportDigest: q.report_digest as Hex, now: new Date(), simulation });

@@ -19,8 +19,8 @@ const now = () => new Date().toISOString();
 export function makeSealer(key: Buffer): Sealer {
   if (key.length !== 32) throw new Error("sealer key must be 32 bytes");
   return {
-    seal: async (obj) => { const iv = randomBytes(12); const c = createCipheriv("aes-256-gcm", key, iv); const data = Buffer.concat([c.update(JSON.stringify(obj), "utf8"), c.final()]); return JSON.stringify({ version: 1, iv: iv.toString("base64"), tag: c.getAuthTag().toString("base64"), data: data.toString("base64") }); },
-    open: async (s) => { const e = JSON.parse(s); if (e.version !== 1) throw new Error("unsupported sealed payload version"); const d = createDecipheriv("aes-256-gcm", key, Buffer.from(e.iv, "base64")); d.setAuthTag(Buffer.from(e.tag, "base64")); return JSON.parse(Buffer.concat([d.update(Buffer.from(e.data, "base64")), d.final()]).toString("utf8")); },
+    seal: async (obj) => { const iv = randomBytes(12); const c = createCipheriv("aes-256-gcm", key, iv, { authTagLength: 16 }); const data = Buffer.concat([c.update(JSON.stringify(obj), "utf8"), c.final()]); return JSON.stringify({ version: 1, iv: iv.toString("base64"), tag: c.getAuthTag().toString("base64"), data: data.toString("base64") }); },
+    open: async (s) => { const e = JSON.parse(s); if (e.version !== 1) throw new Error("unsupported sealed payload version"); const tag = Buffer.from(String(e.tag ?? ""), "base64"), iv = Buffer.from(String(e.iv ?? ""), "base64"); if (tag.length !== 16 || iv.length !== 12) throw new Error("sealed payload: the GCM tag must be 16 bytes and the IV 12 bytes"); const d = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: 16 }); d.setAuthTag(tag); return JSON.parse(Buffer.concat([d.update(Buffer.from(e.data, "base64")), d.final()]).toString("utf8")); },
   };
 }
 export async function sealerFromSigner(signer: { address: string; signMessage: (a: { message: string }) => Promise<Hex> }, chainId: number): Promise<Sealer> {

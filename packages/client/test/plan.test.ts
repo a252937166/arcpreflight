@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SpendRefused, parseUsdc18, type SpendEntry } from "../src/spend.js";
-import { beginMeasured, checkStep, createPlan, endStep, noteOpen, parsePlan, pinCaps, planCommitted, planRemaining, recordGuard, sameCaps, serializePlan, summarizePlan, updateMeasured } from "../src/plan.js";
+import { beginMeasured, checkStep, createPlan, endStep, noteOpen, parsePlan, pinCaps, planCommitted, planRemaining, recordGuard, resolvePlanId, sameCaps, serializePlan, summarizePlan, updateMeasured } from "../src/plan.js";
 
 // Gate D review 2026-10-10, P1: the cumulative cap must hold across process restarts — one record per plan id carries settled outflow,
 // pending commitments and the first invocation's balance baseline; the approved caps are pinned and cannot be raised by the environment.
 const U = parseUsdc18;
-const APPROVED = { budgetCapNativeAtomic: U("0.69"), steps: { deploy: { totalNativeAtomic: U("0.15"), perTxNativeAtomic: U("0.05") }, fund: { totalNativeAtomic: U("0.20"), perTxNativeAtomic: U("0.20") }, probe: { totalNativeAtomic: U("0.02"), perTxNativeAtomic: U("0.016") }, acceptance: { totalNativeAtomic: U("0.35"), perTxNativeAtomic: null }, lifecycle: { totalNativeAtomic: U("0.12"), perTxNativeAtomic: null } } };
+const APPROVED = { budgetCapNativeAtomic: U("0.69"), maxFeePerGasCeiling: 40n * 10n ** 9n, steps: { deploy: { totalNativeAtomic: U("0.15"), perTxNativeAtomic: U("0.05") }, fund: { totalNativeAtomic: U("0.20"), perTxNativeAtomic: U("0.20") }, probe: { totalNativeAtomic: U("0.02"), perTxNativeAtomic: U("0.016") }, acceptance: { totalNativeAtomic: U("0.35"), perTxNativeAtomic: null }, lifecycle: { totalNativeAtomic: U("0.12"), perTxNativeAtomic: null } } };
 const plan = () => createPlan({ planId: "gate-d-mainnet-2026-10", network: "mainnet", approved: APPROVED, now: "2026-10-10T00:00:00.000Z" });
 const entry = (status: SpendEntry["status"], worst: string, actual: string | null = null, to: string | null = null): SpendEntry => ({ purpose: "t", to, worstNativeAtomic: U(worst).toString(), actualNativeAtomic: actual === null ? null : U(actual).toString(), status, txHash: null, at: "2026-10-10T00:00:00.000Z" });
 
@@ -59,5 +59,26 @@ describe("plan ledger", () => {
     expect(() => updateMeasured(plan(), "lifecycle", U("1"))).toThrow(/no baseline/);
     expect(endStep(settled, "acceptance", "done").steps.acceptance.status).toBe("done");
     expect(summarizePlan(settled)[0]).toContain("budget cap 0.69"); expect(summarizePlan(settled).find((l) => l.includes("acceptance"))).toContain("baseline 10");
+  });
+});
+
+describe("audit 2026-10-10 (OP-02, OP-04): the plan id is mandatory on mainnet; the fee ceiling is pinned like the money caps", () => {
+  it("OP-02: on mainnet a blank or whitespace PLAN_ID is refused, an unset one takes the default, a named one is used; testnet has no plan unless named", () => {
+    expect(resolvePlanId("mainnet", undefined, "gate-d")).toBe("gate-d");
+    expect(resolvePlanId("mainnet", "rehearsal-x", "gate-d")).toBe("rehearsal-x");
+    expect(() => resolvePlanId("mainnet", "", "gate-d")).toThrow(/blank/); expect(() => resolvePlanId("mainnet", "   ", "gate-d")).toThrow(/blank/);
+    expect(resolvePlanId("testnet", undefined, "gate-d")).toBeNull(); expect(resolvePlanId("testnet", "", "gate-d")).toBeNull(); expect(resolvePlanId("testnet", " r1 ", "gate-d")).toBe("r1");
+  });
+  it("OP-04: MAX_FEE_GWEI above the pinned 40 gwei is refused for every step; 40 or lower is accepted; the ceiling is part of the pinned caps", () => {
+    const p = plan();
+    for (const step of ["deploy", "fund", "probe", "lifecycle"] as const) {
+      expect(() => pinCaps(p, step, { totalNativeAtomic: U("0.01"), maxFeePerGasCeiling: 41n * 10n ** 9n })).toThrow(/cannot raise an approved ceiling/);
+      expect(() => pinCaps(p, step, { totalNativeAtomic: U("0.01"), maxFeePerGasCeiling: 80n * 10n ** 9n })).toThrow(/80 gwei/);
+      expect(pinCaps(p, step, { totalNativeAtomic: U("0.01"), maxFeePerGasCeiling: 40n * 10n ** 9n }).totalNativeAtomic).toBe(U("0.01"));
+      expect(pinCaps(p, step, { totalNativeAtomic: U("0.01"), maxFeePerGasCeiling: 25n * 10n ** 9n }).totalNativeAtomic).toBe(U("0.01"));
+    }
+    expect(sameCaps(p.approved, { ...APPROVED, maxFeePerGasCeiling: 80n * 10n ** 9n })).toBe(false);
+    expect(parsePlan(serializePlan(p)).approved.maxFeePerGasCeiling).toBe(40n * 10n ** 9n);
+    expect(summarizePlan(p)[0]).toContain("fee ceiling 40 gwei");
   });
 });

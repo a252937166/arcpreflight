@@ -232,8 +232,7 @@ export async function verifyRecovery(api: string, token: string | undefined, out
   return { unauthenticatedStatus: 401, authenticated: "VERIFIED (same payment tx, same report digest)" };
 }
 
-async function startRun(api: string, fixture: FixtureId, cooldownMs: number): Promise<{ runId: string; startedAt: number; admission: NonNullable<RunReport["admission"]> }> {
-  const key = ADMISSION_KEY();
+async function startRun(api: string, fixture: FixtureId, cooldownMs: number, key: string = ADMISSION_KEY()): Promise<{ runId: string; startedAt: number; admission: NonNullable<RunReport["admission"]> }> {
   for (let attempt = 0; ; attempt++) {
     let res: { status: number; body: any };
     try { res = await getJson(`${api}/v1/demo/run`, { method: "POST", headers: { "content-type": "application/json", ...(process.env.ADMIN_TOKEN ? { "x-admin-token": process.env.ADMIN_TOKEN } : {}) }, body: JSON.stringify({ fixture, clientRunRequestId: key }) }); }
@@ -287,7 +286,8 @@ async function main(): Promise<number> {
   // the plan ledger (review 2026-10-10, P1): the approved cap is pinned (SPEND_CAP_USDC may lower it, never raise it); the measured outflow
   // is carried across restarts from the FIRST invocation's balance baseline; runs still open count at their worst case until they settle
   const book = openPlan(process.env.ARCPREFLIGHT_ROOT ?? process.cwd(), "mainnet", { write: EXECUTE });
-  if (book) pinCaps(book.plan, "acceptance", { totalNativeAtomic: cap });
+  if (!book) throw new Refused("mainnet acceptance needs the plan ledger (PLAN_ID must name the approved plan)"); // audit 2026-10-10 (OP-02)
+  pinCaps(book.plan, "acceptance", { totalNativeAtomic: cap, maxFeePerGasCeiling: GAS_PRICE_CEIL }); // the money cap and the 40 gwei ceiling the plan pins
   const floor = parseUsdc(process.env.RUNNER_FLOOR_USDC ?? "0.15");
   const marginS = Number(process.env.COOLDOWN_MARGIN_SECONDS ?? 3);
   const rpc = process.env.ARC_RPC_URL ?? ARC.mainnet.rpc;
@@ -392,15 +392,26 @@ async function main(): Promise<number> {
   const meter = new OutflowMeter("mainnet acceptance outflow", cap, baseline);
   if (book && baseline !== startTotal) console.log(`  resuming: measured outflow carried from the first invocation ${usdc(meter.outflow(startTotal))} USDC (baseline ${usdc(baseline)} USDC, now ${usdc(startTotal)})`);
   const syncMeasured = async () => { const t = await sumBalances(); if (book) book.apply((p) => updateMeasured(p, "acceptance", t)); return t; };
+  // audit 2026-10-10 (OP-03): the pending commitment is replaced by the measured outflow in ONE durable update, after the balance read succeeded;
+  // a failed read keeps the commitment pending (never an understated record)
+  const settleOpen = async (id: string, worst: bigint) => { const t = await sumBalances(); book!.apply((p) => updateMeasured(noteOpen(p, "acceptance", id, false, worst), "acceptance", t)); return t; };
   let current: { fixture: FixtureId; runId?: string; run?: any } | null = null, lastStart = 0;
   try {
-    // runs a previous invocation started and never saw finish: wait for them first (their worst case stays pending until they settle)
-    for (const openRun of book?.plan.steps.acceptance.openRuns ?? []) {
-      console.log(`  resuming: run ${openRun} was started by a previous invocation and is still open in the plan record — waiting for it before starting anything`);
-      const r = await awaitRun(api, openRun);
-      console.log(`  ${openRun}: ${r.state} ${r.outcome?.kind ?? ""}`);
-      book!.apply((p) => noteOpen(p, "acceptance", openRun, false, plan.worstPerRun.approved));
-      await syncMeasured();
+    // audit 2026-10-10 (OP-03): operations a previous invocation reserved (their ADMISSION KEY is the durable identity, written before the POST)
+    // are recovered first: the same key re-sent returns the original run if the server admitted it (or admits it now — the same operation),
+    // and a refusal means nothing ever started, so the reservation is released. Nothing new starts before every open one is settled.
+    for (const open of [...(book?.plan.steps.acceptance.openRuns ?? [])]) {
+      const key = open.startsWith("key:") ? open.slice(4) : null;
+      console.log(`  resuming: operation ${open} was reserved by a previous invocation and is still open in the plan record — recovering it before starting anything`);
+      let r: any = null;
+      if (key) {
+        const res = await getJson(`${api}/v1/demo/run`, { method: "POST", headers: { "content-type": "application/json", ...(process.env.ADMIN_TOKEN ? { "x-admin-token": process.env.ADMIN_TOKEN } : {}) }, body: JSON.stringify({ fixture: "APPROVED_PAYMENT", clientRunRequestId: key }) }).catch(() => null);
+        if (res && (res.status === 200 || res.status === 202) && res.body?.runId) r = await awaitRun(api, res.body.runId);
+        else if (res && res.status === 409 && res.body?.error === "RUN_CONFLICT") throw new Refused(`reserved operation ${key} is bound to another scenario on the server — manual check`);
+        else console.log(`  ${open}: the server never admitted it (${res?.status ?? "no answer"} ${JSON.stringify(res?.body ?? null)?.slice(0, 80)}) — the reservation is released, nothing was spent`);
+      } else r = await awaitRun(api, open); // an older record that stored the run id
+      if (r) console.log(`  ${open}: ${r.runId} ${r.state} ${r.outcome?.kind ?? ""}`);
+      await settleOpen(open, plan.worstPerRun.approved);
     }
     for (let round = 1; round <= repeats; round++) {
       for (const fixture of FIXTURES) {
@@ -412,12 +423,13 @@ async function main(): Promise<number> {
         if (book) { const c = checkStep(book.plan, "acceptance", worstNow, cap); if (!c.ok) throw new Refused(c.reason!); }
         console.log(`[${reports.length + 1}/${total}] ${fixture}: starting a live mainnet run (measured outflow so far ${usdc(head.outflow)} of ${usdc(cap)} USDC)`);
         current = { fixture };
-        const { runId, startedAt, admission } = await startRun(api, fixture, (cooldown + marginS) * 1000);
+        // OP-03: the operation's identity (its admission key) and its worst case are durable BEFORE the admission request leaves
+        const key = ADMISSION_KEY(); const openId = `key:${key}`;
+        book!.apply((p) => noteOpen(p, "acceptance", openId, true, worstNow));
+        const { runId, startedAt, admission } = await startRun(api, fixture, (cooldown + marginS) * 1000, key);
         lastStart = startedAt; current.runId = runId;
-        if (book) book.apply((p) => noteOpen(p, "acceptance", runId, true, worstNow)); // pending at its worst case until it settles
         current.run = await awaitRun(api, runId);
-        if (book) book.apply((p) => noteOpen(p, "acceptance", runId, false, worstNow));
-        await syncMeasured();
+        await settleOpen(openId, worstNow); // one durable update: pending released and the measured outflow recorded together
         const report = await verifyRun(ctx, fixture, current.run);
         report.round = round; report.admission = admission;
         report.recovery = await verifyRecovery(api, token, current.run.result);

@@ -58,15 +58,17 @@ async function recoveryKey() {
 }
 export async function sealJson(obj: unknown): Promise<string> {
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", await recoveryKey(), iv);
+  const cipher = createCipheriv("aes-256-gcm", await recoveryKey(), iv, { authTagLength: 16 });
   const data = Buffer.concat([cipher.update(JSON.stringify(obj), "utf8"), cipher.final()]);
   return JSON.stringify({ version: 1, iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64"), data: data.toString("base64") });
 }
 export async function openJson(encrypted: string): Promise<any> {
   const envelope = JSON.parse(encrypted);
   if (envelope.version !== 1) throw new Error("unsupported payment recovery payload version");
-  const decipher = createDecipheriv("aes-256-gcm", await recoveryKey(), Buffer.from(envelope.iv, "base64"));
-  decipher.setAuthTag(Buffer.from(envelope.tag, "base64"));
+  const tag = Buffer.from(String(envelope.tag ?? ""), "base64"); const iv = Buffer.from(String(envelope.iv ?? ""), "base64");
+  if (tag.length !== 16 || iv.length !== 12) throw new Error("payment recovery payload: the GCM tag must be 16 bytes and the IV 12 bytes");
+  const decipher = createDecipheriv("aes-256-gcm", await recoveryKey(), iv, { authTagLength: 16 });
+  decipher.setAuthTag(tag);
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.data, "base64")), decipher.final()]).toString("utf8"));
 }
 const openBody = (s: string) => openJson(s) as Promise<SettleBody>;

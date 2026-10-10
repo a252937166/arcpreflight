@@ -1,0 +1,32 @@
+network=testnet chainId=5042002 mode=EXECUTE · RESUMING from the journal
+deployer 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 7.7033952 USDC · nonce 54 · runner 0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE · orderCreator 0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b
+fees: base 20 gwei · max fee sent 29 gwei · priority 5 gwei · ceiling 40 gwei
+caps: 0.05 USDC per transaction · 0.15 USDC total (gas included) · ledger /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-deploy.json (1 prior entry, 0.037469421 USDC committed)
+plan rehearsal-sign-20261010 (testnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.037469421 · remaining 0.652530579
+  deploy      running  cap 0.15   outflow 0                    pending 0.037469421          internal 0      invocations 1
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-rehearsal-sign-20261010.json)
+journal /private/tmp/claude-501/-Users-ouyangduning-Documents-project-interesting-dorahacks-microgrants/87d205e9-cdb3-437f-9201-de53cf6758b0/scratchpad/r3/deploy-sign-rehearsal/deploy-testnet-journal.json:
+  deploy implementation A (DemoMerchantV1)     signed    nonce 54 0x1d448e0060…
+  deploy implementation B (DemoMerchantV2)     pending  
+  deploy MAIN proxy on A                       pending  
+  deploy CHANGED proxy on A                    pending  
+  setOrderCreator on MAIN                      pending  
+  setOrderCreator on CHANGED                   pending  
+  upgrade CHANGED proxy A -> B                 pending  
+  restart → resend: deploy implementation A (DemoMerchantV1): the node does not hold 0x1d448e0060e7ffcb1afbd195ce4b445089b6d2cc846801930ad7ca1038443508 and nonce 54 is still free — the identical signed bytes are handed to the node again
+plan (6 unfinished steps):
+  deploy implementation B (DemoMerchantV2)     gas  1105057 (live estimate) · limit  1326069 · worst 0.038456001  · expected 0.027626425
+  deploy MAIN proxy on A                       gas   178416 (measured on testnet) · limit   214100 · worst 0.0062089    · expected 0.0044604
+  deploy CHANGED proxy on A                    gas   178416 (measured on testnet) · limit   214100 · worst 0.0062089    · expected 0.0044604
+  setOrderCreator on MAIN                      gas    52167 (measured on testnet) · limit    62601 · worst 0.001815429  · expected 0.001304175
+  setOrderCreator on CHANGED                   gas    52167 (measured on testnet) · limit    62601 · worst 0.001815429  · expected 0.001304175
+  upgrade CHANGED proxy A -> B                 gas    37633 (measured on testnet) · limit    45160 · worst 0.00130964   · expected 0.000940825
+  total worst 0.055814299 USDC · expected 0.0400964 USDC
+predicted addresses: implB 0xafDCE905F32B4da080C4cD7c2e98e02636e040a9 · proxyMAIN 0xe403137522e25b8bC57263f2B0C69eeE722d624d · proxyCHANGED 0x69A7d5f49d08A252f12c4Ff9f55Ce2EC8aC193Ab
+deploy implementation A (DemoMerchantV1): the node does not hold 0x1d448e0060e7ffcb1afbd195ce4b445089b6d2cc846801930ad7ca1038443508 and nonce 54 is still free — the identical signed bytes are handed to the node again
+deploy implementation A (DemoMerchantV1): 0x1d448e0060e7ffcb1afbd195ce4b445089b6d2cc846801930ad7ca1038443508 block 66440659 gas 1067071 cost 0.026676775 USDC → 0x2c7af9c48cffca442f1af3762f3e7c1f93e25cc9 · committed 0.026676775/0.15
+REHEARSAL STOP: DEPLOY_STOP_AFTER=implA: confirmed, manifest not written — the process ends here as an interruption would

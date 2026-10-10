@@ -57,3 +57,53 @@ describe("anonymous session", () => {
     await expect(getSession()).rejects.toMatchObject({ status: 429 });
   });
 });
+
+describe("audit 2026-10-10 · an operation stays on its instance (W01); a session that owns records is never replaced (W10)", () => {
+  it("W01: the testnet session resolving after the selected instance changed does not send the pending order to the new instance, and a 401 is never retried across instances", async () => {
+    const { api } = await import("../src/lib/api");
+    const paths: string[] = []; let release!: (r: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      paths.push(path);
+      if (path === "/testnet/v1/session") return new Promise<Response>((r) => { release = r; });
+      if (path === "/v1/session") return response({ principal: "visitor:main", token: "main-token" }, 201);
+      if (path.endsWith("/v1/demo/orders")) return response({ orderId: "0x01", state: "CONFIRMED" }, 201);
+      throw new Error(`unexpected ${path}`);
+    }));
+    setApiBase("/testnet");
+    const pending = withSession((t) => api.createOrder({ payer: "0x0000000000000000000000000000000000000a11", proxy: "MAIN" }, t));
+    await new Promise((r) => setTimeout(r, 0));
+    setApiBase(""); // the visitor switched to the mainnet instance while the testnet session was still being created
+    release(response({ principal: "visitor:test", token: "test-token" }, 201));
+    await expect(pending).rejects.toMatchObject({ name: "InstanceChangedError" });
+    expect(paths).toEqual(["/testnet/v1/session"]); // nothing was sent anywhere else: no order on the new instance, no new-instance session
+    // the same for a 401 arriving after a switch: the retry never goes to the new instance
+    setApiBase("/testnet"); store.set("arcpreflight.session:/testnet", JSON.stringify({ principal: "visitor:old", token: "old" })); paths.length = 0;
+    const late = withSession(async (t) => { setApiBase(""); throw new ApiError(401, { error: "UNAUTHENTICATED", token: t }); });
+    await expect(late).rejects.toMatchObject({ name: "InstanceChangedError" });
+    expect(paths).toEqual([]);
+  });
+  it("W01: a request issued while an operation is pinned goes to the pinned base even if the global base moved, or is refused — never silently redirected", async () => {
+    const { api, pinBase } = await import("../src/lib/api");
+    const paths: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => { paths.push(path); return response({ runs: [] }); }));
+    setApiBase("/testnet"); const unpin = pinBase("/testnet");
+    await api.runs(); expect(paths).toEqual(["/testnet/v1/demo/runs?limit=20&offset=0"]);
+    setApiBase("");
+    await expect(api.runs()).rejects.toMatchObject({ name: "InstanceChangedError" }); unpin();
+    await api.runs(); expect(paths.at(-1)).toBe("/v1/demo/runs?limit=20&offset=0"); // unpinned: the current instance again
+  });
+  it("W10: two fresh tabs creating a session at once end with ONE stored principal; the later writer adopts the stored session instead of overwriting it", async () => {
+    let n = 0; let release!: (r: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      if (path.endsWith("/v1/session") && init?.method === "POST") { n++; return n === 1 ? new Promise<Response>((r) => { release = r; }) : response({ principal: `visitor:${n}`, token: `vs_${n}` }, 201); }
+      throw new Error(`unexpected ${path}`);
+    }));
+    const a = getSession(); // tab A: its creation is slow
+    await new Promise((r) => setTimeout(r, 0));
+    store.set("arcpreflight.session:root", JSON.stringify({ principal: "visitor:B", token: "vs_B" })); // tab B created and stored its session meanwhile
+    release(response({ principal: "visitor:A", token: "vs_A" }, 201));
+    expect(await a).toEqual({ principal: "visitor:B", token: "vs_B" }); // A adopts B's: one principal for both tabs
+    expect(JSON.parse(store.get("arcpreflight.session:root")!)).toEqual({ principal: "visitor:B", token: "vs_B" });
+    expect(await withSession(async (t) => t)).toBe("vs_B");
+  });
+});

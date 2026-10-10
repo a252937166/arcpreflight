@@ -76,7 +76,8 @@ Any of these stops the plan; nothing further is sent, the evidence (including `-
 7. A business transaction left `BROADCAST_ATTEMPTED` for more than 10 minutes: reconcile first, no new run.
 8. The RPC reports a chain other than 5042, or the running release is not `0e78c40` (or an approved successor).
 9. A journaled deployment step whose nonce was consumed by a transaction the journal does not know, a reverted step, or a deployer nonce that moved outside the journal: the deploy stops for a manual check and nothing is re-signed (a re-run reconciles and continues only when the chain agrees with the journal).
-10. The plan ledger refuses: a step whose committed total across every invocation plus the next worst case would pass its cap, a plan total that would pass the 0.69 USDC budget cap, or an environment override above a pinned cap — each before anything is signed or started.
+10. The plan ledger refuses: a step whose committed total across every invocation plus the next worst case would pass its cap, a plan total that would pass the 0.69 USDC budget cap, or an environment override above a pinned cap or above the pinned 40 gwei fee ceiling — each before anything is signed or started. Mainnet never runs without a named plan (a blank `PLAN_ID` is refused).
+11. The running release does not serve the manifest-based evidence route (audit API-01), or the operator has not decided on the server keys' handling after the evidence-route incident (see the approvals below).
 
 ## Resumability and the plan ledger (review of 2026-10-10)
 
@@ -85,6 +86,7 @@ Any of these stops the plan; nothing further is sent, the evidence (including `-
 
 ## Approvals needed
 
+0. The server keys after the evidence-route incident (audit API-01): the access logs show no read of a key file through the route; rotating the three server keys (demo-runner, merchant-payto, order-creator) before the cutover is the conservative option and would need new keys, testnet re-pointing and two mainnet fund moves (demo-runner 5.0 and merchant-payto 0.5 USDC) under their own approval. Decide: rotate first, or proceed with the current keys.
 1. This plan and budget: a **0.69 USDC budget cap** out of the project's keys (the **0.84 USDC sum of step caps** minus the 0.15 internal funding); expected ≈ 0.31 (gas ≈ 0.105 + 0.205 into our own merchant contract), plus 0.27 moved between our own keys.
 2. Then one typed go per step, in order: `deploy`, `fund`, `probe`, `server`, `baselines`, `acceptance`, `lifecycle`.
 3. Separately, later: `open` (public mainnet execution), and the GitHub push — which is a force-push that replaces the remote `main` (`2dc55aa`) with the rewritten local history and needs its own approval naming it.

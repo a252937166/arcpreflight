@@ -83,7 +83,7 @@ export default function Evidence() {
             <div className="stack" style={{ gap: 8 }}>
               <h3>Labels and the release profile</h3>
               <Labels labels={["LIVE_REQUEST", "DEMO_ON_MAINNET", "RECORDED_SAMPLE"]} />
-              <p className="muted small"><code>SUBMISSION_RESTRICTED</code>: external paid access closed (only configured principals buy reports), wallet-popup execution off, USDC-transfer intent path off, SCA buyers off. Each is a <em>deferred feature</em> with its rejection tested, not a hidden gap. Gates: G0 read-only probes · G1 contracts + schema + observer tests · G2 three fixtures live + recovery · G3 hardening. The live demo page is G2.</p>
+              <p className="muted small"><code>SUBMISSION_RESTRICTED</code>: {net?.access?.selfService ? "anonymous browser sessions buy checks (self-service)" : "external paid access closed (only configured principals buy reports)"}; wallet-popup execution {net?.access?.walletExecution === false ? "off" : net?.access?.publicExecution === false ? "gated until the mainnet acceptance is recorded" : "on"}; USDC-transfer intent path off; SCA buyers off. Each closed path is a <em>deferred feature</em> with its rejection tested, not a hidden gap; the open ones are what this instance reports under <code>/v1/network.access</code>.{" "}Gates: G0 read-only probes · G1 contracts + schema + observer tests · G2 three fixtures live + recovery · G3 hardening. The live demo page is G2.</p>
               <ReceiptChain />
             </div>
             {net?.capabilities && net.capabilities.length > 0 && (

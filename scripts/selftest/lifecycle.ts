@@ -86,7 +86,8 @@ const sumBalances = async () => (await Promise.all(projectAddresses.map((a) => c
 // until it settles. The visitor key's own guard is persisted too (evidence/spend/<net>-lifecycle-wallet.json) so its cap holds across re-runs.
 const ROOT_DIR = process.env.ARCPREFLIGHT_ROOT ?? process.cwd();
 const book = openPlan(ROOT_DIR, net, { write: !PREFLIGHT });
-if (book) pinCaps(book.plan, "lifecycle", { totalNativeAtomic: projectCap });
+if (net === "mainnet" && !book) throw new SpendRefused("mainnet lifecycle needs the plan ledger (PLAN_ID must name the approved plan)"); // audit 2026-10-10 (OP-02)
+if (book) pinCaps(book.plan, "lifecycle", { totalNativeAtomic: projectCap, maxFeePerGasCeiling: walletLimits.maxFeePerGasCeiling }); // OP-04: MAX_FEE_GWEI may lower the pinned 40 gwei ceiling, never raise it
 const startTotal = await sumBalances();
 if (book && !PREFLIGHT) book.apply((p) => beginMeasured(p, "lifecycle", projectAddresses, startTotal));
 const baseline = book?.plan.steps.lifecycle.baselineTotalNativeAtomic ?? startTotal;
@@ -119,7 +120,9 @@ const beforeScenario = async (sc: string) => {
   if (book) { const c = checkStep(book.plan, "lifecycle", worstOf[sc] ?? 0n, projectCap); if (!c.ok) throw new SpendRefused(c.reason!); book.apply((p) => noteOpen(p, "lifecycle", scenarioId(sc), true, worstOf[sc] ?? 0n)); }
   log(`${sc}: measured project outflow so far ${usdc18(h.outflow)} USDC; worst case of this scenario ${usdc18(worstOf[sc] ?? 0n)} USDC; cap ${usdc18(projectCap)} USDC`);
 };
-const afterScenario = async (sc: string) => { if (book) book.apply((p) => noteOpen(p, "lifecycle", scenarioId(sc), false, worstOf[sc] ?? 0n)); await syncMeasured(); };
+// audit 2026-10-10 (OP-03): the pending commitment is released and the measured outflow recorded in ONE durable update, after the balance read
+// succeeded; a failed read keeps the commitment pending
+const afterScenario = async (sc: string) => { const t = await sumBalances(); if (book && !PREFLIGHT) book.apply((p) => updateMeasured(noteOpen(p, "lifecycle", scenarioId(sc), false, worstOf[sc] ?? 0n), "lifecycle", t)); };
 
 if (scenarios.includes("wallet")) {
   await beforeScenario("wallet");

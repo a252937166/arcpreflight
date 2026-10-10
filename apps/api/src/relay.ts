@@ -198,6 +198,13 @@ export class Relayer {
     await this.assertChain();
     const head = await this.c.rpc.getBlockNumber();
     const chunk = BigInt(this.c.scanChunkBlocks);
+    // audit 2026-10-10 (API-02): a matching transaction found earlier whose receipt was not readable yet is the durable CANDIDATE; it is
+    // re-examined first and the scan window is never advanced past it — evidence that was found but not fully read is never skipped
+    if (p.candidate_tx_hash) {
+      const settled = await this.settleCandidate(db, p, x, p.candidate_tx_hash as Hex);
+      if (settled) return settled;
+      return this.keep(db, p.request_id, "PENDING", `settlement candidate ${p.candidate_tx_hash} found; its receipt is not readable yet — re-examined on the next pass, the scan does not move past it`);
+    }
     let from = p.scanned_to_block !== null && p.scanned_to_block !== undefined ? BigInt(p.scanned_to_block) + 1n
       : p.created_block !== null && p.created_block !== undefined ? BigInt(p.created_block) : head > chunk ? head - chunk : 0n;
     let to = from;
@@ -207,16 +214,33 @@ export class Relayer {
       for (const l of logs) {
         if (l.topics[0]?.toLowerCase() === AUTHORIZATION_CANCELED_TOPIC) return this.finish(db, p.request_id, "FAILED", l.transactionHash as Hex, "authorization canceled on-chain by the payer", null);
         const tx = await this.c.rpc.getTransaction({ hash: l.transactionHash as Hex }).catch(() => null);
-        const direct = !!tx && String(tx.to ?? "").toLowerCase() === this.c.usdc.toLowerCase() && authorizationCallMatches(tx.input, a);
+        if (!tx) { // the event names the transaction but the node does not serve its body yet: keep it as the candidate, do not move past it
+          run(db, "UPDATE payments SET candidate_tx_hash = ?, updated_at = ? WHERE request_id = ?", String(l.transactionHash).toLowerCase(), now(), p.request_id);
+          return this.keep(db, p.request_id, "PENDING", `authorization consumed by ${l.transactionHash}; the transaction body is not readable yet — kept as the settlement candidate`);
+        }
+        const direct = String(tx.to ?? "").toLowerCase() === this.c.usdc.toLowerCase() && authorizationCallMatches(tx.input, a);
         if (!direct) return this.keep(db, p.request_id, "PENDING", `authorization consumed by transaction ${l.transactionHash} of an unrecognised shape (wrapper or mismatched calldata); manual reconciliation required`);
-        const rc = await this.c.rpc.getTransactionReceipt({ hash: l.transactionHash as Hex }).catch(() => null);
-        const ev = rc && (rc.status === "success" || rc.status === "0x1") ? findSettlementInLogs(rc.logs ?? [], x, rc.transactionHash) : null;
-        if (ev) return this.finish(db, p.request_id, "COMPLETED", ev.transactionHash, p.tx_hash && p.tx_hash.toLowerCase() !== ev.transactionHash.toLowerCase() ? "settled by a transaction other than the relayer's" : null, ev);
+        run(db, "UPDATE payments SET candidate_tx_hash = ?, updated_at = ? WHERE request_id = ?", String(l.transactionHash).toLowerCase(), now(), p.request_id);
+        const settled = await this.settleCandidate(db, p, x, l.transactionHash as Hex);
+        if (settled) return settled;
+        return this.keep(db, p.request_id, "PENDING", `settlement candidate ${l.transactionHash} found (direct USDC call for this authorization); its receipt is not readable yet — the scan stays before block ${l.blockNumber ?? "?"}`);
       }
       run(db, "UPDATE payments SET scanned_to_block = ?, updated_at = ? WHERE request_id = ?", Number(to), now(), p.request_id);
       from = to + 1n;
     }
     return this.keep(db, p.request_id, "PENDING", `authorization consumed on-chain; settlement evidence not located yet (scanned to block ${to})`);
+  }
+  /** the candidate's receipt: COMPLETED on matching logs, FAILED when it reverted, null while the receipt is not readable */
+  private async settleCandidate(db: Db, p: any, x: SettlementExpectation, hash: Hex): Promise<RelayOutcome | null> {
+    const rc = await this.c.rpc.getTransactionReceipt({ hash }).catch(() => null);
+    if (!rc) return null;
+    if (rc.status === "success" || rc.status === "0x1") {
+      const ev = findSettlementInLogs(rc.logs ?? [], x, rc.transactionHash);
+      if (ev) return this.finish(db, p.request_id, "COMPLETED", ev.transactionHash, p.tx_hash && p.tx_hash.toLowerCase() !== ev.transactionHash.toLowerCase() ? "settled by a transaction other than the relayer's" : null, ev);
+      return this.keep(db, p.request_id, "PENDING", `candidate ${hash} succeeded but its receipt lacks matching AuthorizationUsed + Transfer logs; manual reconciliation required`);
+    }
+    run(db, "UPDATE payments SET candidate_tx_hash = NULL, updated_at = ? WHERE request_id = ?", now(), p.request_id); // a reverted candidate did not settle: the search continues
+    return null;
   }
 }
 

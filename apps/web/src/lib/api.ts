@@ -146,11 +146,19 @@ let apiBase = "";
 export const setApiBase = (base: string) => { apiBase = base; };
 export const getApiBase = () => apiBase;
 export const apiPath = (path: string) => `${apiBase}${path}`;
+/** Audit 2026-10-10 (W01): an operation that started on one instance stays on it. `withSession` pins the base it captured for the whole
+ *  operation (session, request, retry); every request sent while a pin is active goes to the pinned base — and if the selected instance
+ *  changed meanwhile, the request is refused (INSTANCE_CHANGED) instead of being redirected to the newly selected network. */
+const pins: string[] = [];
+export const pinBase = (base: string) => { pins.push(base); return () => { const i = pins.lastIndexOf(base); if (i >= 0) pins.splice(i, 1); }; };
+export class InstanceChangedError extends Error { constructor(public pinned: string, public current: string) { super(`the selected network changed while this request was pending (from ${pinned || "root"} to ${current || "root"}); nothing was sent to the new instance`); this.name = "InstanceChangedError"; } }
 async function req<T>(path: string, init?: RequestInit & { token?: string }): Promise<T> {
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   if (init?.body) headers["content-type"] = "application/json";
   if (init?.token) headers["authorization"] = `Bearer ${init.token}`;
-  const r = await fetch(apiPath(path), { ...init, headers });
+  const pinned = pins.length ? pins[pins.length - 1] : null;
+  if (pinned !== null && pinned !== apiBase) throw new InstanceChangedError(pinned, apiBase);
+  const r = await fetch(`${pinned ?? apiBase}${path}`, { ...init, headers });
   const text = await r.text();
   let body: any = null; try { body = text ? JSON.parse(text) : null; } catch { body = { error: "NON_JSON", text: text.slice(0, 200) }; }
   if (!r.ok && r.status !== 402 && r.status !== 202) throw new ApiError(r.status, body);

@@ -20,18 +20,36 @@ export async function readSlot(client: PublicClient, address: Hex, slot: Hex, s:
   return { value: v, evidence: ev.evidence, evidenceDigest: ev.digest };
 }
 
-export async function readCall(client: PublicClient, to: Hex, data: Hex, s: Snapshot, from?: Hex, valueNativeAtomic?: bigint): Promise<Read<{ ok: boolean; data: Hex | null; error: string | null; revertData: Hex | null }>> {
+/** `ok: false` has two very different meanings: the EVM reverted the call (`unavailable: false`, revert data when the node gave any), or the RPC
+ *  could not answer at all — HTTP failure, timeout, rate limit, node error, unserved history (`unavailable: true`). Audit 2026-10-10 (VF-04):
+ *  only the first is a fact about the contract; the second is missing evidence and must never read as a revert. */
+export type CallRead = { ok: boolean; data: Hex | null; error: string | null; revertData: Hex | null; unavailable: boolean };
+export async function readCall(client: PublicClient, to: Hex, data: Hex, s: Snapshot, from?: Hex, valueNativeAtomic?: bigint): Promise<Read<CallRead>> {
   try {
     const r = await client.call({ to, data, account: from, value: valueNativeAtomic, ...blockTag(s) });
     const out = (r.data ?? "0x") as Hex;
     const ev = makeEvidence("eth_call", [{ to, data, from: from ?? null, value: valueNativeAtomic?.toString() ?? null }, { blockHash: s.blockHash }], s, out, null);
-    return { value: { ok: true, data: out, error: null, revertData: null }, evidence: ev.evidence, evidenceDigest: ev.digest };
+    return { value: { ok: true, data: out, error: null, revertData: null, unavailable: false }, evidence: ev.evidence, evidenceDigest: ev.digest };
   } catch (e: any) {
     const msg = String(e?.shortMessage ?? e?.message ?? e);
     const revertData = revertDataOf(e);
-    const ev = makeEvidence("eth_call", [{ to, data, from: from ?? null, value: valueNativeAtomic?.toString() ?? null }, { blockHash: s.blockHash }], s, revertData, msg);
-    return { value: { ok: false, data: null, error: msg, revertData }, evidence: ev.evidence, evidenceDigest: ev.digest };
+    const unavailable = revertData === null && isUnavailable(e);
+    const ev = makeEvidence("eth_call", [{ to, data, from: from ?? null, value: valueNativeAtomic?.toString() ?? null }, { blockHash: s.blockHash }], s, revertData, unavailable ? `unavailable: ${msg}` : msg);
+    return { value: { ok: false, data: null, error: msg, revertData, unavailable }, evidence: ev.evidence, evidenceDigest: ev.digest };
   }
+}
+const UNAVAILABLE_NAMES = new Set(["HttpRequestError", "TimeoutError", "WebSocketRequestError", "SocketClosedError", "RpcRequestError", "InternalRpcError", "LimitExceededRpcError", "ResourceUnavailableRpcError", "ResourceNotFoundRpcError", "UnknownRpcError", "ProviderDisconnectedError", "ChainDisconnectedError", "UnknownNodeError"]);
+/** transport and node failures, found anywhere in viem's cause chain; an EVM revert (ExecutionRevertedError / ContractFunctionRevertedError / revert data) is not one */
+export function isUnavailable(e: any): boolean {
+  let c = e;
+  for (let i = 0; i < 8 && c; i++) {
+    const name = String(c.name ?? "");
+    if (name === "ExecutionRevertedError" || name === "ContractFunctionRevertedError" || name === "ContractFunctionZeroDataError") return false;
+    if (UNAVAILABLE_NAMES.has(name) || typeof c.status === "number") return true;
+    c = c.cause;
+  }
+  const msg = String(e?.shortMessage ?? e?.message ?? e ?? "");
+  return /HTTP request failed|Service Unavailable|Bad Gateway|Gateway Timeout|timed out|timeout|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|rate limit|too many requests|\b(502|503|504|429)\b|missing trie node|header not found|block not found|unknown block/i.test(msg) && !/revert/i.test(msg);
 }
 /** Raw revert payload (custom error selector + args) if the node returned one; kept verbatim as evidence. */
 function revertDataOf(e: any): Hex | null {

@@ -30,7 +30,8 @@ const { guard, save, path: ledger } = openGuard(ROOT, limits, { write: EXECUTE }
 // the plan ledger (review 2026-10-10, P1): the approved caps are pinned, the budget is carried across every step and restart; the value that
 // reaches allow-listed project keys stays internal (not outflow), the gas does not
 const book = openPlan(ROOT, net, { write: EXECUTE });
-if (book) pinCaps(book.plan, "fund", { totalNativeAtomic: limits.totalNativeAtomic, perTxNativeAtomic: limits.perTxNativeAtomic });
+if (net === "mainnet" && !book) throw new SpendRefused("mainnet needs the plan ledger (PLAN_ID must name the approved plan)");
+if (book) pinCaps(book.plan, "fund", { totalNativeAtomic: limits.totalNativeAtomic, perTxNativeAtomic: limits.perTxNativeAtomic, maxFeePerGasCeiling: limits.maxFeePerGasCeiling }); // audit 2026-10-10 (OP-04): MAX_FEE_GWEI may lower the approved 40 gwei ceiling, never raise it
 const internalSettled = () => guard.entries.filter((e) => e.status === "settled").reduce((a, e) => { const row = rows.find((r) => r.to.toLowerCase() === (e.to ?? "").toLowerCase()); return a + (row ? row.value : 0n); }, 0n);
 const syncPlan = () => { if (book) book.apply((p) => recordGuard(p, "fund", guard.entries, internalSettledSafe())); };
 const internalSettledSafe = () => { const settled = guard.entries.filter((e) => e.status === "settled").reduce((a, e) => a + BigInt(e.actualNativeAtomic ?? e.worstNativeAtomic), 0n); const i = internalSettled(); return i > settled ? settled : i; };

@@ -150,7 +150,7 @@ export default function Home() {
               <div className="stack" style={{ gap: 10 }}>
                 <p className="kicker" style={{ color: "var(--rose)" }}>the amount is in the wrong units</p>
                 <h2 style={{ fontSize: "1.9rem" }}>Blocked.</h2>
-                <p className="muted">USDC is Arc's gas: 18 decimals native, 6 on the ERC-20 face, one balance. A 0.05 USDC order sent as native <code>50000</code> is a million times too small. Blocked before signing.</p>
+                <p className="muted">USDC is Arc's gas: 18 decimals native, 6 on the ERC-20 face, one balance. A 0.05 USDC order sent as native <code>50000</code> is a trillion times too small (10^12: 18 versus 6 decimals). Blocked before signing.</p>
                 <p className="row" style={{ gap: 10 }}><DecisionBadge decision="BLOCKED" size="sm" /><Link to={link("/demo?fixture=AMOUNT_UNIT_MISMATCH")} className="small">run this one →</Link></p>
               </div>
             </div>

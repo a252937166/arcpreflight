@@ -7,6 +7,8 @@ export type Described = { text: string; code: string | null; raw: unknown };
 const reason = (b: any) => (typeof b?.reason === "string" && b.reason ? b.reason : null);
 const shortId = (id: unknown) => (typeof id === "string" && id.length > 14 ? `${id.slice(0, 10)}…` : typeof id === "string" ? id : "(unnamed)");
 /** the order request's answer was lost on the way (network error): the server may have recorded the order and sent its creation */
+/** W05: the fee authorization was handed to the service and the answer was lost: the purchase is uncertain, never "nothing was sent" */
+export const purchaseUncertainText = (requestId: string, cause: string) => `The answer to the purchase of request ${shortId(requestId)} was lost (${cause}). Your fee authorization may have reached the service and settled: the request is remembered under My checks — recover it from there before buying again; nothing is paid twice for the same authorization.`;
 export const ORDER_RESPONSE_LOST_TEXT = "The answer to the order request was lost (network error). The order may have been recorded and its creation sent — My workflow is re-read now; do not create another order until it shows there.";
 const SENTENCES: Record<string, (b: any) => string> = {
   PAYMENT_FAILED: (b) => `The check fee was not settled: ${b?.payment?.reason ?? reason(b) ?? "the settlement failed"}. Nothing was charged and no report was delivered.`,
@@ -65,13 +67,17 @@ export function describeBody(body: any, status?: number): Described {
   return { text: text.endsWith(".") ? text : `${text}.`, code, raw: body };
 }
 
+/** an error whose sentence was written deliberately (it may quote a cause): `describeError` shows it as is, never re-classifies it */
+export const describedError = (text: string, code: string, raw: unknown): Error => Object.assign(new Error(text), { described: { text, code, raw } as Described });
 export function describeError(e: unknown): Described {
+  if (e && typeof e === "object" && "described" in (e as any) && (e as any).described?.text) return (e as any).described as Described;
   if (e instanceof ApiError || (e && typeof e === "object" && "body" in (e as any) && "status" in (e as any))) {
     const { body, status } = e as { body: any; status: number };
     return describeBody(body, status);
   }
   const msg = String((e as any)?.message ?? e ?? "unknown error");
-  if (/Failed to fetch|NetworkError|network|ECONNREFUSED|Load failed/i.test(msg)) return { text: "The API could not be reached (network error). Nothing was sent; try again.", code: "NETWORK", raw: e };
+  // audit 2026-10-10 (W05): a transport error says nothing about side effects — a request that was accepted may have gone through
+  if (/Failed to fetch|NetworkError|network|ECONNREFUSED|Load failed/i.test(msg)) return { text: "The API could not be reached (network error). If this action may have sent something, check its record (My checks / My workflow) before trying again.", code: "NETWORK", raw: e };
   if (/user rejected|User denied|4001/i.test(msg)) return { text: "The wallet rejected the request; nothing was signed.", code: "WALLET_REJECTED", raw: e };
   return { text: msg.endsWith(".") ? msg : `${msg}.`, code: null, raw: e };
 }

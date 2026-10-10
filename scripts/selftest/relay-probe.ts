@@ -12,7 +12,7 @@ import { ARC, FIAT_TOKEN_EIP3009_ABI, signTransferAuthorization, verifyTransferA
 import { net, chain, publicClient, account, feeParams, evidenceDir, ROOT } from "../demo/common.js";
 import { limitsFrom, openGuard } from "../lib/spend-ledger.js";
 import { openPlan } from "../lib/plan-ledger.js";
-import { pinCaps, checkStep, recordGuard, beginStep, endStep } from "@arcpreflight/client";
+import { pinCaps, checkStep, recordGuard, beginStep, endStep, SpendRefused } from "@arcpreflight/client";
 
 const EXECUTE = process.argv.includes("--execute");
 const E18 = 10n ** 18n;
@@ -57,7 +57,8 @@ const limits = limitsFrom({ label: "relay-probe", network: net, perTxUsdc: "0.01
 const { guard, save } = openGuard(ROOT, limits, { write: EXECUTE });
 // the plan ledger (review 2026-10-10, P1): pinned caps, the budget carried across steps and restarts (the fee is counted as outflow, conservatively)
 const book = openPlan(ROOT, net, { write: EXECUTE });
-if (book) pinCaps(book.plan, "probe", { totalNativeAtomic: limits.totalNativeAtomic, perTxNativeAtomic: limits.perTxNativeAtomic });
+if (net === "mainnet" && !book) throw new SpendRefused("mainnet needs the plan ledger (PLAN_ID must name the approved plan)");
+if (book) pinCaps(book.plan, "probe", { totalNativeAtomic: limits.totalNativeAtomic, perTxNativeAtomic: limits.perTxNativeAtomic, maxFeePerGasCeiling: limits.maxFeePerGasCeiling }); // audit 2026-10-10 (OP-04): MAX_FEE_GWEI may lower the approved 40 gwei ceiling, never raise it
 const syncPlan = () => { if (book) book.apply((p) => recordGuard(p, "probe", guard.entries)); };
 const gasLimit = (gas * 12n) / 10n, costCeiling = gasLimit * fees.maxFeePerGas;
 const problems: string[] = [];

@@ -86,6 +86,24 @@ describe("shared wallet balances", () => {
     expect(p.request.mock.calls.filter((c: any[]) => c[0].method === "eth_call")).toHaveLength(1); // exactly one follow-up ERC-20 read
     offChip(); offPage();
   });
+  it("W04 (2026-10-10): one read on the wire at a time — a request during an in-flight read joins it; if that read leaves the loop waiting, one read follows at once; the newest answer is what stands", async () => {
+    const answers: ((v: bigint) => void)[] = [];
+    const p: any = { request: vi.fn(async ({ method }: { method: string }) => { if (method !== "eth_getBalance") throw new Error(method); return new Promise<string>((r) => answers.push((v) => r(`0x${v.toString(16)}`))); }) };
+    const off = subscribeBalances(p, ACCOUNT, null, () => {});
+    answers.shift()!(180_000_000_000_000_000n); await flush(); expect(balancesOf(p, ACCOUNT).native).toBe(180_000_000_000_000_000n);
+    const loop = refreshBalances(p, ACCOUNT); await flush(); // read #1 (unchanged → the loop will wait)
+    answers.shift()!(180_000_000_000_000_000n); await flush();
+    await vi.advanceTimersByTimeAsync(2000); // the retry timer fires: read #2 goes out and is slow
+    expect(answers).toHaveLength(1);
+    const menu = refreshBalances(p, ACCOUNT, { untilChanged: false }); await flush(); // a new request while #2 is on the wire: NO second concurrent read
+    expect(answers).toHaveLength(1); expect(p.request).toHaveBeenCalledTimes(3);
+    answers.shift()!(180_000_000_000_000_000n); await flush(); // #2 lands unchanged: the loop would pause, but the joined request asked for a read → #3 goes out at once
+    expect(answers).toHaveLength(1); expect(p.request).toHaveBeenCalledTimes(4);
+    answers.shift()!(117_000_000_000_000_000n); await flush(); await loop; await menu;
+    expect(balancesOf(p, ACCOUNT).native).toBe(117_000_000_000_000_000n); // the newest answer stands
+    await vi.advanceTimersByTimeAsync(10_000); expect(p.request).toHaveBeenCalledTimes(4); // and nothing keeps polling
+    off();
+  });
   it("other tabs: a change is written under the signal key; a signal from another tab makes every view of that account re-read until it sees that value; this tab's own signal and other accounts are ignored", async () => {
     let bal = 180_000_000_000_000_000n, other = 7n;
     const p = provider({ [ACCOUNT.toLowerCase()]: () => bal, [OTHER]: () => other });

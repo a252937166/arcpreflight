@@ -88,6 +88,11 @@ describe("decide()", () => {
   it("simulation revert → BLOCKED; missing simulation → REVIEW_REQUIRED", () => {
     expect(decide({ ...base(), simulation: { ok: false, error: "OrderAlreadyPaid" } }).decision).toBe("BLOCKED");
     expect(decide({ ...base(), simulation: null }).decision).toBe("REVIEW_REQUIRED");
+    // audit 2026-10-10 (VF-04): an RPC that could not run the call is missing evidence, never a revert — REVIEW_REQUIRED, not BLOCKED
+    const unavailable = decide({ ...base(), simulation: { ok: false, error: "HTTP request failed. Status: 503 Service Unavailable", unavailable: true } });
+    expect(unavailable.decision).toBe("REVIEW_REQUIRED");
+    expect(unavailable.checks.find((c) => c.id === "CALL_SIMULATION")).toMatchObject({ outcome: "REVIEW_REQUIRED", reasons: [expect.stringContaining("simulation unavailable")] });
+    expect(decide({ ...base(), simulation: { ok: false, error: "OrderAlreadyPaid", unavailable: false } }).decision).toBe("BLOCKED");
   });
   it("stale report / expired intent / unknown required signal → REVIEW_REQUIRED", () => {
     expect(decide({ ...base(), now: new Date("2026-10-02T12:03:00Z") }).decision).toBe("REVIEW_REQUIRED");

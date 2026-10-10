@@ -230,6 +230,103 @@ describe("presentation review 2026-10-09 · the decision waits for the reference
   });
 });
 
+describe("audit 2026-10-10 · results stay bound to their inputs, their workflow and their run", () => {
+  const BUNDLE_A = { passportBundleVersion: "1.0", files: { a: "1" } }, BUNDLE_B = { passportBundleVersion: "1.0", files: { b: "2" } };
+  it("W02: a verification of A that lands after B was loaded is dropped (no PASS under B, no callback); removing the anchors after a PASS clears the result", async () => {
+    const { VerifyInBrowser } = await import("../src/components/VerifyInBrowser");
+    let release!: (r: any) => void; h.verifyResult = new Promise((r) => { release = r; }); freshHooks();
+    const onVerified = vi.fn();
+    let props: any = { bundle: BUNDLE_A, name: "A.json", net: h.net, anchors: { baselineDigests: [D], policyDigests: [] }, anchorsSource: "user", onVerified };
+    let tree = render(() => VerifyInBrowser(props)); const pending = button(tree, "Verify in browser").props.onClick(); tree = render(() => VerifyInBrowser(props));
+    props = { ...props, bundle: BUNDLE_B, name: "B.json" }; tree = render(() => VerifyInBrowser(props)); tree = render(() => VerifyInBrowser(props));
+    release(verifierResult(ALL_PASS)); await pending; tree = render(() => VerifyInBrowser(props));
+    expect(tree.props["data-verification"]).toBe(""); expect(content(tree)).not.toContain("Passed"); expect(onVerified).not.toHaveBeenCalled(); // A's result is nobody's
+    // a result stands only for the inputs it was computed with: anchors removed → no result shown
+    h.verifyResult = verifierResult(ALL_PASS); freshHooks();
+    props = { bundle: BUNDLE_A, name: "A.json", net: h.net, anchors: { baselineDigests: [D], policyDigests: [] }, anchorsSource: "user", onVerified: vi.fn() };
+    tree = render(() => VerifyInBrowser(props)); await button(tree, "Verify in browser").props.onClick(); tree = render(() => VerifyInBrowser(props));
+    expect(tree.props["data-verification"]).toBe("passed");
+    props = { ...props, anchors: { baselineDigests: [], policyDigests: [] }, anchorsSource: "none" }; tree = render(() => VerifyInBrowser(props)); tree = render(() => VerifyInBrowser(props));
+    expect(content(tree)).toContain("none — APPROVAL_SOURCE stays UNVERIFIED"); expect(tree.props["data-verification"]).toBe("");
+  });
+  it("W03: account A's execution confirming after the connected account became B never repopulates B's workflow; an export released after start over saves nothing and marks nothing done", async () => {
+    const api = developerApi(); memStorage(); let tree = await createDeveloperOrder();
+    await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    await button(tree, "Sign TransferWithAuthorization").props.onClick(); render(Developer); await flush(); tree = render(Developer);
+    let release!: (h: string) => void;
+    h.wallet.provider.request.mockImplementation(async ({ method }: any) => (method === "eth_sendTransaction" ? new Promise((r) => { release = r; }) : method === "eth_accounts" ? [ACCOUNT] : method === "eth_chainId" ? "0x4cef52" : "0x1"));
+    const pending = button(tree, "Execute with your wallet").props.onClick(); await flush(); tree = render(Developer);
+    const OTHER = "0x0000000000000000000000000000000000000B11"; h.wallet = { ...h.wallet, account: OTHER }; render(Developer); await flush(); tree = render(Developer);
+    expect(lifecycleOf(tree).order.status).toBe("active"); // B starts at step 1
+    release(D); await pending; render(Developer); await flush(); tree = render(Developer);
+    expect(h.wallet.account).toBe(OTHER);
+    expect(nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "OrderCard")).toBeUndefined(); // A's order did not come back
+    expect(nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "AttemptPanel")).toBeUndefined(); // nor A's confirmed attempt
+    expect(lifecycleOf(tree).order.status).toBe("active");
+    expect(api.attempts).toHaveLength(1); // A's attempt was recorded on the server under A — reconciled there, not here
+    // export, then start over, then the export lands
+    h.wallet = { ...h.wallet, account: ACCOUNT }; freshHooks(); developerApi(); memStorage(); h.saveJson.mockClear();
+    tree = await createDeveloperOrder(); await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    await button(tree, "Sign TransferWithAuthorization").props.onClick(); render(Developer); await flush(); tree = render(Developer);
+    let releaseExport!: (r: Response) => void; const orig = (vi.mocked(fetch) as any).getMockImplementation();
+    vi.mocked(fetch).mockImplementation(async (path: any, init?: any) => (String(path).endsWith("/passport") ? new Promise<Response>((r) => { releaseExport = r; }) : orig(path, init)));
+    const exporting = button(tree, "Download Payment Passport").props.onClick(); await flush(); tree = render(Developer);
+    button(tree, "start over").props.onClick(); tree = render(Developer);
+    expect(lifecycleOf(tree).order.status).toBe("active"); expect(lifecycleOf(tree).passport.status).toBe("todo");
+    releaseExport(response(BUNDLE_A)); await exporting; tree = render(Developer);
+    expect(lifecycleOf(tree).passport.status).toBe("todo"); expect(h.saveJson).not.toHaveBeenCalled(); expect(content(tree)).not.toContain("saved as");
+  });
+  it("W05: a purchase whose answer is lost after the fee authorization left reads as UNCERTAIN and names the remembered request — never 'nothing was sent'", async () => {
+    const api = developerApi(); memStorage(); let tree = await createDeveloperOrder();
+    await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    const orig = api.fetch.getMockImplementation()!; let accepted = false;
+    api.fetch.mockImplementation(async (path: string, init?: RequestInit) => { if (path === "/v1/preflight" && JSON.parse(String(init?.body)).payment) { accepted = true; throw new TypeError("Failed to fetch"); } return orig(path, init); });
+    await button(tree, "Sign TransferWithAuthorization").props.onClick(); tree = render(Developer);
+    expect(accepted).toBe(true);
+    const text = nodes(tree).filter((n) => typeof n.type === "function" && n.type.name === "ErrorBanner").map((n) => n.props?.err?.text ?? "").join(" ") + " " + content(tree);
+    expect(text).toContain("may have reached the service"); expect(text).toContain(REQUEST.slice(0, 10)); expect(text).toContain("recover it from there before buying again");
+    expect(text).not.toContain("Nothing was sent");
+  });
+  it("W06: a BROADCAST_ATTEMPTED attempt with a hash but no comparison yet shows 'comparison pending', never the green 'as planned'", async () => {
+    const { AttemptPanel } = await import("../src/components/AttemptPanel");
+    const pendingCompare: any = { ...VALIDATED, state: "BROADCAST_ATTEMPTED", txHash: D, deviations: null };
+    expect(content(AttemptPanel({ attempt: pendingCompare, net: h.net, phase: "polling" }))).toContain("comparison pending");
+    expect(content(AttemptPanel({ attempt: pendingCompare, net: h.net, phase: "polling" }))).not.toContain("as planned");
+    const compared: any = { ...pendingCompare, state: "CONFIRMED", deviations: { mismatch: [], deviations: {} } };
+    expect(content(AttemptPanel({ attempt: compared, net: h.net, phase: "done" }))).toContain("to · data · value · chainId · type as planned");
+  });
+  it("W07: the Demo quick check never turns a 503 on the approval read into a review decision — the paid report is kept and handed to the Developer workflow; a 404 still decides", async () => {
+    const { useWalletRun } = await import("../src/lib/walletRun");
+    const api = developerApi(); const store = memStorage(); api.baselines.fail(503, { error: "UPSTREAM_UNAVAILABLE", reason: "node unavailable" });
+    let hook = render(() => useWalletRun(h.net, h.wallet));
+    await hook.start({ id: "APPROVED_PAYMENT", proxy: "MAIN", merchant: MERCHANT } as any); hook = render(() => useWalletRun(h.net, h.wallet));
+    expect(hook.run.delivered).not.toBeNull(); expect(hook.run.decision).toBeNull(); expect(hook.run.handoff).toBe(false);
+    expect(hook.run.phase).toBe("error"); expect(hook.run.err?.text).toContain("could not be read"); expect(hook.run.err?.text).toContain("no new fee");
+    expect(JSON.parse(store.get("arcpreflight.workflow:root")!)[ACCOUNT.toLowerCase()]).toMatchObject({ requestId: REQUEST, approved: true, handoff: "demo" }); // the paid report is kept for the Developer workflow
+    freshHooks(); api.baselines.fail(404, { error: "NOT_FOUND", reason: "no such baseline" });
+    hook = render(() => useWalletRun(h.net, h.wallet)); await hook.start({ id: "APPROVED_PAYMENT", proxy: "MAIN", merchant: MERCHANT } as any); hook = render(() => useWalletRun(h.net, h.wallet));
+    expect(hook.run.phase).toBe("done"); expect(hook.run.decision?.decision).toBe("REVIEW_REQUIRED"); // a definitive answer decides
+  });
+  it("W08: a live run's poll that lands after the visitor opened a recorded run from history is dropped — the selected run stays on screen", async () => {
+    memStorage();
+    const mk = (id: string, state: string): any => ({ runId: id, state, fixture: "APPROVED_PAYMENT", labels: [], steps: [], createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(), expected: null, headline: null, result: null, recovery: null });
+    const A = mk("run-A", "RUNNING"), B = mk("run-B", "DONE"); let readsA = 0; let release!: (r: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+      if (path.startsWith("/v1/demo/runs?")) return response({ runs: [], total: 0 });
+      if (path === "/v1/demo/runs/run-A") { if (++readsA === 1) return response(A); return new Promise<Response>((r) => { release = r; }); }
+      if (path === "/v1/demo/runs/run-B") return response(B); throw new Error(path);
+    }));
+    let tree = render(Demo); await flush(); tree = render(Demo);
+    let history = fnNode(tree, "RunsTable"); await history.props.onView("run-A"); await flush(); tree = render(Demo); // live A, polling (its next poll is held)
+    await vi.advanceTimersByTimeAsync(2000); tree = render(Demo);
+    history = fnNode(tree, "RunsTable"); await history.props.onView("run-B"); tree = render(Demo);
+    expect(fnNode(tree, "RunPanel").props.run.runId).toBe("run-B");
+    release(response({ ...A, state: "RUNNING" })); await flush(); tree = render(Demo);
+    expect(fnNode(tree, "RunPanel").props.run.runId).toBe("run-B"); // A's late poll changed nothing
+    await vi.advanceTimersByTimeAsync(10_000); expect(readsA).toBe(2); // and A's loop is over: no further polls
+  });
+});
+
 it("Developer step 4 executes through the attempt API: validated plan → eth_sendTransaction without a nonce → hash reported → polled to CONFIRMED (AP33-07)", async () => {
   const api = developerApi(); const store = memStorage();
   let txRequest: any = null; let rememberedAtPrompt: string | null = null;
