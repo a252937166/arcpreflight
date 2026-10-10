@@ -201,9 +201,9 @@ export class Relayer {
     // audit 2026-10-10 (API-02): a matching transaction found earlier whose receipt was not readable yet is the durable CANDIDATE; it is
     // re-examined first and the scan window is never advanced past it — evidence that was found but not fully read is never skipped
     if (p.candidate_tx_hash) {
-      const settled = await this.settleCandidate(db, p, x, p.candidate_tx_hash as Hex);
+      const settled = await this.settleCandidate(db, p, x, a, p.candidate_tx_hash as Hex);
       if (settled) return settled;
-      return this.keep(db, p.request_id, "PENDING", `settlement candidate ${p.candidate_tx_hash} found; its receipt is not readable yet — re-examined on the next pass, the scan does not move past it`);
+      return this.keep(db, p.request_id, "PENDING", `settlement candidate ${p.candidate_tx_hash} found; its transaction body or receipt is not readable yet — re-examined on the next pass, the scan does not move past it`);
     }
     let from = p.scanned_to_block !== null && p.scanned_to_block !== undefined ? BigInt(p.scanned_to_block) + 1n
       : p.created_block !== null && p.created_block !== undefined ? BigInt(p.created_block) : head > chunk ? head - chunk : 0n;
@@ -213,25 +213,26 @@ export class Relayer {
       const logs = await this.c.rpc.getLogs({ address: this.c.usdc, fromBlock: from, toBlock: to, topics: [[AUTHORIZATION_USED_TOPIC, AUTHORIZATION_CANCELED_TOPIC], addressTopic(x.from), x.nonce] });
       for (const l of logs) {
         if (l.topics[0]?.toLowerCase() === AUTHORIZATION_CANCELED_TOPIC) return this.finish(db, p.request_id, "FAILED", l.transactionHash as Hex, "authorization canceled on-chain by the payer", null);
-        const tx = await this.c.rpc.getTransaction({ hash: l.transactionHash as Hex }).catch(() => null);
-        if (!tx) { // the event names the transaction but the node does not serve its body yet: keep it as the candidate, do not move past it
-          run(db, "UPDATE payments SET candidate_tx_hash = ?, updated_at = ? WHERE request_id = ?", String(l.transactionHash).toLowerCase(), now(), p.request_id);
-          return this.keep(db, p.request_id, "PENDING", `authorization consumed by ${l.transactionHash}; the transaction body is not readable yet — kept as the settlement candidate`);
-        }
-        const direct = String(tx.to ?? "").toLowerCase() === this.c.usdc.toLowerCase() && authorizationCallMatches(tx.input, a);
-        if (!direct) return this.keep(db, p.request_id, "PENDING", `authorization consumed by transaction ${l.transactionHash} of an unrecognised shape (wrapper or mismatched calldata); manual reconciliation required`);
+        // the event names the transaction: it is the durable candidate from here on; its body is validated before anything completes
         run(db, "UPDATE payments SET candidate_tx_hash = ?, updated_at = ? WHERE request_id = ?", String(l.transactionHash).toLowerCase(), now(), p.request_id);
-        const settled = await this.settleCandidate(db, p, x, l.transactionHash as Hex);
+        const settled = await this.settleCandidate(db, p, x, a, l.transactionHash as Hex);
         if (settled) return settled;
-        return this.keep(db, p.request_id, "PENDING", `settlement candidate ${l.transactionHash} found (direct USDC call for this authorization); its receipt is not readable yet — the scan stays before block ${l.blockNumber ?? "?"}`);
+        return this.keep(db, p.request_id, "PENDING", `authorization consumed by ${l.transactionHash}; its transaction body or receipt is not readable yet — kept as the settlement candidate, the scan stays before block ${l.blockNumber ?? "?"}`);
       }
       run(db, "UPDATE payments SET scanned_to_block = ?, updated_at = ? WHERE request_id = ?", Number(to), now(), p.request_id);
       from = to + 1n;
     }
     return this.keep(db, p.request_id, "PENDING", `authorization consumed on-chain; settlement evidence not located yet (scanned to block ${to})`);
   }
-  /** the candidate's receipt: COMPLETED on matching logs, FAILED when it reverted, null while the receipt is not readable */
-  private async settleCandidate(db: Db, p: any, x: SettlementExpectation, hash: Hex): Promise<RelayOutcome | null> {
+  /** The candidate's BODY first (review of 40c5858: the candidate path completed from receipt logs alone): only a DIRECT USDC call whose
+   *  calldata equals the stored authorization in every field may complete — a wrapper or mismatched calldata stays pending for manual
+   *  reconciliation and the candidate is kept, never completed from its logs. Then its receipt: COMPLETED on matching logs, dropped when it
+   *  reverted. Null while the body or the receipt is not readable: the candidate stays and the scan does not move past it. */
+  private async settleCandidate(db: Db, p: any, x: SettlementExpectation, a: Eip3009Authorization, hash: Hex): Promise<RelayOutcome | null> {
+    const tx = await this.c.rpc.getTransaction({ hash }).catch(() => null);
+    if (!tx) return null;
+    const direct = String(tx.to ?? "").toLowerCase() === this.c.usdc.toLowerCase() && typeof tx.input === "string" && authorizationCallMatches(tx.input, a);
+    if (!direct) return this.keep(db, p.request_id, "PENDING", `authorization consumed by transaction ${hash} of an unrecognised shape (wrapper or mismatched calldata); manual reconciliation required — kept as the candidate, never completed from its logs alone`);
     const rc = await this.c.rpc.getTransactionReceipt({ hash }).catch(() => null);
     if (!rc) return null;
     if (rc.status === "success" || rc.status === "0x1") {

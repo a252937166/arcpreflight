@@ -226,10 +226,33 @@ describe("cost statement 1.1 — completeness and role", () => {
     expect(incomplete.costStatementVersion).toBe("1.1");
     expect(incomplete.buyer).toMatchObject({ role: "visitor-wallet", complete: false, businessGas: null, totalUsdc: "0.06" });
     expect(incomplete.notes).toContain("buyer total is incomplete: business gas not available");
-    expect(incomplete.operator.complete).toBe(true);
+    expect(incomplete.operator.complete).toBe(false); // a counted check fee whose settlement transaction is not recorded is missing evidence (review of bf0c800, P2)
+    expect(incomplete.notes).toContain("fee relay evidence missing: no settlement transaction hash is recorded for the settled check fee; operator.feeRelay is null, not estimated");
+    expect(costStatement({ ...base, buyerRole: "visitor-wallet", expected: { feeTx: false } }).operator.complete).toBe(true); // unless the caller says the fee's settlement is not expected here
     const complete = costStatement({ ...base, receipts: { businessTx: { gasUsed: 40364n, effectiveGasPrice: 25_000_000_000n } } });
     expect(complete.buyer).toMatchObject({ role: "buyer", complete: true, totalUsdc: "0.0610091" });
     const operatorIncomplete = costStatement({ ...base, txs: { ...base.txs, feeTx: ("0x" + "55".repeat(32)) as `0x${string}` }, receipts: { businessTx: { gasUsed: 1n, effectiveGasPrice: 1n } } });
     expect(operatorIncomplete.operator.complete).toBe(false); expect(operatorIncomplete.buyer.complete).toBe(true);
+  });
+  it("review of bf0c800 (P2): a source the statement must account for but that is not recorded at all is missing evidence — the total is incomplete; a source that does not apply leaves it complete", async () => {
+    const { costStatement } = await import("../src/cost.js");
+    const base = { buyer: "0x00000000000000000000000000000000000000aa" as const, relayer: null, orderCreator: null, businessPrincipalNativeAtomic: "50000000000000000", businessPaid: true, checkFeeTokenAtomic: "10000", plan: null, policy: null, receipts: {}, txs: {} };
+    // a run that paid: the order creation, the fee settlement and the business payment are required, none is recorded
+    const missing = costStatement({ ...base, expected: { createOrderTx: true, feeTx: true, businessTx: true } });
+    expect(missing.operator.complete).toBe(false); expect(missing.buyer.complete).toBe(false);
+    expect(missing.notes).toContain("order-creation evidence missing: no creation transaction is recorded for this order; operator.orderCreation is null, not estimated");
+    expect(missing.notes).toContain("fee relay evidence missing: no settlement transaction hash is recorded for the settled check fee; operator.feeRelay is null, not estimated");
+    expect(missing.notes).toContain("business transaction evidence missing: no transaction hash is recorded for the business payment; businessGas is null, not estimated");
+    expect(missing.notes).toContain("operator total is incomplete: a relay or order-creation receipt is not available"); expect(missing.notes).toContain("buyer total is incomplete: business gas not available");
+    // the same records where nothing is required of the business side (no payment was made) and no order creation applies (a check-only statement): complete
+    const notApplicable = costStatement({ ...base, businessPaid: false, checkFeeTokenAtomic: null, expected: { createOrderTx: false, feeTx: false, businessTx: false } });
+    expect(notApplicable.operator.complete).toBe(true); expect(notApplicable.buyer.complete).toBe(true); expect(notApplicable.notes.some((n) => /evidence missing/.test(n))).toBe(false);
+    // defaults for callers that do not say: a paid payment and a settled fee are required, an unrecorded creation is not presumed
+    const defaults = costStatement({ ...base });
+    expect(defaults.buyer.complete).toBe(false); expect(defaults.operator.complete).toBe(false); expect(defaults.notes.some((n) => n.startsWith("order-creation evidence missing"))).toBe(false);
+    // the honest exporter's statement with the receipts present is complete and carries no such note
+    const full = costStatement({ ...base, orderCreator: "0x00000000000000000000000000000000000000cc", relayer: "0x00000000000000000000000000000000000000dd", txs: { feeTx: ("0x" + "55".repeat(32)) as `0x${string}`, businessTx: ("0x" + "44".repeat(32)) as `0x${string}`, createOrderTx: ("0x" + "66".repeat(32)) as `0x${string}` },
+      receipts: { feeTx: { gasUsed: 87141n, effectiveGasPrice: 25_000_000_000n }, businessTx: { gasUsed: 40364n, effectiveGasPrice: 21_000_000_000n }, createOrderTx: { gasUsed: 98107n, effectiveGasPrice: 21_000_000_000n } }, expected: { createOrderTx: true, feeTx: true, businessTx: true } });
+    expect(full.buyer.complete).toBe(true); expect(full.operator.complete).toBe(true); expect(full.notes.some((n) => /evidence missing|incomplete/.test(n))).toBe(false);
   });
 });

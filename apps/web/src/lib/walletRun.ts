@@ -9,7 +9,7 @@ import { toHex, type Hex } from "viem";
 import { intentDigest, policyDigest, ReportCore, reportDigest, type IntentCore } from "@arcpreflight/schema";
 import { decide } from "@arcpreflight/policy";
 import { TRANSFER_WITH_AUTHORIZATION_TYPES, usdcDomain, type ArcNet } from "@arcpreflight/client";
-import { api, ApiError, type BaselineRecord, type Fixture, type FixtureInfo, type NetworkInfo, type Report, type Step } from "./api";
+import { api, ApiError, type ApiClient, type BaselineRecord, type Fixture, type FixtureInfo, type NetworkInfo, type Report, type Step } from "./api";
 import { approvedBaseline, developerIntent, developerPolicy, prepareOrderQuote, type DeveloperOrder, type PreparedQuote } from "./preflight";
 import { signTypedDataV4, type Eip1193 } from "./wallet";
 import { withSession } from "./session";
@@ -38,12 +38,12 @@ export async function signFeeAuthorization(provider: Eip1193, account: string, n
 export type Delivered = { report: Report; digest: string; simulation: any; serviceFeeTx: string | null; requestId: string };
 /** Pays the quote and waits for delivery. A 202 means the fee is still settling on Arc: the SAME request is polled — nothing is paid twice.
  *  The request id is remembered before anything leaves, so "My checks" can find it even if the response is lost. */
-export async function purchaseReport(quote: PreparedQuote, token: string, payment: FeePayment, opts: { wait?: () => Promise<void>; maxPolls?: number } = {}): Promise<Delivered> {
-  const quotedIntent = quote.intent; const requestId = quote.response.requestId;
+export async function purchaseReport(quote: PreparedQuote, token: string, payment: FeePayment, opts: { wait?: () => Promise<void>; maxPolls?: number; client?: ApiClient } = {}): Promise<Delivered> {
+  const quotedIntent = quote.intent; const requestId = quote.response.requestId; const c = opts.client ?? api; // the purchase and its polls stay on one instance
   rememberCheck({ requestId, createdAt: new Date().toISOString(), subject: quotedIntent.to, valueNativeAtomic: quotedIntent.valueNativeAtomic });
-  let r = await api.preflight(quotedIntent, token, payment);
+  let r = await c.preflight(quotedIntent, token, payment);
   let tries = 0; const max = opts.maxPolls ?? 20;
-  while (r.__status === 202 && tries++ < max) { await (opts.wait?.() ?? new Promise((s) => setTimeout(s, 1500))); r = await api.request(requestId, token); }
+  while (r.__status === 202 && tries++ < max) { await (opts.wait?.() ?? new Promise((s) => setTimeout(s, 1500))); r = await c.request(requestId, token); }
   if (r.__status === 202) throw new Error("The check fee is still settling on Arc. Nothing is paid twice: recover this request from \"My checks\" on the Developer page once it has settled.");
   if (r.delivery !== "DELIVERED") throw new ApiError(r.__status, r);
   const rep = ReportCore.parse(r.report);
@@ -80,7 +80,7 @@ export function useWalletRun(net: NetworkInfo | null, wallet: WalletLike) {
     setRun({ ...EMPTY_WALLET_RUN, phase: "running", fixture: fixture.id, startedAt: t0 });
     try {
       let answer;
-      try { answer = await withSession((t) => api.createOrder({ payer: account, proxy: fixture.proxy }, t)); }
+      try { answer = await withSession((t, c) => c.createOrder({ payer: account, proxy: fixture.proxy }, t)); }
       catch (e) { if (describeError(e).code === "NETWORK") throw new Error(ORDER_RESPONSE_LOST_TEXT); throw e; } // a lost answer may hide a recorded order
       if (isPendingOrder(answer)) { // 202: the identity is recorded, the creation is not confirmed — nothing below may use it yet (2026-10-09)
         push("orderCreationPending", { who: "order-creator (API)", why: answer.reason ?? "the creation is not confirmed yet", orderId: answer.orderId, createOrderTx: answer.tx });
@@ -95,14 +95,14 @@ export function useWalletRun(net: NetworkInfo | null, wallet: WalletLike) {
       const intent = developerIntent(net.chainId, account, order, policy, unitMistake);
       patch({ intent });
       push("intent", { who: "your browser", why: unitMistake ? "the value is encoded in 6-decimal units on the 18-decimal native path — the classic Arc mistake" : "exact call: pay(orderId) with the approved amount", intentDigest: intentDigest(intent), to: intent.to, valueNativeAtomic: intent.valueNativeAtomic, approvedAmountNativeAtomic: order.amountNativeAtomic });
-      const quote = await withSession((t) => prepareOrderQuote(intent, order.block, t, { isCurrent: alive }));
+      const quote = await withSession((t, c) => prepareOrderQuote(intent, order.block, t, { isCurrent: alive }, c));
       if (!alive()) return;
       patch({ quote, intent: quote.intent });
       push("quote", { who: "ArcPreflight API (x402 · HTTP 402)", why: "the report is prepared and pinned before anything is charged", requestId: quote.response.requestId, priceTokenAtomic: quote.response.quote.amountTokenAtomic, pinnedBlock: quote.response.pinnedBlock, expiresAt: quote.response.quote.expiresAt });
       const payment = await signFeeAuthorization(provider, account, net, quote);
       if (!alive()) return;
       push("signServiceFee", { who: "your wallet", why: "one EIP-3009 TransferWithAuthorization for exactly the quoted fee — the only thing this wallet signs in a check", from: payment.authorization.from, payTo: payment.authorization.to, valueTokenAtomic: payment.authorization.value });
-      const delivered = await withSession((t) => purchaseReport(quote, t, payment));
+      const delivered = await withSession((t, c) => purchaseReport(quote, t, payment, { client: c }));
       if (!alive()) return;
       patch({ delivered });
       push("reportDelivered", { who: "ArcPreflight relayer → API", why: "the fee settled on Arc (gas in USDC paid by the project's merchant account); the report's digest is recomputed here", serviceFeeTx: delivered.serviceFeeTx, reportDigest: delivered.digest, baselineResult: delivered.report.baselineResult, pinnedBlock: delivered.report.observation.blockNumber });
@@ -110,7 +110,7 @@ export function useWalletRun(net: NetworkInfo | null, wallet: WalletLike) {
       // the paid report is kept, handed to the Developer workflow as this wallet's check, and the error says to retry the same report (no new fee)
       let baseline: BaselineRecord | null = null;
       if (order.baselineDigest) {
-        try { baseline = await withSession((t) => approvedBaseline(order.baselineDigest!, t)); }
+        try { baseline = await withSession((t, c) => approvedBaseline(order.baselineDigest!, t, c)); }
         catch (e) {
           if (!alive()) return;
           if (!(e instanceof ApiError && e.status === 404)) {

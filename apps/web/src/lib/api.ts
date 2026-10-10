@@ -146,25 +146,27 @@ let apiBase = "";
 export const setApiBase = (base: string) => { apiBase = base; };
 export const getApiBase = () => apiBase;
 export const apiPath = (path: string) => `${apiBase}${path}`;
-/** Audit 2026-10-10 (W01): an operation that started on one instance stays on it. `withSession` pins the base it captured for the whole
- *  operation (session, request, retry); every request sent while a pin is active goes to the pinned base — and if the selected instance
- *  changed meanwhile, the request is refused (INSTANCE_CHANGED) instead of being redirected to the newly selected network. */
-const pins: string[] = [];
-export const pinBase = (base: string) => { pins.push(base); return () => { const i = pins.lastIndexOf(base); if (i >= 0) pins.splice(i, 1); }; };
-export class InstanceChangedError extends Error { constructor(public pinned: string, public current: string) { super(`the selected network changed while this request was pending (from ${pinned || "root"} to ${current || "root"}); nothing was sent to the new instance`); this.name = "InstanceChangedError"; } }
-async function req<T>(path: string, init?: RequestInit & { token?: string }): Promise<T> {
+/** Review of bf0c800 (P1): every operation that spans more than one request — a session and its call, a lost answer and its retry, a
+ *  recovery — holds its OWN client bound to the instance it started on (`apiFor(base)`). There is no shared mutable "pinned base": two
+ *  operations on different instances can never make each other use the wrong service, and a retry after a lost response goes exactly
+ *  where the original request went. `api` is the client of the instance selected NOW, for one-shot reads by views (a view that outlives a
+ *  switch is remounted by the app, so a late answer has nowhere to land). */
+async function request<T>(base: string, path: string, init?: RequestInit & { token?: string }): Promise<T> {
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   if (init?.body) headers["content-type"] = "application/json";
   if (init?.token) headers["authorization"] = `Bearer ${init.token}`;
-  const pinned = pins.length ? pins[pins.length - 1] : null;
-  if (pinned !== null && pinned !== apiBase) throw new InstanceChangedError(pinned, apiBase);
-  const r = await fetch(`${pinned ?? apiBase}${path}`, { ...init, headers });
+  const r = await fetch(`${base}${path}`, { ...init, headers });
   const text = await r.text();
   let body: any = null; try { body = text ? JSON.parse(text) : null; } catch { body = { error: "NON_JSON", text: text.slice(0, 200) }; }
   if (!r.ok && r.status !== 402 && r.status !== 202) throw new ApiError(r.status, body);
   return { ...body, __status: r.status } as T;
 }
-export const api = {
+function clientFor(baseOf: () => string) {
+  const req = <T,>(path: string, init?: RequestInit & { token?: string }) => request<T>(baseOf(), path, init);
+  return {
+  /** the instance this client is bound to ("" = root); the current-instance client reports the selected base */
+  get base() { return baseOf(); },
+
   network: () => req<NetworkInfo>("/v1/network"),
   runs: (limit = 20, offset = 0) => req<RunList>(`/v1/demo/runs?limit=${limit}&offset=${offset}`),
   run: (id: string) => req<Run>(`/v1/demo/runs/${id}`),
@@ -220,7 +222,13 @@ export const api = {
   /** the owner's private passport of a paid check (no signature inside) */
   requestPassport: (id: string, token: string) => req<PassportBundle>(`/v1/requests/${id}/passport`, { token }),
   baseline: (digest: string, token: string) => req<BaselineRecord>(`/v1/baselines/${digest}`, { token }),
-};
+  };
+}
+export type ApiClient = ReturnType<typeof clientFor>;
+/** the client of the instance selected now (one-shot reads by views) */
+export const api: ApiClient = clientFor(() => apiBase);
+/** an immutable client for ONE operation: bound to `base` for every request it makes, whatever the visitor selects meanwhile */
+export const apiFor = (base: string): ApiClient => clientFor(() => base);
 /** a public run's passport is a plain download link (same origin, content-disposition: attachment) */
 export const passportUrl = (runId: string) => apiPath(`/v1/demo/runs/${runId}/passport`);
 export const explorerTx = (n: NetworkInfo | null | undefined, h: string) => `${n?.explorer ?? "https://explorer.arc.io"}/tx/${h}`;

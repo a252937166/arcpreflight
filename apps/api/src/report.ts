@@ -115,7 +115,8 @@ export async function buildIntentReport(intent: IntentCore, intentDigest: Hex, b
   evidence.push({ evidence: sim.evidence, digest: sim.evidenceDigest });
   // audit 2026-10-10 (VF-04): an RPC that could not run the call is missing evidence, not a revert; the report says which it was
   const simError = sim.value.ok ? null : sim.value.unavailable ? sim.value.error : describeRevert(sim.value.revertData, sim.value.error);
-  signals.push({ id: "CALL_SIMULATION", state: sim.value.ok ? "observed" : "not_observed", basis: "simulation",
+  // review of bf0c800 (P3): an unavailable simulation is UNKNOWN in the report, as it is in the decision (REVIEW_REQUIRED) — never "not_observed", which is the revert
+  signals.push({ id: "CALL_SIMULATION", state: sim.value.ok ? "observed" : sim.value.unavailable ? "unknown" : "not_observed", basis: "simulation",
     scope: "eth_call with the exact sender, target, calldata and value at the pinned block", evidenceDigests: [sim.evidenceDigest],
     limitations: sim.value.ok ? ["simulation success is not a guarantee of future inclusion or success"] : sim.value.unavailable ? [`unavailable: the RPC could not run the simulation (${simError}); not a revert — retry when the RPC answers`] : [`revert: ${simError}`], sourceIds: ["https://ethereum.org/developers/docs/apis/json-rpc/"] });
   signals.push(...arcAdvisorySignals);

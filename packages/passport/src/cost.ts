@@ -21,6 +21,11 @@ export type CostInput = {
   txs: { feeTx?: Hex | null; businessTx?: Hex | null; createOrderTx?: Hex | null };
   unresolvedReservationNativeAtomic?: string;
   capturedAt?: string;
+  /** Which source transactions this statement MUST account for (review of bf0c800, P2): a required source that is not even recorded makes the
+   *  total incomplete — "not applicable" (this run made no business payment) is told apart from "required evidence missing" (a run always
+   *  created its order; a paid payment has a hash). Defaults, for callers that do not say: a hash that is recorded, a paid business payment,
+   *  a settled check fee. */
+  expected?: { feeTx?: boolean; businessTx?: boolean; createOrderTx?: boolean };
 };
 
 const big = (v: bigint | string | number): bigint => (typeof v === "bigint" ? v : BigInt(v));
@@ -48,11 +53,17 @@ export function costStatement(i: CostInput): CostStatement {
   if (i.txs.feeTx && !feeRelay) notes.push("fee relay receipt unavailable at export: operator.feeRelay is null, not estimated");
   const orderCreation = withAddress(gasCost(i.receipts.createOrderTx, i.txs.createOrderTx), i.orderCreator);
   if (i.txs.createOrderTx && !orderCreation) notes.push("order-creation receipt unavailable at export: operator.orderCreation is null, not estimated");
+  // review of bf0c800 (P2): a source the statement must account for but that is not even recorded is MISSING EVIDENCE, not "not applicable"
+  const expected = { feeTx: i.expected?.feeTx ?? (feeToken !== null || !!i.txs.feeTx), businessTx: i.expected?.businessTx ?? (i.businessPaid || !!i.txs.businessTx), createOrderTx: i.expected?.createOrderTx ?? !!i.txs.createOrderTx };
+  if (expected.businessTx && !i.txs.businessTx) notes.push("business transaction evidence missing: no transaction hash is recorded for the business payment; businessGas is null, not estimated");
+  if (expected.feeTx && !i.txs.feeTx) notes.push("fee relay evidence missing: no settlement transaction hash is recorded for the settled check fee; operator.feeRelay is null, not estimated");
+  if (expected.createOrderTx && !i.txs.createOrderTx) notes.push("order-creation evidence missing: no creation transaction is recorded for this order; operator.orderCreation is null, not estimated");
   const buyerTotal = principal + feeNative + (businessGas ? BigInt(businessGas.nativeAtomic) : 0n);
   const operatorTotal = (feeRelay ? BigInt(feeRelay.nativeAtomic) : 0n) + (orderCreation ? BigInt(orderCreation.nativeAtomic) : 0n);
-  // 1.1: a total that lacks a receipt it should include is a known subtotal, flagged incomplete — never presented as the cost
-  const buyerComplete = !(i.txs.businessTx && !businessGas);
-  const operatorComplete = !(i.txs.feeTx && !feeRelay) && !(i.txs.createOrderTx && !orderCreation);
+  // 1.1: a total that lacks a receipt it should include — unavailable at export, or never recorded although required — is a known subtotal,
+  // flagged incomplete, never presented as the cost
+  const buyerComplete = !(expected.businessTx && !businessGas);
+  const operatorComplete = !(expected.feeTx && !feeRelay) && !(expected.createOrderTx && !orderCreation);
   if (!buyerComplete) notes.push("buyer total is incomplete: business gas not available");
   if (!operatorComplete) notes.push("operator total is incomplete: a relay or order-creation receipt is not available");
   const authorizedGas = i.plan ? BigInt(i.plan.gasLimit) * BigInt(i.plan.maxFeePerGasNativeAtomic) : null;

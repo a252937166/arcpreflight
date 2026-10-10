@@ -76,6 +76,10 @@ export function refreshBalances(p: Eip1193, account: string, opts: RefreshOption
         if (loop.followUp && erc20 === null && e.usdc) { loop.followUp = false; loop.untilChanged = false; void read(); return; }
         e.reading = false; e.value = { native, erc20, readAt: Date.now() }; e.published++; notify(e);
         if (loop.before !== null && native !== loop.before) signalOtherTabs(account, native);
+        // review of bf0c800 (P2): a request that arrived while this read was on the wire is still owed its own read — it asked AFTER this value
+        // was requested, so the change it waits for can be newer than this answer. The fresh value is on screen; one more read follows (and
+        // keeps re-reading only while an expected value is still unmet). It is never settled away with the older answer.
+        if (loop.wantRead) { loop.wantRead = false; loop.before = native; loop.attempts = 0; loop.untilChanged = loop.expect !== null && native !== loop.expect; e.reading = true; void read(); return; }
         done();
       }).catch(() => { loop.inFlight = false; if (gen === e.gen) { e.timer = null; e.reading = false; } done(); });
     };

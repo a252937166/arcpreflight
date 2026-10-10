@@ -58,39 +58,82 @@ describe("anonymous session", () => {
   });
 });
 
-describe("audit 2026-10-10 · an operation stays on its instance (W01); a session that owns records is never replaced (W10)", () => {
-  it("W01: the testnet session resolving after the selected instance changed does not send the pending order to the new instance, and a 401 is never retried across instances", async () => {
-    const { api } = await import("../src/lib/api");
-    const paths: string[] = []; let release!: (r: Response) => void;
+describe("review of bf0c800 · one immutable client per operation (P1); renewals reuse another tab's replacement (P2); a session that owns records is never replaced (W10)", () => {
+  const PAYER = "0x0000000000000000000000000000000000000a11";
+  it("P1: an operation finishes on the instance it started on — the testnet session resolving after the visitor switched to the root instance sends its order to /testnet, never to the new instance; a 401 met after the switch is renewed and retried on /testnet", async () => {
+    const paths: string[] = []; let release!: (r: Response) => void; let testnetSessions = 0;
     vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
       paths.push(path);
-      if (path === "/testnet/v1/session") return new Promise<Response>((r) => { release = r; });
+      if (path === "/testnet/v1/session" && init?.method === "POST") { testnetSessions++; return testnetSessions === 1 ? new Promise<Response>((r) => { release = r; }) : response({ principal: "visitor:t2", token: "t2" }, 201); }
       if (path === "/v1/session") return response({ principal: "visitor:main", token: "main-token" }, 201);
-      if (path.endsWith("/v1/demo/orders")) return response({ orderId: "0x01", state: "CONFIRMED" }, 201);
-      throw new Error(`unexpected ${path}`);
+      if (path === "/testnet/v1/demo/orders") return response({ orderId: "0x01", state: "CONFIRMED" }, 201);
+      if (path === "/testnet/v1/demo/runs?limit=20&offset=0") return response({ runs: [] });
+      throw new Error(`reached the wrong instance: ${path}`);
     }));
     setApiBase("/testnet");
-    const pending = withSession((t) => api.createOrder({ payer: "0x0000000000000000000000000000000000000a11", proxy: "MAIN" }, t));
+    const pending = withSession((t, c) => c.createOrder({ payer: PAYER, proxy: "MAIN" }, t));
     await new Promise((r) => setTimeout(r, 0));
     setApiBase(""); // the visitor switched to the mainnet instance while the testnet session was still being created
     release(response({ principal: "visitor:test", token: "test-token" }, 201));
-    await expect(pending).rejects.toMatchObject({ name: "InstanceChangedError" });
-    expect(paths).toEqual(["/testnet/v1/session"]); // nothing was sent anywhere else: no order on the new instance, no new-instance session
-    // the same for a 401 arriving after a switch: the retry never goes to the new instance
+    await expect(pending).resolves.toMatchObject({ orderId: "0x01" });
+    expect(paths).toEqual(["/testnet/v1/session", "/testnet/v1/demo/orders"]); // the order went where the operation started; nothing reached the new instance
+    // a 401 arriving after a switch: renewed on the SAME instance and the call retried there, with the stored session replaced there
     setApiBase("/testnet"); store.set("arcpreflight.session:/testnet", JSON.stringify({ principal: "visitor:old", token: "old" })); paths.length = 0;
-    const late = withSession(async (t) => { setApiBase(""); throw new ApiError(401, { error: "UNAUTHENTICATED", token: t }); });
-    await expect(late).rejects.toMatchObject({ name: "InstanceChangedError" });
-    expect(paths).toEqual([]);
+    const late = withSession(async (t, c) => { if (t === "old") { setApiBase(""); throw new ApiError(401, { error: "UNAUTHENTICATED" }); } return c.runs(); });
+    await expect(late).resolves.toMatchObject({ runs: [] });
+    expect(paths).toEqual(["/testnet/v1/session", "/testnet/v1/demo/runs?limit=20&offset=0"]);
+    expect(JSON.parse(store.get("arcpreflight.session:/testnet")!).token).toBe("t2"); expect(storedSession("")).toBeNull(); // nothing was created on the new instance
   });
-  it("W01: a request issued while an operation is pinned goes to the pinned base even if the global base moved, or is refused — never silently redirected", async () => {
-    const { api, pinBase } = await import("../src/lib/api");
-    const paths: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (path: string) => { paths.push(path); return response({ runs: [] }); }));
-    setApiBase("/testnet"); const unpin = pinBase("/testnet");
-    await api.runs(); expect(paths).toEqual(["/testnet/v1/demo/runs?limit=20&offset=0"]);
-    setApiBase("");
-    await expect(api.runs()).rejects.toMatchObject({ name: "InstanceChangedError" }); unpin();
-    await api.runs(); expect(paths.at(-1)).toBe("/v1/demo/runs?limit=20&offset=0"); // unpinned: the current instance again
+  it("P1 reproduction: two operations on different instances at once each keep their own client — the shared pin stack used to send the earlier operation's request to the later operation's instance", async () => {
+    const paths: string[] = []; let releaseA!: (r: Response) => void; let releaseB!: (r: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      paths.push(path);
+      if (path === "/v1/session" && init?.method === "POST") return new Promise<Response>((r) => { releaseA = r; });
+      if (path === "/testnet/v1/session" && init?.method === "POST") return new Promise<Response>((r) => { releaseB = r; });
+      if (path === "/v1/demo/orders") return response({ orderId: "0xA", state: "CONFIRMED" }, 201);
+      if (path === "/testnet/v1/demo/orders") return response({ orderId: "0xB", state: "CONFIRMED" }, 201);
+      throw new Error(`unexpected ${path}`);
+    }));
+    setApiBase(""); const a = withSession((t, c) => c.createOrder({ payer: PAYER, proxy: "MAIN" }, t)); await new Promise((r) => setTimeout(r, 0)); // A starts on the root instance (its session is slow)
+    setApiBase("/testnet"); const b = withSession((t, c) => c.createOrder({ payer: PAYER, proxy: "MAIN" }, t)); await new Promise((r) => setTimeout(r, 0)); // the visitor switched; B starts on testnet (slow too)
+    releaseA(response({ principal: "visitor:a", token: "a" }, 201)); // A's session lands while B is in flight on the other instance
+    await expect(a).resolves.toMatchObject({ orderId: "0xA" }); // A's order went to A's instance …
+    releaseB(response({ principal: "visitor:b", token: "b" }, 201));
+    await expect(b).resolves.toMatchObject({ orderId: "0xB" }); // … and B's to B's
+    expect(paths.filter((p) => p.endsWith("/demo/orders"))).toEqual(["/v1/demo/orders", "/testnet/v1/demo/orders"]);
+    expect(JSON.parse(store.get("arcpreflight.session:root")!).token).toBe("a"); expect(JSON.parse(store.get("arcpreflight.session:/testnet")!).token).toBe("b");
+  });
+  it("P1 reproduction (the reviewer's scenario): an operation past its session boundary keeps its instance for its later requests even after another operation pinned the newly selected instance", async () => {
+    const paths: string[] = []; let gateB!: () => void; const gate = new Promise<void>((r) => { gateB = r; });
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      paths.push(path);
+      if (path.endsWith("/v1/session") && init?.method === "POST") return response({ principal: `visitor:${path}`, token: `tok:${path}` }, 201);
+      if (path.endsWith("/v1/wallet/attempts")) return response({ attempts: [] });
+      if (path.endsWith("/v1/demo/runs?limit=20&offset=0")) return response({ runs: [] });
+      throw new Error(`unexpected ${path}`);
+    }));
+    setApiBase("/testnet");
+    const b = withSession(async (t, c) => { await c.attempts(t); await gate; await c.attempts(t); return "b"; }); // B: two requests on testnet with a pause between them
+    await new Promise((r) => setTimeout(r, 0));
+    setApiBase(""); const a = withSession(async (t, c) => c.runs()); await new Promise((r) => setTimeout(r, 0)); // the visitor switched to root and started A there
+    gateB(); await expect(b).resolves.toBe("b"); await a;
+    expect(paths.filter((p) => p.endsWith("/v1/wallet/attempts"))).toEqual(["/testnet/v1/wallet/attempts", "/testnet/v1/wallet/attempts"]); // B's second request stayed on B's instance (the shared pin stack used to send it to root)
+    expect(paths.filter((p) => p.endsWith("offset=0"))).toEqual(["/v1/demo/runs?limit=20&offset=0"]);
+  });
+  it("P2: a delayed 401 for the OLD token after another tab already stored a replacement reuses that replacement — no second renewal, the valid session is never overwritten; without a replacement exactly one renewal; concurrent 401s in one tab share it", async () => {
+    fakeApi(); store.set("arcpreflight.session:root", JSON.stringify({ principal: "visitor:old", token: "vs_old" }));
+    const seen: string[] = [];
+    // this tab's request with the old token comes back 401 AFTER another tab renewed and stored vs_B
+    const result = await withSession(async (t) => { seen.push(t); if (t === "vs_old") { store.set("arcpreflight.session:root", JSON.stringify({ principal: "visitor:B", token: "vs_B" })); throw new ApiError(401, { error: "UNAUTHENTICATED" }); } return `ok:${t}`; });
+    expect(result).toBe("ok:vs_B"); expect(seen).toEqual(["vs_old", "vs_B"]); expect(posts).toEqual([]); // reused, not renewed
+    expect(JSON.parse(store.get("arcpreflight.session:root")!).token).toBe("vs_B");
+    // control: no replacement anywhere → one renewal
+    store.set("arcpreflight.session:root", JSON.stringify({ principal: "visitor:old2", token: "vs_old2" })); resetSessions();
+    expect(await withSession(async (t) => { if (t === "vs_old2") throw new ApiError(401, { error: "UNAUTHENTICATED" }); return t; })).toBe("vs_1"); expect(posts).toHaveLength(1);
+    // concurrent variant: three calls of this tab meet the dead token at once → ONE renewal, all three retried with it
+    store.set("arcpreflight.session:root", JSON.stringify({ principal: "visitor:old3", token: "vs_old3" })); resetSessions();
+    const three = await Promise.all([1, 2, 3].map(() => withSession(async (t) => { if (t === "vs_old3") throw new ApiError(401, { error: "UNAUTHENTICATED" }); return t; })));
+    expect(three).toEqual(["vs_2", "vs_2", "vs_2"]); expect(posts).toHaveLength(2);
   });
   it("W10: two fresh tabs creating a session at once end with ONE stored principal; the later writer adopts the stored session instead of overwriting it", async () => {
     let n = 0; let release!: (r: Response) => void;

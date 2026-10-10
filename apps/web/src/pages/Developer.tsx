@@ -9,7 +9,7 @@ import type { Hex as HexT } from "viem";
 import { intentDigest, policyDigest, type IntentCore } from "@arcpreflight/schema";
 import { decide } from "@arcpreflight/policy";
 import { useNet } from "../App";
-import { api, apiPath, ApiError, explorerAddr, explorerTx, type AttemptView, type BaselineRecord, type CheckRow, type OrderView, type PassportBundle } from "../lib/api";
+import { apiPath, ApiError, explorerAddr, explorerTx, type AttemptView, type BaselineRecord, type CheckRow, type OrderView, type PassportBundle } from "../lib/api";
 import { approvedBaseline, developerIntent, developerPolicy, prepareOrderQuote, quoteReady, WALLET_VALIDATION_WINDOW_SECONDS, type PreparedQuote, WALLET_REPORT_AGE_SECONDS } from "../lib/preflight";
 import { useWallet } from "../lib/wallet";
 import { purchaseReport, signFeeAuthorization, type Delivered } from "../lib/walletRun";
@@ -70,6 +70,7 @@ export default function Developer() {
   const role = net?.accounts?.orderSignerRole ?? "order-creator";
   const adminInProcess = role === "deployer-admin" || !!net?.accounts?.adminKeyInProcess;
   const netRef = useRef(net); netRef.current = net;
+  const accountRef = useRef(account); accountRef.current = account; // the payer on screen NOW: an answer for another payer never lands here (review of bf0c800, P2)
 
   // this browser's anonymous session with the selected instance (P3): created by the first paid action, reused afterwards
   const [session, setSession] = useState<Session | null>(() => storedSession());
@@ -187,27 +188,31 @@ export default function Developer() {
     const current = storedSession(); setSession(current);
     if (!current) { setMine((m) => ({ ...m, loaded: true, busy: false })); return; }
     setMine((m) => ({ ...m, busy: true, err: null }));
+    const key = hydrated.current; // the (instance, payer) these lists are for — a response that lands after either changed is dropped (review of bf0c800, P2)
     try {
-      const [o, a] = await Promise.all([withSession((t) => api.orders(t)), withSession((t) => api.attempts(t))]);
+      const [o, a] = await Promise.all([withSession((t, c) => c.orders(t)), withSession((t, c) => c.attempts(t))]);
+      if (hydrated.current !== key) return;
       setSession(storedSession());
       setMine((m) => ({ ...m, orders: o?.orders ?? [], attempts: a?.attempts ?? [], loaded: true, busy: false, err: null }));
-    } catch (e) { setMine((m) => ({ ...m, loaded: true, busy: false, err: describeError(e) })); }
+    } catch (e) { if (hydrated.current === key) setMine((m) => ({ ...m, loaded: true, busy: false, err: describeError(e) })); }
   }, []);
   const loadChecks = useCallback(async () => {
     const remembered = (known: Set<string>): CheckRow[] => rememberedChecks().filter((x) => !known.has(x.requestId)).map((x) => ({ requestId: x.requestId, clientRequestId: "", state: "NOT_UNDER_THIS_SESSION", createdAt: x.createdAt, updatedAt: x.createdAt, intentDigest: "", subject: x.subject ?? "", orderId: null, valueNativeAtomic: x.valueNativeAtomic ?? "0", reportDigest: null, payment: null, passportAvailable: false }));
     const current = storedSession(); setSession(current);
     if (!current) { setChecks((c) => ({ ...c, rows: remembered(new Set()), busy: false, loaded: true, err: null })); return; }
     setChecks((c) => ({ ...c, busy: true, err: null }));
+    const key = hydrated.current;
     try {
-      const r = await withSession((t) => api.requests(t));
+      const r = await withSession((t, c) => c.requests(t));
+      if (hydrated.current !== key) return;
       setSession(storedSession());
       setChecks((c) => ({ ...c, rows: [...r.requests, ...remembered(new Set(r.requests.map((x) => x.requestId)))], busy: false, err: null, loaded: true }));
-    } catch (e) { setChecks((c) => ({ ...c, busy: false, err: describeError(e), loaded: true })); }
+    } catch (e) { if (hydrated.current === key) setChecks((c) => ({ ...c, busy: false, err: describeError(e), loaded: true })); }
   }, []);
   const refreshOrder = useCallback(async (id?: string) => {
     const oid = id ?? order?.orderId; if (!oid) return;
     const g = wf.current;
-    try { const o = await withSession((t) => api.order(oid, t)); if (!current(g)) return; setOrder((cur) => (cur && cur.orderId.toLowerCase() === o.orderId.toLowerCase() ? o : cur)); } catch { /* keep what we have; the card says what was read */ }
+    try { const o = await withSession((t, c) => c.order(oid, t)); if (!current(g)) return; setOrder((cur) => (cur && cur.orderId.toLowerCase() === o.orderId.toLowerCase() ? o : cur)); } catch { /* keep what we have; the card says what was read */ }
   }, [order?.orderId]); // eslint-disable-line react-hooks/exhaustive-deps
   /** everything that belongs to one payer's workflow leaves the screen (the server records stay; My workflow lists them) */
   const resetVisible = () => { setOrder(null); setOrderMeta({ baselineDigest: null, proxy: null }); setApproved(false); setUnitMistake(false); setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null); setOpenSteps({}); setErr(null); };
@@ -226,18 +231,18 @@ export default function Developer() {
     let alive = true;
     (async () => {
       try {
-        const o = await withSession((t) => api.order(saved.orderId, t));
+        const o = await withSession((t, c) => c.order(saved.orderId, t));
         if (!alive) return;
         if (!same(o.payer, account)) return; // never show another payer's order as this account's
         setOrder(o); setOrderMeta({ baselineDigest: saved.baselineDigest ?? baselineDigestFor(netRef.current, o.proxy), proxy: o.proxy }); setApproved(saved.approved);
         if (saved.requestId && saved.intent) {
-          const r = await withSession((t) => api.request(saved.requestId!, t)).catch(() => null);
+          const r = await withSession((t, c) => c.request(saved.requestId!, t)).catch(() => null);
           if (!alive) return;
           const d: Delivered | null = r?.delivery === "DELIVERED" && r.report ? { report: r.report, digest: r.reportDigest, simulation: r.simulation, serviceFeeTx: r.payment?.transaction ?? null, requestId: saved.requestId } : null;
           setCheck({ intent: saved.intent, requestId: saved.requestId, quote: null, delivered: d });
         }
         if (saved.attemptId) {
-          const a = await withSession((t) => api.attempt(saved.attemptId!, t)).catch(() => null);
+          const a = await withSession((t, c) => c.attempt(saved.attemptId!, t)).catch(() => null);
           if (alive && a && same(a.payer, account)) {
             const restoredUncertain = isUncertain(a);
             setAttempt(a); setExec({ ...IDLE, phase: isTerminal(a.state) ? "done" : restoredUncertain ? "uncertain" : "idle", txHash: a.txHash });
@@ -277,7 +282,7 @@ export default function Developer() {
     // re-read that follows a purchase used to clear it, and the page decided "review required" from the gap (2026-10-09)
     setBaselineRead((b) => (b.digest === digest ? b : { digest, record: null, outcome: "loading", error: null }));
     let alive = true; let request = 0;
-    const refresh = () => { const current = ++request; return withSession((t) => approvedBaseline(digest, t))
+    const refresh = () => { const current = ++request; return withSession((t, c) => approvedBaseline(digest, t, c))
       .then((b) => { if (alive && current === request) setBaselineRead({ digest, record: b, outcome: "loaded", error: null }); })
       .catch((e) => { if (!alive || current !== request) return;
         if (e instanceof ApiError && e.status === 404) setBaselineRead({ digest, record: null, outcome: "missing", error: null }); // a definitive answer: no approved baseline
@@ -291,10 +296,11 @@ export default function Developer() {
   const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); setErr(null); try { await fn(); } catch (e: any) { setErr(describeError(e)); } finally { setBusy(null); setSession(storedSession()); } };
   const rowAction = async (id: string, fn: () => Promise<void>) => { setMine((m) => ({ ...m, rowBusy: id, rowErr: null })); try { await fn(); setMine((m) => ({ ...m, rowBusy: null })); } catch (e) { setMine((m) => ({ ...m, rowBusy: null, rowErr: describeError(e) })); } };
   const resetAll = () => { nextWorkflow(); clearWorkflow(account); resetVisible(); };
-  const createOrder = (body: OrderBody) => withSession((t) => api.createOrder(body, t));
+  const createOrder = (body: OrderBody) => withSession((t, c) => c.createOrder(body, t));
   /** 201 (confirmed), 202 (identity recorded, creation not confirmed) or a 502 that names the order: the card shows that order — never "nothing was changed" */
   const onCreated = (o: OrderAnswer) => {
     const view = orderViewFromCreated(o);
+    if (!same(view.payer, accountRef.current)) { void loadMine(); return; } // created for the payer that was connected; another one is on screen now
     setDialog(false); setOrder(view); setOrderMeta({ baselineDigest: ("baselineDigest" in o ? o.baselineDigest : null) ?? baselineDigestFor(net, view.proxy), proxy: view.proxy });
     setApproved(false); setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null); setOpenSteps({}); setErr(null);
     setSession(storedSession());
@@ -302,14 +308,14 @@ export default function Developer() {
   };
   /** owner-only bounded reconciliation of an unconfirmed creation (may hand the node the same signed transaction again; never a second order) */
   const adoptOrder = (o: OrderView) => { setOrder((cur) => (cur && same(cur.orderId, o.orderId) ? o : cur)); setMine((m) => ({ ...m, orders: m.orders.map((x) => (same(x.orderId, o.orderId) ? o : x)) })); };
-  const recoverOrder = (id: string) => run("recover-order", async () => adoptOrder(await withSession((t) => api.recoverOrder(id, t))));
-  const recoverOrderRow = (id: string) => rowAction(id, async () => adoptOrder(await withSession((t) => api.recoverOrder(id, t))));
+  const recoverOrder = (id: string) => run("recover-order", async () => adoptOrder(await withSession((t, c) => c.recoverOrder(id, t))));
+  const recoverOrderRow = (id: string) => rowAction(id, async () => adoptOrder(await withSession((t, c) => c.recoverOrder(id, t))));
   const approve = () => { if (orderConfirmed) setApproved(true); };
   const getQuote = () => run("quote", async () => {
     if (!devOrder || !policy || !account || !net) return;
     const id = ++quoteSeq.current; const draft = developerIntent(net.chainId, account, devOrder, policy, unitMistake);
     setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null);
-    const result = await withSession((t) => prepareOrderQuote(draft, devOrder.block, t, { isCurrent: () => quoteSeq.current === id }));
+    const result = await withSession((t, c) => prepareOrderQuote(draft, devOrder.block, t, { isCurrent: () => quoteSeq.current === id }, c));
     setNow(Date.now()); setCheck({ intent: result.intent, requestId: result.response.requestId, quote: result, delivered: null });
   });
   const buy = () => run("buy", async () => {
@@ -323,7 +329,7 @@ export default function Developer() {
     const g = wf.current; const requestId = check.requestId;
     let d: Delivered;
     // W05: from here the authorization may reach the service; a lost answer is an uncertain purchase, never "nothing was sent"
-    try { d = await withSession((t) => purchaseReport(check.quote!, t, payment)); }
+    try { d = await withSession((t, c) => purchaseReport(check.quote!, t, payment, { client: c })); }
     catch (e) { const why = describeError(e); if (why.code === "NETWORK" || why.code === null) throw describedError(purchaseUncertainText(requestId, why.text), "PURCHASE_UNCERTAIN", e); throw e; }
     finally { void loadChecks(); }
     if (!current(g)) return; // W03: the workflow moved on (another account, start over); the server record stands, this view is not touched
@@ -345,7 +351,7 @@ export default function Developer() {
       const g = wf.current;
       setExec({ phase: "validating", txHash: null, refusal: null, err: null }); setPassport(null); setVerification(null);
       const ev = await executeAttempt({ provider: w.provider, account, requestId: check.requestId, orderId: order.orderId, policy, withToken: withSession, onEvent: onExecEventFor(g) });
-      if (!current(g)) { void loadMine(); return; } // the account changed or the workflow was reset meanwhile: the attempt is listed under its own payer, never shown here
+      if (!current(g) || !same(ev.attempt?.payer ?? account, accountRef.current)) { void loadMine(); return; } // the account changed or the workflow was reset meanwhile: the attempt is listed under its own payer, never shown here
       if (ev.attempt) setAttempt(ev.attempt);
       void refreshOrder(); void loadMine();
     });
@@ -354,8 +360,10 @@ export default function Developer() {
     if (executionInFlight() || busy) return;
     return run("execute", async () => {
       if (!w.provider || !account) return;
+      const g = wf.current; // review of bf0c800 (P2): a resume that finishes after the payer or the workflow changed reconciles its own record only
       setAttempt(a); setExec({ phase: "prompting", txHash: null, refusal: null, err: null });
-      const ev = await sendValidatedAttempt({ provider: w.provider, account, attempt: a, withToken: withSession, onEvent: onExecEvent });
+      const ev = await sendValidatedAttempt({ provider: w.provider, account, attempt: a, withToken: withSession, onEvent: onExecEventFor(g) });
+      if (!current(g) || !same(ev.attempt?.payer ?? a.payer, accountRef.current)) { void loadMine(); return; }
       if (ev.attempt) setAttempt(ev.attempt);
       void refreshOrder(); void loadMine();
     });
@@ -364,31 +372,35 @@ export default function Developer() {
   const reconcileUncertain = (a: AttemptView) => {
     if (executionInFlight()) return;
     return run("execute", async () => {
+      const g = wf.current;
       setAttempt(a); setExec({ phase: "uncertain", txHash: a.txHash, refusal: null, err: null });
-      const ev = await reconcileUncertainAttempt({ attempt: a, withToken: withSession, onEvent: onExecEvent });
+      const ev = await reconcileUncertainAttempt({ attempt: a, withToken: withSession, onEvent: onExecEventFor(g) });
+      if (!current(g) || !same(ev.attempt?.payer ?? a.payer, accountRef.current)) { void loadMine(); return; }
       if (ev.attempt) setAttempt(ev.attempt);
       void refreshOrder(a.orderId); void loadMine();
     });
   };
   const adopt = (a: AttemptView) => {
-    setAttempt((cur) => (!cur || cur.attemptId === a.attemptId ? a : cur));
+    if (same(a.payer, accountRef.current)) setAttempt((cur) => (!cur || cur.attemptId === a.attemptId ? a : cur)); // another payer's attempt is listed, never made current
     setMine((m) => ({ ...m, attempts: m.attempts.map((x) => (x.attemptId === a.attemptId ? { ...x, ...a } : x)) }));
     // an attempt still VALIDATED after an unexplained wallet answer keeps that status, and one with a prompt marker stays uncertain: no second prompt is offered until it closes or the visitor abandons it
     setExec((x) => (attempt && attempt.attemptId !== a.attemptId ? x : { ...x, phase: isTerminal(a.state) ? "done" : x.phase === "unresolved" ? "unresolved" : x.phase === "unknown-submission" ? "unknown-submission" : x.phase === "uncertain" || isUncertain(a) ? "uncertain" : "idle", err: x.phase === "unknown-submission" && !isTerminal(a.state) ? x.err : null }));
     void refreshOrder(a.orderId);
   };
-  const abandon = (id: string) => rowAction(id, async () => adopt(await withSession((t) => api.attemptAbandon(id, t))));
-  const recover = (id: string) => rowAction(id, async () => adopt(await withSession((t) => api.attemptRecover(id, t))));
-  const observe = (id: string) => rowAction(id, async () => adopt(await withSession((t) => api.attempt(id, t))));
+  const abandon = (id: string) => rowAction(id, async () => adopt(await withSession((t, c) => c.attemptAbandon(id, t))));
+  const recover = (id: string) => rowAction(id, async () => adopt(await withSession((t, c) => c.attemptRecover(id, t))));
+  const observe = (id: string) => rowAction(id, async () => adopt(await withSession((t, c) => c.attempt(id, t))));
   /** make a listed attempt (or one remembered by this browser) the current one — the order follows it; only for this account's own attempts */
   const pick = (id: string) => rowAction(id, async () => {
-    nextWorkflow(); // W03: picking another attempt is a new workflow on screen
-    const full = await withSession((t) => api.attempt(id, t));
-    if (!same(full.payer, account)) throw new Error(`This attempt belongs to wallet ${short(full.payer, 4)}; connect that wallet to continue it. It stays listed under "other wallets in this browser".`);
+    const g = nextWorkflow(); // W03: picking another attempt is a new workflow on screen
+    const full = await withSession((t, c) => c.attempt(id, t));
+    if (!current(g)) return; // the workflow moved on while the attempt was read (review of bf0c800, P2)
+    if (!same(full.payer, accountRef.current)) throw new Error(`This attempt belongs to wallet ${short(full.payer, 4)}; connect that wallet to continue it. It stays listed under "other wallets in this browser".`);
     const pickedUncertain = isUncertain(full);
     setAttempt(full); setExec({ phase: isTerminal(full.state) ? "done" : pickedUncertain ? "uncertain" : "idle", txHash: full.txHash, refusal: null, err: null }); setPassport(null); setVerification(null); setOpenSteps({});
     if (!order || order.orderId.toLowerCase() !== full.orderId.toLowerCase()) {
-      const o = await withSession((t) => api.order(full.orderId, t));
+      const o = await withSession((t, c) => c.order(full.orderId, t));
+      if (!current(g)) return;
       setOrder(o); setOrderMeta({ baselineDigest: baselineDigestFor(net, o.proxy), proxy: o.proxy }); setApproved(true); setCheck(null);
     }
     if (pickedUncertain) void reconcileUncertain(full); // §10 item 1: listed or remembered, an attempt whose prompt was opened is reconciled, never handed to the wallet again
@@ -396,15 +408,15 @@ export default function Developer() {
   const pickOrder = (o: OrderView) => { if (!same(o.payer, account)) return; nextWorkflow(); setOrder(o); setOrderMeta({ baselineDigest: baselineDigestFor(net, o.proxy), proxy: o.proxy }); setApproved(false); setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null); setOpenSteps({}); };
   const download = () => run("passport", async () => {
     const g = wf.current; // W03: an export that lands after start over / an account change saves nothing and marks nothing done
-    if (attempt && attempt.passportAvailable) { const { __status: _s, ...bundle } = (await withSession((t) => api.attemptPassport(attempt.attemptId, t))) as any; if (!current(g)) return; const name = `arcpreflight-wallet-passport-${attempt.attemptId.slice(0, 8)}.json`; saveJson(name, bundle); setPassport({ bundle, name, kind: "attempt" }); setVerification(null); return; }
-    if (check?.delivered) { const { __status: _s, ...bundle } = (await withSession((t) => api.requestPassport(check.requestId, t))) as any; if (!current(g)) return; const name = `arcpreflight-check-passport-${check.requestId.slice(0, 8)}.json`; saveJson(name, bundle); setPassport({ bundle, name, kind: "check" }); setVerification(null); }
+    if (attempt && attempt.passportAvailable) { const { __status: _s, ...bundle } = (await withSession((t, c) => c.attemptPassport(attempt.attemptId, t))) as any; if (!current(g)) return; const name = `arcpreflight-wallet-passport-${attempt.attemptId.slice(0, 8)}.json`; saveJson(name, bundle); setPassport({ bundle, name, kind: "attempt" }); setVerification(null); return; }
+    if (check?.delivered) { const { __status: _s, ...bundle } = (await withSession((t, c) => c.requestPassport(check.requestId, t))) as any; if (!current(g)) return; const name = `arcpreflight-check-passport-${check.requestId.slice(0, 8)}.json`; saveJson(name, bundle); setPassport({ bundle, name, kind: "check" }); setVerification(null); }
   });
   // my checks (fee history) rows
   const checkRow = async (id: string, fn: () => Promise<void>) => { setChecks((c) => ({ ...c, rowBusy: id, rowErr: null })); try { await fn(); setChecks((c) => ({ ...c, rowBusy: null })); } catch (e) { setChecks((c) => ({ ...c, rowBusy: null, rowErr: describeError(e) })); } };
   const patchRow = (id: string, r: any) => setChecks((c) => ({ ...c, rows: c.rows.map((row) => (row.requestId === id ? foldRequest(row, r) : row)) }));
-  const refreshRow = (id: string) => checkRow(id, async () => patchRow(id, await withSession((t) => api.request(id, t))));
-  const recoverRow = (id: string) => checkRow(id, async () => patchRow(id, await withSession((t) => api.recoverRequest(id, t))));
-  const passportRow = (id: string) => checkRow(id, async () => { const { __status: _s, ...bundle } = (await withSession((t) => api.requestPassport(id, t))) as any; saveJson(`arcpreflight-check-passport-${id.slice(0, 8)}.json`, bundle); });
+  const refreshRow = (id: string) => checkRow(id, async () => patchRow(id, await withSession((t, c) => c.request(id, t))));
+  const recoverRow = (id: string) => checkRow(id, async () => patchRow(id, await withSession((t, c) => c.recoverRequest(id, t))));
+  const passportRow = (id: string) => checkRow(id, async () => { const { __status: _s, ...bundle } = (await withSession((t, c) => c.requestPassport(id, t))) as any; saveJson(`arcpreflight-check-passport-${id.slice(0, 8)}.json`, bundle); });
 
   const anchors = useMemo(() => ({ baselineDigests: orderMeta.baselineDigest ? [orderMeta.baselineDigest] : [], policyDigests: pDigest ? [pDigest] : [] }), [orderMeta.baselineDigest, pDigest]);
   const proxyFixture = fixtureForProxy(net, orderMeta.proxy);

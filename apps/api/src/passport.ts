@@ -68,6 +68,7 @@ export function runCostStatement(result: any, buyerRole: "project-runner" | "vis
       policy: result.policy ? { maxNativePaymentAtomic: result.policy.maxNativePaymentAtomic, maxServiceFeeTokenAtomic: result.policy.maxServiceFeeTokenAtomic } : null,
       receipts: { feeTx: receiptLike(result.feeReceipt), businessTx: receiptLike(result.businessReceipt), createOrderTx: receiptLike(result.orderCreation) },
       txs: { feeTx: result.serviceFeeTx ?? null, businessTx: result.execution?.businessTxHash ?? null, createOrderTx: result.orderCreation?.tx ?? null },
+      expected: { createOrderTx: true, feeTx: !!result.serviceFeeTx, businessTx: result.execution?.businessStatus === "SUCCESS" }, // review of bf0c800 (P2): a run's order creation is required evidence
       capturedAt: result.execution?.recordedAt ?? now(),
     });
   } catch { return null; }

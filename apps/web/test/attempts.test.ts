@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, setApiBase, type AttemptView } from "../src/lib/api";
+import { ApiError, setApiBase, type AttemptView, api, type ApiClient } from "../src/lib/api";
 import { AMBIGUOUS_OPEN_TEXT, AMBIGUOUS_TEXT, UNCERTAIN_OPEN_TEXT, UNCERTAIN_TEXT, attemptMessage, deviationRows, executeAttempt, executionInFlight, findOpenAttempt, insideWindow, isOpen, isTerminal, isUncertain, isUserRejection, pollAttempt, preSendCheck, reconcileUncertainAttempt, rememberAttempt, rememberedAttempt, rememberedAttempts, resetExecutionGuard, sendValidatedAttempt, txRequestFromPlan, windowCheck } from "../src/lib/attempts";
 import { ACCOUNT, D, MERCHANT, NOW, REQUEST, response } from "./fixtures";
 
@@ -16,7 +16,7 @@ const PLAN = { chainId: 5042002, from: ACCOUNT, type: 2 as const, to: MERCHANT, 
 const ATTEMPT = "11111111-2222-4333-8444-555555555555";
 const OTHER = "0x0000000000000000000000000000000000000b11";
 const view = (over: Partial<AttemptView> = {}): AttemptView => ({ attemptId: ATTEMPT, executionMode: "wallet", state: "VALIDATED", requestId: REQUEST, orderId: ORDER, merchant: MERCHANT, payer: ACCOUNT, amountNativeAtomic: "5000000000000000", labels: ["LIVE_REQUEST"], decision: "NO_POLICY_VIOLATION", decisionReasons: [], refusal: null, validUntil: new Date(NOW.getTime() + 60_000).toISOString(), txHash: null, nonce: null, from: null, broadcastBlock: null, businessStatus: null, businessTxHash: null, block: null, note: null, deviations: null, nextAction: "confirm in your wallet", passportAvailable: false, businessExecution: { state: "VALIDATED", txHash: null, nonce: null, broadcastBlock: null, consumedBy: null, note: null, validUntil: null }, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(), plan: PLAN, ...over });
-const withToken = async <T,>(fn: (t: string) => Promise<T>) => fn("tok");
+const withToken = async <T,>(fn: (t: string, c: ApiClient) => Promise<T>) => fn("tok", api); // the operation's client: the current instance here (review of bf0c800)
 /** a wallet that answers the pre-send reads like an extension does, and hands eth_sendTransaction to `onSend` */
 function wallet(onSend: (req: any) => Promise<any> | any, over: { accounts?: string[]; chainId?: number } = {}) {
   const sends: any[] = [];

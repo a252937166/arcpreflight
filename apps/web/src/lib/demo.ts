@@ -1,4 +1,4 @@
-import { api, ApiError, type Fixture, type Run } from "./api";
+import { api, ApiError, type ApiClient, type Fixture, type Run } from "./api";
 import { clearPendingKey, newRunKey, rememberRunKey, setPendingKey, takePendingKey } from "./runKeys";
 
 export type DemoStart = { mode: "live"; runId: string; admission: "new" | "existing"; key: string } | { mode: "sample"; run: Run; reason: string; body: any };
@@ -9,16 +9,19 @@ export type DemoStart = { mode: "live"; runId: string; admission: "new" | "exist
 export type DemoOptions = { interruptAfterBroadcast?: boolean };
 /** `interruptAfterBroadcast` (v3.3 §4): the runner persists, marks and sends as always, then stops waiting — the labelled interruption the
  *  recovery worker resolves from the recorded hash and the order state. Effective for APPROVED_PAYMENT only; the admission key rules are unchanged. */
-export async function startDemo(fixture: Fixture, key: string = takePendingKey(fixture) ?? newRunKey(), opts: DemoOptions = {}): Promise<DemoStart> {
+export async function startDemo(fixture: Fixture, key: string = takePendingKey(fixture) ?? newRunKey(), opts: DemoOptions = {}, client: ApiClient = api): Promise<DemoStart> {
+  // review of bf0c800 (P1): the whole operation — the request, the retry after a lost answer and the sample read — uses the client it was
+  // handed at the click, bound to the instance selected then; a switch meanwhile never redirects the retry (the same key on another instance
+  // would start a second run there)
   setPendingKey(fixture, key);
   let response;
-  try { response = await api.startRun(fixture, key, opts); }
+  try { response = await client.startRun(fixture, key, opts); }
   catch (error) {
     if (error instanceof ApiError) {
       if (![429, 503].includes(error.status) || !error.body?.sampleRunId) throw error;
       response = error.body;
     } else {
-      response = await api.startRun(fixture, key, opts); // lost response: same key, never a new one
+      response = await client.startRun(fixture, key, opts); // lost response: same key, never a new one, same instance
     }
   }
   if (response.runId) {
@@ -28,5 +31,5 @@ export async function startDemo(fixture: Fixture, key: string = takePendingKey(f
   clearPendingKey(fixture);
   const reason = [response.error, response.reason].filter(Boolean).join(": ") || "Live run unavailable";
   if (!response.sampleRunId) throw new Error(reason);
-  return { mode: "sample", run: await api.run(response.sampleRunId), reason, body: response };
+  return { mode: "sample", run: await client.run(response.sampleRunId), reason, body: response };
 }

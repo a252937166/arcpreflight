@@ -1493,3 +1493,65 @@ describe("2026-10-09 · an order whose creation is not confirmed never looks com
     expect(nodes(card).some((n) => typeof n.type === "function" && n.type.name === "Hex" && n.props.value === HASH)).toBe(true);
   });
 });
+
+describe("review of bf0c800 · operations bound to their instance and payer", () => {
+  const OTHER = "0x0000000000000000000000000000000000000B11";
+  const runStart = (tree: any) => nodes(tree).find((n) => n.type === "button" && n.props?.id === "run-start");
+  it("P1: a Demo start whose answer was lost retries with the same key on the instance it started on — even after the visitor switched instances meanwhile", async () => {
+    h.net.fixtures = [{ id: "CHANGED_IMPLEMENTATION", merchant: MERCHANT, title: "changed", headline: "REVIEW_REQUIRED", proxy: "CHANGED" }];
+    h.ctx = { base: "/testnet" }; setApiBase("/testnet"); memStorage();
+    const posts: { path: string; body: any }[] = []; let attempt = 0;
+    const run = { runId: REQUEST, fixture: "CHANGED_IMPLEMENTATION", state: "RUNNING", labels: ["LIVE_REQUEST"], steps: [], result: null, recovery: null };
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      if (path.endsWith("/v1/demo/run")) { posts.push({ path, body: JSON.parse(init!.body as string) }); if (attempt++ === 0) { setApiBase(""); throw new TypeError("network dropped after the request left"); } return response({ runId: REQUEST, poll: `/testnet/v1/demo/runs/${REQUEST}`, admission: "existing" }, 200); }
+      if (path.endsWith(`/v1/demo/runs/${REQUEST}`)) return response(run);
+      return response({ runs: [] });
+    }));
+    render(Demo); await flush(); await button(render(Demo), "live").props.onClick();
+    expect(posts.map((p) => p.path)).toEqual(["/testnet/v1/demo/run", "/testnet/v1/demo/run"]); // the retry went where the original went, never to the newly selected instance
+    expect(posts[1].body.clientRunRequestId).toBe(posts[0].body.clientRunRequestId);
+  });
+  it("P2: opening a finished run from history while a live run polls re-enables Run; opening a running one keeps Run disabled until that run ends", async () => {
+    h.net.fixtures = [{ id: "APPROVED_PAYMENT", merchant: MERCHANT, title: "approved", headline: "NO_POLICY_VIOLATION", proxy: "MAIN", baselineDigest: baselineHash }];
+    memStorage();
+    const mk = (id: string, state: string): any => ({ runId: id, state, fixture: "APPROVED_PAYMENT", labels: [], steps: [], createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(), expected: null, headline: null, result: null, recovery: null });
+    const A = mk("run-A", "RUNNING"), B = mk("run-B", "DONE"), C = mk("run-C", "RUNNING"); let readsC = 0;
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/v1/demo/run" && init?.method === "POST") return response({ runId: "run-A", poll: "/v1/demo/runs/run-A", admission: "new" }, 202);
+      if (path === "/v1/demo/runs/run-A") return response(A); // live and never finishing within this test
+      if (path === "/v1/demo/runs/run-B") return response(B);
+      if (path === "/v1/demo/runs/run-C") return response(++readsC < 3 ? C : { ...C, state: "DONE" });
+      return response({ runs: [], total: 0 });
+    }));
+    let tree = render(Demo); await flush(); tree = render(Demo);
+    expect(runStart(tree).props.disabled).toBe(false);
+    await runStart(tree).props.onClick(); await flush(); tree = render(Demo);
+    expect(runStart(tree).props.disabled).toBe(true); // busy while the live run polls
+    await fnNode(tree, "RunsTable").props.onView("run-B"); await flush(); tree = render(Demo);
+    expect(fnNode(tree, "RunPanel").props.run.runId).toBe("run-B");
+    expect(runStart(tree).props.disabled).toBe(false); // a finished run is on screen: Run is available again (it used to stay disabled for good)
+    await fnNode(tree, "RunsTable").props.onView("run-C"); await flush(); tree = render(Demo);
+    expect(runStart(tree).props.disabled).toBe(true); // a running one: busy, polled …
+    await vi.advanceTimersByTimeAsync(1500 * 3); await flush(); tree = render(Demo);
+    expect(fnNode(tree, "RunPanel").props.run.state).toBe("DONE"); expect(runStart(tree).props.disabled).toBe(false); // … until it ends
+  });
+  it("P2: account A's history answer landing after the connected account became B never populates B's lists; B's own listing stands", async () => {
+    memStorage({ "arcpreflight.session:root": JSON.stringify(SESSION(1)) });
+    const ORDER_A = { ...ORDER_VIEW, orderId: `0x${"a1".repeat(32)}`, payer: ACCOUNT }; const ORDER_B = { ...ORDER_VIEW, orderId: `0x${"b2".repeat(32)}`, payer: OTHER };
+    let releaseA!: (r: Response) => void; let orderLists = 0;
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (path === "/v1/demo/orders" && method === "GET") { orderLists++; return orderLists === 1 ? new Promise<Response>((r) => { releaseA = r; }) : response({ orders: [ORDER_B] }); }
+      if (path === "/v1/wallet/attempts") return response({ attempts: [] });
+      if (path === "/v1/requests") return response({ requests: [] });
+      throw new Error(`Unexpected URL: ${path}`);
+    }));
+    render(Developer); await flush(); let tree = render(Developer); // A: its order list is slow
+    expect(orderLists).toBe(1);
+    h.wallet = { ...h.wallet, account: OTHER }; render(Developer); await flush(); tree = render(Developer); // the connected account became B: B's own lists are read
+    expect(orderLists).toBe(2); expect(content(tree)).toContain(ORDER_B.orderId.slice(0, 10));
+    releaseA(response({ orders: [ORDER_A] })); await flush(); tree = render(Developer); // A's answer lands late
+    expect(content(tree)).not.toContain(ORDER_A.orderId.slice(0, 10)); // it populates nothing — not B's workflow, not "other wallets"
+    expect(content(tree)).toContain(ORDER_B.orderId.slice(0, 10)); // B's listing stands
+  });
+});

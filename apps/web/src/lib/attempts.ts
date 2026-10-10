@@ -13,13 +13,14 @@
 // first caller gets it, everyone else 409 PROMPT_CLAIMED → reconcile), the account/chain/clock are re-read after the claim call and a failed
 // re-check hands the claim back (`not-prompted`), and the wallet request carries the plan's chainId.
 import { toHex } from "viem";
-import { api, ApiError, type AttemptState, type AttemptView, type Deviations, type PromptMarker } from "./api";
+import { ApiError, type ApiClient, type AttemptState, type AttemptView, type Deviations, type PromptMarker } from "./api";
 import type { Eip1193 } from "./wallet";
 import { scopedKey } from "./storage";
 import { describeError, type Described } from "./errors";
 import { short, utc, type Tone } from "./format";
 
-export type WithToken = <T>(fn: (token: string) => Promise<T>) => Promise<T>;
+/** runs a principal-gated call: the token AND the client of the instance the operation belongs to (review of bf0c800, P1) */
+export type WithToken = <T>(fn: (token: string, client: ApiClient) => Promise<T>) => Promise<T>;
 export const OPEN_STATES: readonly AttemptState[] = ["VALIDATED", "BROADCAST_ATTEMPTED"];
 export const isOpen = (s: AttemptState | string | null | undefined) => s === "VALIDATED" || s === "BROADCAST_ATTEMPTED";
 export const isTerminal = (s: AttemptState | string | null | undefined) => !!s && !isOpen(s);
@@ -88,7 +89,7 @@ export async function pollAttempt(attemptId: string, withToken: WithToken, opts:
   const intervalMs = opts.intervalMs ?? 2000, maxMs = opts.maxMs ?? 120_000, wait = opts.wait ?? sleep, now = opts.now ?? Date.now;
   const t0 = now(); let last: AttemptView | null = null;
   for (;;) {
-    try { last = await withToken((t) => api.attempt(attemptId, t)); onTick?.(last); if (!isOpen(last.state)) return { attempt: last, settled: true }; }
+    try { last = await withToken((t, c) => c.attempt(attemptId, t)); onTick?.(last); if (!isOpen(last.state)) return { attempt: last, settled: true }; }
     catch (e) { if (e instanceof ApiError && e.status !== 429 && e.status < 500) throw e; /* transport or 5xx: keep polling */ }
     if (now() - t0 >= maxMs) return { attempt: last, settled: false };
     await wait(intervalMs);
@@ -97,9 +98,9 @@ export async function pollAttempt(attemptId: string, withToken: WithToken, opts:
 
 /** The open attempt of an order (the server allows one): the brief list row, then the full view with its plan. */
 export async function findOpenAttempt(orderId: string, withToken: WithToken): Promise<AttemptView | null> {
-  const list = await withToken((t) => api.attempts(t));
+  const list = await withToken((t, c) => c.attempts(t));
   const brief = (list.attempts ?? []).find((a) => a.orderId.toLowerCase() === orderId.toLowerCase() && isOpen(a.state));
-  return brief ? withToken((t) => api.attempt(brief.attemptId, t)) : null;
+  return brief ? withToken((t, c) => c.attempt(brief.attemptId, t)) : null;
 }
 
 export type PreSendCheck = { ok: true } | { ok: false; code: "ACCOUNT_CHANGED" | "CHAIN_CHANGED" | "WINDOW_CLOSED" | "WALLET_UNAVAILABLE" | "PROMPT_MARKER_FAILED" | "ATTEMPT_UNCERTAIN" | "PROMPT_CLAIMED"; text: string };
@@ -148,7 +149,7 @@ async function executeInner(i: ExecuteInput): Promise<ExecuteEvent> {
   const emit = (ev: ExecuteEvent) => { i.onEvent?.(ev); return ev; };
   emit({ phase: "validating", attempt: null });
   let attempt: AttemptView;
-  try { attempt = await i.withToken((t) => api.createAttempt({ requestId: i.requestId, orderId: i.orderId, policy: i.policy }, t)); }
+  try { attempt = await i.withToken((t, c) => c.createAttempt({ requestId: i.requestId, orderId: i.orderId, policy: i.policy }, t)); }
   catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.body?.error === "VALIDATION_FAILED") {
       const reasons: string[] = Array.isArray(e.body?.reasons) ? e.body.reasons : [];
@@ -195,7 +196,7 @@ async function sendInner(i: SendInput): Promise<ExecuteEvent> {
   // this call only; anyone else (another tab, a stale view, a retry) gets 409 PROMPT_CLAIMED and reconciles. A claim that cannot be written means
   // the uncertainty could not be persisted — nothing is prompted.
   const claimId = newClaimId();
-  try { const marked = await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "prompted", t, null, claimId)); rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: attempt.state, promptState: marked.prompt?.state ?? "PROMPTED" }); }
+  try { const marked = await i.withToken((t, c) => c.attemptPrompt(attempt.attemptId, "prompted", t, null, claimId)); rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: attempt.state, promptState: marked.prompt?.state ?? "PROMPTED" }); }
   catch (e) {
     if (e instanceof ApiError && e.body?.error === "PROMPT_CLAIMED") { // somebody else holds the claim: this page never prompts — it reconciles
       const held: AttemptView = e.body.attempt && typeof e.body.attempt === "object" ? { ...attempt, ...(e.body.attempt as AttemptView) } : { ...attempt, prompt: { state: "PROMPTED", at: new Date(clock()).toISOString(), detail: null } };
@@ -218,14 +219,14 @@ async function sendInner(i: SendInput): Promise<ExecuteEvent> {
     txHash = hash;
   } catch (e) {
     if (isUserRejection(e)) {
-      try { const a = await i.withToken((t) => api.attemptAbandon(attempt.attemptId, t)); rememberView(a); return emit({ phase: "abandoned", attempt: a }); }
+      try { const a = await i.withToken((t, c) => c.attemptAbandon(attempt.attemptId, t)); rememberView(a); return emit({ phase: "abandoned", attempt: a }); }
       catch (e2) { return emit({ phase: "error", attempt, error: describeError(e2) }); }
     }
     return reconcileAmbiguous(i, attempt, describeError(e), emit, claimId); // timeout, "already known", "nonce too low", network error: possibly submitted
   }
   emit({ phase: "reporting", attempt, txHash });
   let sent: AttemptView | null = null;
-  try { sent = await i.withToken((t) => api.attemptSent(attempt.attemptId, txHash, t)); rememberView(sent); }
+  try { sent = await i.withToken((t, c) => c.attemptSent(attempt.attemptId, txHash, t)); rememberView(sent); }
   catch (e) { emit({ phase: "error", attempt, txHash, error: describeError(e) }); /* the hash exists on the network; keep observing — the worker also recovers through OrderPaid */ }
   if (sent && !isOpen(sent.state)) return emit({ phase: "done", attempt: sent, txHash });
   emit({ phase: "polling", attempt: sent ?? attempt, txHash });
@@ -240,7 +241,7 @@ async function sendInner(i: SendInput): Promise<ExecuteEvent> {
  *  "nothing was sent". */
 async function handBackClaim(i: SendInput, attempt: AttemptView, claimId: string, why: Exclude<PreSendCheck, { ok: true }>, emit: (ev: ExecuteEvent) => ExecuteEvent): Promise<ExecuteEvent> {
   try {
-    const released = await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "not-prompted", t, why.code, claimId));
+    const released = await i.withToken((t, c) => c.attemptPrompt(attempt.attemptId, "not-prompted", t, why.code, claimId));
     rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: released.state, promptState: released.prompt?.state ?? null });
     return emit({ phase: "error", attempt: released, error: { text: why.text, code: why.code, raw: null } });
   } catch (e) {
@@ -258,7 +259,7 @@ async function handBackClaim(i: SendInput, attempt: AttemptView, claimId: string
 async function reconcileAmbiguous(i: SendInput, attempt: AttemptView, error: Described, emit: (ev: ExecuteEvent) => ExecuteEvent, claimId: string): Promise<ExecuteEvent> {
   emit({ phase: "unknown-submission", attempt, error });
   rememberAttempt({ attemptId: attempt.attemptId, orderId: attempt.orderId, requestId: attempt.requestId, createdAt: attempt.createdAt, state: attempt.state, promptState: "UNKNOWN_SUBMISSION" });
-  try { rememberView(await i.withToken((t) => api.attemptPrompt(attempt.attemptId, "unknown-submission", t, error.text, claimId))); } catch { /* the PROMPTED marker is already durable; reconciliation decides */ }
+  try { rememberView(await i.withToken((t, c) => c.attemptPrompt(attempt.attemptId, "unknown-submission", t, error.text, claimId))); } catch { /* the PROMPTED marker is already durable; reconciliation decides */ }
   return reconcileLoop(attempt, i.withToken, i.poll, emit, { phase: "unknown-submission", recoverEvery: 3, error });
 }
 /** recover at tick 0 (and every `recoverEvery`-th tick when > 0), observe in between, every ~2 s for up to `ambiguousMaxMs` (60 s); `done` once the
@@ -270,7 +271,7 @@ async function reconcileLoop(attempt: AttemptView, withToken: WithToken, poll: P
   for (let n = 0; ; n++) {
     try {
       const recover = n === 0 || (o.recoverEvery > 0 && n % o.recoverEvery === 0);
-      last = await withToken((t) => (recover ? api.attemptRecover(attempt.attemptId, t) : api.attempt(attempt.attemptId, t)));
+      last = await withToken((t, c) => (recover ? c.attemptRecover(attempt.attemptId, t) : c.attempt(attempt.attemptId, t)));
       rememberView(last);
       if (!isOpen(last.state)) return emit({ phase: "done", attempt: last, txHash: last.businessTxHash ?? last.txHash, error: null });
       emit({ phase: o.phase, attempt: last, txHash: last.txHash, error });

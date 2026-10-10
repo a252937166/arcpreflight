@@ -7,7 +7,7 @@ import { buildPassport, bundleToString, type PassportFiles } from "@arcpreflight
 import { writePassportDirectory } from "@arcpreflight/passport/node";
 import { verifyPassport, loadBundle, PassportLoadError, utf8Length, type Finding, type VerifierRpc } from "../src/index.js";
 import { syntheticRun, RELAYER, PAYER, MERCHANT, FEE_TX, BIZ_TX, CREATE_TX } from "../../passport/test/fixture.js";
-import { intentDigest, reportDigest, decisionDigest, finalValidationDigest, executionDigest, quoteDigest } from "@arcpreflight/schema";
+import { intentDigest, policyDigest, reportDigest, decisionDigest, finalValidationDigest, executionDigest, quoteDigest } from "@arcpreflight/schema";
 
 const statuses = (r: { findings: Finding[] }) => Object.fromEntries(r.findings.map((f) => [f.id, f.status]));
 const finding = (r: { findings: Finding[] }, id: string) => r.findings.find((f) => f.id === id)!;
@@ -410,11 +410,49 @@ describe("review of 0c0d406, P2 — the approval status expiry must agree with t
 });
 
 // ---- audit 2026-10-10: a self-consistent rewrite must not pass; the passport does not choose its asset; creation gas needs its creation
+describe("review of bf0c800 (P2) — missing required evidence never yields a complete cost statement", () => {
+  /** the review's attack: the creation evidence removed everywhere, consistently — the summary, the capture, and a rewritten statement that
+   *  no longer counts the creation gas yet still claims completeness */
+  function creationEvidenceRemoved() {
+    const f = syntheticRun("APPROVED"); const files = roundTrip(buildPassport(f.source).files);
+    const stripped = editManifest(retouch(files, (c) => {
+      const s2 = JSON.parse(c["order-summary.json"]); s2.createOrder = { tx: null, block: null, signer: null }; c["order-summary.json"] = JSON.stringify(s2, null, 2) + "\n";
+      const cost = JSON.parse(c["cost-statement.json"]); cost.operator.orderCreation = null; cost.operator.totalNativeAtomic = cost.operator.feeRelay.nativeAtomic; cost.operator.totalUsdc = cost.operator.feeRelay.usdc; cost.sources.createOrderTx = null; cost.operator.complete = true;
+      c["cost-statement.json"] = JSON.stringify(cost, null, 2) + "\n";
+      delete c["evidence/chain/create-order-tx.json"];
+    }), (m) => { m.files = m.files.filter((e: any) => e.path !== "evidence/chain/create-order-tx.json"); });
+    return { f, files: stripped };
+  }
+  it("reproduction: a passport whose creation evidence was removed consistently — summary, capture and a rewritten statement claiming completeness — fails COST_STATEMENT instead of passing with the creation gas silently gone; the control passes", async () => {
+    const { f, files } = creationEvidenceRemoved();
+    const r = await verifyPassport(files, { rpc: f.rpc(), anchors: f.anchors });
+    expect(finding(r, "FILE_INTEGRITY").status).toBe("PASS"); // the removal is self-consistent …
+    expect(finding(r, "COST_STATEMENT")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/operator\.complete: statement true, recomputed false|order-creation evidence missing/) }); // … but the total it claims complete is a subtotal
+    expect(r.counts.pass).toBeLessThan(10);
+    const control = syntheticRun("APPROVED");
+    expect(statuses(await verifyPassport(roundTrip(buildPassport(control.source).files), { rpc: control.rpc(), anchors: control.anchors }))).toEqual(ALL_PASS);
+  });
+  it("variants: an honest export without the creation transaction says `complete: false` and is UNVERIFIED, never PASS; a run that made no business payment is not asked for one (not applicable ≠ missing)", async () => {
+    const f = syntheticRun("APPROVED"); const r: any = f.source.result!;
+    const source = { ...f.source, result: { ...r, steps: r.steps.filter((s: any) => s.step !== "createOrder") }, chainCaptures: { ...f.source.chainCaptures, createOrderTx: undefined } };
+    const files = roundTrip(buildPassport(source as any).files);
+    const cost = JSON.parse(files["cost-statement.json"]);
+    expect(cost.operator.complete).toBe(false); expect(cost.notes).toContain("order-creation evidence missing: no creation transaction is recorded for this order; operator.orderCreation is null, not estimated");
+    const v = await verifyPassport(files, { rpc: f.rpc(), anchors: f.anchors });
+    expect(finding(v, "DIGEST_INTEGRITY").status).toBe("PASS");
+    expect(finding(v, "COST_STATEMENT")).toMatchObject({ status: "UNVERIFIED", detail: expect.stringContaining("required evidence missing: order creation") });
+    const review = syntheticRun("REVIEW_REQUIRED"); // nothing paid: no business hash is required, the statement is complete and verifies
+    const rv = await verifyPassport(roundTrip(buildPassport(review.source).files), { rpc: review.rpc(), anchors: review.anchors });
+    expect(JSON.parse(roundTrip(buildPassport(review.source).files)["cost-statement.json"]).buyer.complete).toBe(true);
+    expect(finding(rv, "COST_STATEMENT").status).toBe("PASS");
+  });
+});
+
 describe("audit 2026-10-10 · rehashed and lookalike passports", () => {
   /** Re-export a run whose intent was changed AFTER the fact, with every cross-link recomputed — the exporter and the digest checks are satisfied,
    *  so only a binding between the plan/transaction and the intent can catch it (VF-01). */
-  function rehashedIntent(mutate: (intent: any) => void) {
-    const f = syntheticRun("APPROVED"); const r: any = f.source.result!;
+  function rehashedIntent(mutate: (intent: any) => void, variant: "APPROVED" | "WALLET" = "APPROVED") {
+    const f = syntheticRun(variant); const r: any = f.source.result!;
     const intent = JSON.parse(JSON.stringify(r.intent)); mutate(intent);
     const iD = intentDigest(intent);
     const report = { ...r.report, intentDigest: iD }; const rD = reportDigest(report);
@@ -471,5 +509,39 @@ describe("audit 2026-10-10 · rehashed and lookalike passports", () => {
     expect(finding(await verifyPassport(mistargeted, { rpc: rpc3 as any, anchors: f.anchors }), "COST_STATEMENT")).toMatchObject({ status: "FAIL", detail: expect.stringContaining("not the merchant") });
     const dropped = await verifyPassport(files, { rpc: f.rpc({ drop: [CREATE_TX.toLowerCase()] }), anchors: f.anchors }); // creation unavailable: UNVERIFIED, never an asserted cost
     expect(finding(dropped, "COST_STATEMENT").status).toBe("UNVERIFIED");
+  });
+  describe("review of bf0c800 (P1) — every receipt references the one recomputed, anchored policy", () => {
+    const OTHER_POLICY = ("0x" + "77".repeat(32)) as `0x${string}`;
+    it("reproduction: a rehashed intent that names another policy fails DIGEST_INTEGRITY on intent.policyDigest although decision, validation and execution still name the anchored one — the unchanged control passes every finding", async () => {
+      const { f, files } = rehashedIntent((i) => { i.policyDigest = OTHER_POLICY; });
+      const r = await verifyPassport(files, { rpc: f.rpc(), anchors: f.anchors });
+      expect(finding(r, "DIGEST_INTEGRITY")).toMatchObject({ status: "FAIL", detail: expect.stringMatching(/intent\.policyDigest: 0x7777/) });
+      expect(finding(r, "APPROVAL_SOURCE").status).toBe("PASS"); // the anchored policy.json is intact; the intent simply does not reference it
+      const control = syntheticRun("APPROVED");
+      expect(statuses(await verifyPassport(roundTrip(buildPassport(control.source).files), { rpc: control.rpc(), anchors: control.anchors }))).toEqual(ALL_PASS);
+    });
+    it("variants: a wallet-mode passport is bound the same way; with policy.json omitted the decision, validation and execution must still agree with the intent's reference; a consistent rehash to an unanchored policy is caught by APPROVAL_SOURCE", async () => {
+      const wallet = rehashedIntent((i) => { i.policyDigest = OTHER_POLICY; }, "WALLET");
+      expect(finding(await verifyPassport(wallet.files, { rpc: wallet.f.rpc(), anchors: wallet.f.anchors }), "DIGEST_INTEGRITY").detail).toMatch(/intent\.policyDigest/);
+      const { f, files } = rehashedIntent((i) => { i.policyDigest = OTHER_POLICY; });
+      const noPolicy = editManifest(files, (m) => { m.files = m.files.filter((e: any) => e.path !== "policy.json"); }); delete noPolicy["policy.json"];
+      const r = await verifyPassport(noPolicy, { rpc: f.rpc(), anchors: f.anchors });
+      expect(finding(r, "FILE_INTEGRITY").status).toBe("PASS"); // the omission itself is well-formed …
+      expect(finding(r, "DIGEST_INTEGRITY").detail).toMatch(/decision\.policyDigest: .* != 0x7777/); // … but the receipts reference a policy the intent does not
+      expect(finding(r, "DIGEST_INTEGRITY").detail).toMatch(/execution\.policyDigest/);
+      // every reference rewritten consistently to another policy, with a matching policy.json: digests hold, so only the anchors can refuse it
+      const g = syntheticRun("APPROVED"); const res: any = g.source.result!;
+      const policy = { ...res.policy, maxNativePaymentAtomic: "60000000000000000" }; const pD = policyDigest(policy);
+      const intent = { ...res.intent, policyDigest: pD }; const iD = intentDigest(intent);
+      const report = { ...res.report, intentDigest: iD }; const rD = reportDigest(report);
+      const quote = { ...res.quote, intentDigest: iD, reportDigest: rD, coverageDigest: rD };
+      const decision = { ...res.decision, intentDigest: iD, reportDigest: rD, policyDigest: pD }; const dD = decisionDigest(decision);
+      const fv = { ...res.finalValidation, intentDigest: iD, reportDigest: rD, decisionDigest: dD, policyDigest: pD }; const fvD = finalValidationDigest(fv);
+      const execution = { ...res.execution, intentDigest: iD, reportDigest: rD, decisionDigest: dD, finalValidationDigest: fvD, policyDigest: pD }; const eD = executionDigest(execution);
+      const source = { ...g.source, result: { ...res, policy, policyDigest: pD, intent, intentDigest: iD, report, reportDigest: rD, quote, quoteDigest: quoteDigest(quote), decision, decisionDigest: dD, finalValidation: fv, execution, executionDigest: eD }, payment: { ...g.source.payment!, quote } };
+      const consistent = await verifyPassport(roundTrip(buildPassport(source as any).files), { rpc: g.rpc(), anchors: g.anchors });
+      expect(finding(consistent, "DIGEST_INTEGRITY").status).toBe("PASS");
+      expect(finding(consistent, "APPROVAL_SOURCE")).toMatchObject({ status: "FAIL", detail: expect.stringContaining("is not an anchored policy") });
+    });
   });
 });

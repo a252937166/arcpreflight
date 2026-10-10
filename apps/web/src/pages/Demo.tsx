@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useNet } from "../App";
-import { api, type Fixture, type FixtureInfo, type Run, type RunSummary } from "../lib/api";
+import { apiFor, type Fixture, type FixtureInfo, type Run, type RunSummary } from "../lib/api";
 import { startDemo, type DemoOptions } from "../lib/demo";
 import { describeBody, describeError, type Described } from "../lib/errors";
 import { useWallet } from "../lib/wallet";
@@ -42,7 +42,10 @@ export const orderedFixtures = (list: FixtureInfo[] | undefined): FixtureInfo[] 
 export const WATCH_LABEL = "Watch a project-funded demo", TRY_LABEL = "Try with my wallet";
 
 export default function Demo() {
-  const { net, refresh, select, instances = [], link = (to: string) => to } = useNet();
+  const { net, refresh, select, instances = [], link = (to: string) => to, base = "" } = useNet();
+  // review of bf0c800 (P1): one client bound to the instance this page was mounted for — a start, its retry after a lost answer, its polls and
+  // the history reads all go there; a switch meanwhile remounts the page and never redirects an operation in flight
+  const client = useMemo(() => apiFor(base), [base]);
   const w = useWallet();
   const [params, setParams] = useSearchParams();
   const initial = (params.get("fixture") as Fixture | null) ?? DEFAULT_SCENARIO;
@@ -85,11 +88,11 @@ export default function Demo() {
   const feeText = feeUsdcText(net);
   const orderText = demoOrderUsdcText(net);
 
-  const loadRuns = useCallback(() => api.runs(PAGE, 0).then((r) => setHistory({ runs: r.runs ?? [], total: r.total ?? (r.runs ?? []).length, more: false })).catch(() => {}), []);
+  const loadRuns = useCallback(() => client.runs(PAGE, 0).then((r) => setHistory({ runs: r.runs ?? [], total: r.total ?? (r.runs ?? []).length, more: false })).catch(() => {}), [client]);
   const loadMore = useCallback(() => {
     setHistory((h) => ({ ...h, more: true }));
-    api.runs(PAGE, history.runs.length).then((r) => setHistory((h) => ({ runs: [...h.runs, ...(r.runs ?? []).filter((x) => !h.runs.some((y) => y.runId === x.runId))], total: r.total ?? h.total, more: false }))).catch(() => setHistory((h) => ({ ...h, more: false })));
-  }, [history.runs.length]);
+    client.runs(PAGE, history.runs.length).then((r) => setHistory((h) => ({ runs: [...h.runs, ...(r.runs ?? []).filter((x) => !h.runs.some((y) => y.runId === x.runId))], total: r.total ?? h.total, more: false }))).catch(() => setHistory((h) => ({ ...h, more: false })));
+  }, [history.runs.length, client]);
   useEffect(() => { loadRuns(); }, [loadRuns]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   useEffect(() => { if (scrollKey) panelRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }); }, [scrollKey]);
@@ -100,7 +103,7 @@ export default function Demo() {
       if (gen !== runGen.current) { timer.current = null; return; } // another run was selected: this loop ends
       let next: number | null = POLL_MS.RUNNING;
       try {
-        const r = await api.run(id);
+        const r = await client.run(id);
         if (!showRun(gen, r)) { timer.current = null; return; } // landed after a new selection: dropped, nothing rescheduled
         if (r.state === "RUNNING") next = POLL_MS.RUNNING;
         else if (r.state === "RECONCILE_REQUIRED" && Date.now() - started < RECONCILE_WATCH_MS) { next = POLL_MS.RECONCILE_REQUIRED; setBusy(false); }
@@ -110,13 +113,13 @@ export default function Demo() {
       if (next !== null) timer.current = setTimeout(tick, next); else timer.current = null;
     };
     void tick();
-  }, [loadRuns, refresh]);
+  }, [loadRuns, refresh, client]);
   const fresh = () => { setOrigin(null); setReason(null); setVisited([]); resetLocal(); };
   const start = async (opts: DemoOptions = {}) => {
     const gen = selectRun(null);
     setBusy(true); setNotice(null); setSample(false); setRun(null); walletRun.reset(); fresh();
     try {
-      const r = await startDemo(effective, undefined, opts);
+      const r = await startDemo(effective, undefined, opts, client);
       if (gen !== runGen.current) return; // the visitor moved on while the admission was pending: this start is not shown
       if (r.mode === "live") {
         shownRunId.current = r.runId;
@@ -142,7 +145,10 @@ export default function Demo() {
   };
   const open = async (id: string) => {
     const gen = selectRun(id); setSample(false); setNotice(null); walletRun.reset(); fresh(); setOrigin("history");
-    try { const r = await api.run(id); if (!showRun(gen, r)) return; if (r.state === "RUNNING" || r.state === "RECONCILE_REQUIRED") { setBusy(r.state === "RUNNING"); poll(id, gen); } } catch { /* ignore */ }
+    // review of bf0c800 (P2): `busy` follows the run that is now selected — in EVERY state. Cancelling the previous live run's poll removed the
+    // callback that would have cleared it, so opening a finished run from history used to leave Run disabled for good.
+    try { const r = await client.run(id); if (!showRun(gen, r)) return; setBusy(r.state === "RUNNING"); if (r.state === "RUNNING" || r.state === "RECONCILE_REQUIRED") poll(id, gen); }
+    catch { if (gen === runGen.current) setBusy(false); }
   };
   const guide = useMemo(() => guideFor(run, net, { ...(local ?? {}), visited }), [run, net, local, visited]);
   const onGo = useCallback((id: CheckpointId | null) => { if (id) setVisited((v) => (v.includes(id) ? v : [...v, id])); }, []);

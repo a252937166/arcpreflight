@@ -111,10 +111,51 @@ describe("self-relayed EIP-3009 settlement", () => {
   it("audit 2026-10-10 (API-02): an event whose transaction body is not readable yet is also kept as the candidate (no scan past it); a reverted candidate is dropped and the search continues", async () => {
     rpc.authUsed = true; rpc.head = 1_500n;
     rpc.logs = logsFor(OTHER_TX, payload.authorization, 950n); // event visible, body not served
-    expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("body is not readable yet") });
+    expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("body or receipt is not readable yet") });
     expect(saved()).toMatchObject({ candidate_tx_hash: OTHER_TX.toLowerCase() }); expect(saved().scanned_to_block ?? null).toBeNull();
-    rpc.receipts.set(OTHER_TX, receipt(OTHER_TX, "reverted", [], 950n)); // the candidate turns out reverted: not a settlement
+    rpc.receipts.set(OTHER_TX, receipt(OTHER_TX, "reverted", [], 950n)); // the receipt is readable before the body: nothing is decided from it alone
+    expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("body or receipt is not readable yet") }); expect(saved().candidate_tx_hash).toBe(OTHER_TX.toLowerCase());
+    rpc.txs.set(OTHER_TX, { to: USDC, input: encodeTransferWithAuthorization(payload.authorization, payload.signature) }); // the body: a direct call for this authorization, and it reverted → not a settlement
     const r = await settle(); expect(r.state).toBe("PENDING"); expect(saved().candidate_tx_hash ?? null).toBeNull();
+  });
+  describe("review of 40c5858 — fee recovery validates the transaction body before completing (P1)", () => {
+    const consumedAt950 = () => { rpc.authUsed = true; rpc.head = 1_500n; rpc.logs = logsFor(OTHER_TX, payload.authorization, 950n); };
+    it("reproduction: a candidate stored while its body was unreadable never completes from its receipt logs once the body turns out to be a WRAPPER call", async () => {
+      consumedAt950();
+      expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("body or receipt is not readable yet") }); // discovered, body not served
+      expect(saved()).toMatchObject({ candidate_tx_hash: OTHER_TX.toLowerCase() });
+      const WRAPPER = "0x00000000000000000000000000000000000000ee";
+      rpc.txs.set(OTHER_TX, { to: WRAPPER, input: "0x12345678" }); // a router/wrapper executed the authorization; the USDC logs still match
+      rpc.receipts.set(OTHER_TX, receipt(OTHER_TX, "success", rpc.logs, 950n));
+      const r = await settle();
+      expect(r.state).toBe("PENDING"); expect(r.reason).toMatch(/unrecognised shape .* manual reconciliation required/);
+      expect(saved()).toMatchObject({ state: "PENDING", candidate_tx_hash: OTHER_TX.toLowerCase() }); // kept as the candidate, not completed, not dropped
+      expect(saved().settlement_evidence_json ?? null).toBeNull();
+      expect(saved().scanned_to_block ?? null).toBeNull(); expect(rpc.getLogsCalls).toHaveLength(1); // the scan never moves past it
+      // a direct USDC call whose authorization fields differ (another validBefore) is not this authorization's settlement either
+      const other = { ...payload.authorization, validBefore: String(Number(payload.authorization.validBefore) + 1) };
+      rpc.txs.set(OTHER_TX, { to: USDC, input: encodeTransferWithAuthorization(other, payload.signature) });
+      expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("mismatched calldata") });
+      expect(saved()).toMatchObject({ state: "PENDING", candidate_tx_hash: OTHER_TX.toLowerCase() });
+    });
+    it("control: the same candidate with a DIRECT call whose calldata equals the authorization completes from its receipt; a reverted direct call is dropped", async () => {
+      consumedAt950();
+      expect((await settle()).state).toBe("PENDING");
+      rpc.txs.set(OTHER_TX, { to: USDC, input: encodeTransferWithAuthorization(payload.authorization, payload.signature) });
+      rpc.receipts.set(OTHER_TX, receipt(OTHER_TX, "success", rpc.logs, 950n));
+      expect(await settle()).toMatchObject({ state: "COMPLETED", txHash: OTHER_TX });
+      expect(JSON.parse(saved().settlement_evidence_json).transactionHash).toBe(OTHER_TX); expect(rpc.sent).toHaveLength(0);
+    });
+    it("interrupted variant: the receipt is readable while the body still is not (a node serving receipts first) — the payment stays PENDING until the body can be validated", async () => {
+      consumedAt950();
+      rpc.receipts.set(OTHER_TX, receipt(OTHER_TX, "success", rpc.logs, 950n)); // receipt served, body not
+      expect(await settle()).toMatchObject({ state: "PENDING", reason: expect.stringContaining("body or receipt is not readable yet") });
+      expect(saved()).toMatchObject({ state: "PENDING", candidate_tx_hash: OTHER_TX.toLowerCase() }); expect(saved().settlement_evidence_json ?? null).toBeNull();
+      expect(await settle()).toMatchObject({ state: "PENDING" }); // a restart: still pending, still the same candidate, the scan untouched
+      expect(rpc.getLogsCalls).toHaveLength(1); expect(saved().scanned_to_block ?? null).toBeNull();
+      rpc.txs.set(OTHER_TX, { to: USDC, input: encodeTransferWithAuthorization(payload.authorization, payload.signature) });
+      expect(await settle()).toMatchObject({ state: "COMPLETED", txHash: OTHER_TX });
+    });
   });
   it("keeps a consumed authorization PENDING until evidence is located, advancing the scan window without rescanning", async () => {
     rpc.authUsed = true; rpc.head = 1_500n; // consumed before we ever sent anything; no logs in range yet

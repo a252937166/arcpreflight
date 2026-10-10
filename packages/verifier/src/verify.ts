@@ -169,13 +169,17 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
     // audit 2026-10-10 (VF-02): the quote's asset and network are the canonical USDC and CAIP-2 of the intent's chain, never the passport's own choice
     { const canon = canonicalArc(intent.chainId); if (canon && payment?.quote) { if (!sameAddr(payment.quote.asset, canon.usdc)) digestProblems.push(`quote.asset ${payment.quote.asset} is not the canonical Arc USDC ${canon.usdc}`); if (low(payment.quote.network) !== canon.caip2) digestProblems.push(`quote.network ${payment.quote.network} != ${canon.caip2}`); } }
     if (report?.intentDigest) link("report.intentDigest", report.intentDigest, D("intent.json"));
+    // review of bf0c800 (P1): the intent, the decision, the final validation and the execution all reference ONE policy — the recomputed
+    // policy.json (which APPROVAL_SOURCE anchors); without policy.json the receipts must at least agree with the intent's reference
+    const policyRef = policy ? D("policy.json") : intent.policyDigest;
+    if (policy) link("intent.policyDigest", intent.policyDigest, policyRef);
     if (baseline) { link("baseline digest vs intent.baselineDigest", D("baseline.json"), intent.baselineDigest); if (!sameAddr(baseline.subject, intent.to)) digestProblems.push("baseline.subject != intent.to"); if (baseline.chainId !== intent.chainId) digestProblems.push("baseline.chainId != intent.chainId"); }
-    if (decision) { link("decision.intentDigest", decision.intentDigest, D("intent.json")); link("decision.reportDigest", decision.reportDigest, D("report.json")); link("decision.baselineDigest", decision.baselineDigest, intent.baselineDigest); if (policy) link("decision.policyDigest", decision.policyDigest, D("policy.json")); }
-    if (fv) { link("finalValidation.intentDigest", fv.intentDigest, D("intent.json")); link("finalValidation.reportDigest", fv.reportDigest, D("report.json")); link("finalValidation.decisionDigest", fv.decisionDigest, D("decision.json")); link("finalValidation.baselineDigest", fv.baselineDigest, intent.baselineDigest);
+    if (decision) { link("decision.intentDigest", decision.intentDigest, D("intent.json")); link("decision.reportDigest", decision.reportDigest, D("report.json")); link("decision.baselineDigest", decision.baselineDigest, intent.baselineDigest); link("decision.policyDigest", decision.policyDigest, policyRef); }
+    if (fv) { link("finalValidation.intentDigest", fv.intentDigest, D("intent.json")); link("finalValidation.reportDigest", fv.reportDigest, D("report.json")); link("finalValidation.decisionDigest", fv.decisionDigest, D("decision.json")); link("finalValidation.baselineDigest", fv.baselineDigest, intent.baselineDigest); link("finalValidation.policyDigest", fv.policyDigest, policyRef);
       if (!plan) digestProblems.push("final-validation.json present without transaction-plan.json"); else link("finalValidation.transactionPlanDigest", fv.transactionPlanDigest, D("transaction-plan.json"));
       if (fv.snapshot?.chainId !== intent.chainId) digestProblems.push("final validation snapshot chain != intent chain"); }
     if (execution) {
-      link("execution.intentDigest", execution.intentDigest, D("intent.json")); link("execution.reportDigest", execution.reportDigest, D("report.json")); link("execution.decisionDigest", execution.decisionDigest, D("decision.json")); link("execution.baselineDigest", execution.baselineDigest, intent.baselineDigest); if (policy) link("execution.policyDigest", execution.policyDigest, D("policy.json"));
+      link("execution.intentDigest", execution.intentDigest, D("intent.json")); link("execution.reportDigest", execution.reportDigest, D("report.json")); link("execution.decisionDigest", execution.decisionDigest, D("decision.json")); link("execution.baselineDigest", execution.baselineDigest, intent.baselineDigest); link("execution.policyDigest", execution.policyDigest, policyRef);
       if (fv || execution.finalValidationDigest) link("execution.finalValidationDigest", execution.finalValidationDigest, D("final-validation.json"));
       if (plan || execution.transactionPlanDigest) link("execution.transactionPlanDigest", execution.transactionPlanDigest, D("transaction-plan.json"));
       const pc = D("evidence/postcondition.json");
@@ -479,6 +483,15 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
     const fee = await fetchFor("fee relay", feeSrc, cost.operator?.feeRelay, cost.operator?.feeRelay?.address);
     const biz = await fetchFor("business payment", bizSrc, cost.buyer?.businessGas, cost.buyer?.address);
     const create = await fetchFor("order creation", createSrc, cost.operator?.orderCreation, cost.operator?.orderCreation?.address);
+    // review of bf0c800 (P2): what this passport MUST account for — a run created its order, a paid payment has a hash, a settled fee its
+    // settlement. A required source that the passport does not record at all is missing evidence: the recomputed total is incomplete (a
+    // statement that still claims completeness differs from the recomputation and fails), and the finding is never a PASS.
+    const settledFee = payment?.settlement?.state === "COMPLETED" || !!feeSrc;
+    const expected = { createOrderTx: manifest.subject?.kind !== "paid-check", feeTx: settledFee, businessTx: execution.businessStatus === "SUCCESS" };
+    const requiredMissing: string[] = [];
+    if (expected.createOrderTx && !createSrc) requiredMissing.push("order creation: no creation transaction is recorded (a run always created its order) — the operator total is a known subtotal, not the cost");
+    if (expected.businessTx && !bizSrc) requiredMissing.push("business payment: recorded as SUCCESS without a transaction hash — the buyer total is a known subtotal");
+    if (expected.feeTx && !feeSrc) requiredMissing.push("fee relay: the check fee is recorded as settled without a settlement transaction — the operator total is a known subtotal");
     // audit 2026-10-10 (VF-03): the order creation's gas is attributed only to THIS order's creation — a transaction to the merchant whose
     // calldata is createOrder(orderId, payer, amount) for the intent's order, that succeeded and emitted OrderCreated; never the fee relay or the payment
     if (createSrc) {
@@ -499,7 +512,7 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
     if (!missing) {
       try {
         const toAddr = (a: string | null): Hex | null => (a && HEX40.test(a) ? (getAddress(a) as Hex) : null);
-        const settled = payment?.settlement?.state === "COMPLETED" || !!feeSrc;
+        const settled = settledFee;
         const recomputedFull = costStatement({
           buyer: getAddress(intent.from) as Hex, buyerRole: buyerRoleOf(manifest.subject?.kind),
           relayer: toAddr(fee.sender) ?? (payment?.settlement?.relayer ?? null),
@@ -513,6 +526,7 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
           txs: { feeTx: feeSrc, businessTx: bizSrc, createOrderTx: createSrc },
           unresolvedReservationNativeAtomic: "0", // never the statement's own value
           capturedAt: typeof cost.capturedAt === "string" ? cost.capturedAt : undefined,
+          expected,
         });
         // a 1.0 statement predates the completeness flags and the buyer role: compare it against the 1.0 projection of the recomputation
         const recomputed: any = cost.costStatementVersion === "1.0"
@@ -524,7 +538,8 @@ export async function verifyPassport(files: PassportFiles, opts: VerifyOptions =
         if (!problems.length) notes.unshift(`recomputed from intent, execution, payment, plan, policy and the three receipts: buyer total ${recomputed.buyer.totalUsdc} USDC (principal ${recomputed.buyer.businessPrincipal.usdc}, check fee ${recomputed.buyer.checkFee?.usdc ?? "0"}, gas ${recomputed.buyer.businessGas?.usdc ?? "none"}), operator total ${recomputed.operator.totalUsdc} USDC, authorized maximum gas ${recomputed.authorizedMaximum.businessGasNativeAtomic ?? "none"} native units`);
       } catch (e) { missing++; notes.push(`statement could not be recomputed from the records: ${errText(e)}`); }
     }
-    set("COST_STATEMENT", problems.length ? "FAIL" : missing || reservationUnverified ? "UNVERIFIED" : "PASS", problems.length ? list(problems) : missing ? list(notes) : reservationUnverified ? [`every field except the unresolved reservation matches the recomputation`, ...notes].join("; ") : [`statement recomputed from the passport's own records and the receipts matches the statement field by field (buyer ${cost.buyer?.address})`, ...notes].join("; "));
+    set("COST_STATEMENT", problems.length ? "FAIL" : missing || reservationUnverified || requiredMissing.length ? "UNVERIFIED" : "PASS",
+      problems.length ? list(problems) : missing ? list(notes) : requiredMissing.length ? [`required evidence missing: ${requiredMissing.join("; ")}`, ...notes].join("; ") : reservationUnverified ? [`every field except the unresolved reservation matches the recomputation`, ...notes].join("; ") : [`statement recomputed from the passport's own records and the receipts matches the statement field by field (buyer ${cost.buyer?.address})`, ...notes].join("; "));
   }
   return finish(manifest);
 }

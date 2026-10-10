@@ -196,6 +196,8 @@ export function buildPassport(source: PassportSource): BuiltPassport {
       policy: { maxNativePaymentAtomic: r.policy.maxNativePaymentAtomic, maxServiceFeeTokenAtomic: r.policy.maxServiceFeeTokenAtomic },
       receipts: { feeTx: receiptOf(caps.feeTx), businessTx: receiptOf(caps.businessTx), createOrderTx: receiptOf(caps.createOrderTx) },
       txs: { feeTx, businessTx, createOrderTx: (createStep?.tx as Hex | undefined) ?? null }, capturedAt: createdAt,
+      // a run always created its order and, when it paid, has a business hash; a settled fee has its settlement (review of bf0c800, P2)
+      expected: { createOrderTx: true, feeTx: settlement?.state === "COMPLETED" || !!feeTx, businessTx: r.execution.businessStatus === "SUCCESS" },
     });
     add("cost-statement.json", pretty(cost), null);
     add("recovery.json", pretty(recoverySummary(r.attemptId, steps, r.execution, source.reconciliation ?? [])), null);

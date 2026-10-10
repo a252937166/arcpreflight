@@ -16,7 +16,7 @@ import crypto from "node:crypto";
 import { resolve } from "node:path";
 import { createPublicClient, http, keccak256, toHex, type Chain, type Hex, type PublicClient } from "viem";
 import { arc } from "viem/chains";
-import { ARC, OutflowMeter, pinCaps, checkStep, beginMeasured, updateMeasured, noteOpen, endStep } from "@arcpreflight/client";
+import { ARC, OutflowMeter, pinCaps, checkStep, beginMeasured, updateMeasured, noteOpen, relabelOpen, openIdTags, endStep } from "@arcpreflight/client";
 import { openPlan } from "../lib/plan-ledger.js";
 import { SLOTS, slotToAddress } from "@arcpreflight/observer";
 import { PAY_SELECTOR } from "@arcpreflight/policy";
@@ -275,8 +275,42 @@ async function awaitRun(api: string, runId: string): Promise<any> {
   return body;
 }
 
-async function main(): Promise<number> {
-  const EXECUTE = process.argv.includes("--execute");
+/** One planned run: round `round` of fixture `fixture`. Its durable identity in the plan record (review of bf0c800, P1) is
+ *  `run-<round>-<fixture>:key:<admission key>` — written BEFORE the admission request leaves — and `:run:<run id>` once the server named
+ *  the run. A restart reads the fixture back from the id and re-sends exactly that operation; the 40c5858 format (`key:<key>` only) lost it. */
+export type Position = { round: number; fixture: FixtureId };
+export const positionId = (p: Position) => `run-${p.round}-${p.fixture}`;
+export function parseOpenId(id: string): { position: Position | null; key: string | null; runId: string | null } {
+  const { base, tags } = openIdTags(id);
+  const m = /^run-(\d+)-([A-Z_]+)$/.exec(base);
+  const position = m && (FIXTURES as readonly string[]).includes(m[2]) ? { round: Number(m[1]), fixture: m[2] as FixtureId } : null;
+  const legacyKey = base === "key" ? id.slice("key:".length) : null; // the 40c5858 format: the key alone, no fixture, no round
+  return { position, key: tags.key ?? legacyKey, runId: tags.run ?? null };
+}
+/** what the server answered to a re-sent admission: the run it names, a refusal that proves nothing started, or an answer that proves nothing */
+export type ReplayOutcome = { kind: "run"; runId: string; admission: "new" | "existing" | string } | { kind: "nothing-started"; detail: string } | { kind: "retry"; detail: string; waitMs: number } | { kind: "ambiguous"; detail: string };
+/** Classifies one answer to a re-sent admission (review of bf0c800, P1). The admission look-up by key is the FIRST thing the server does
+ *  once past the gate, so a cooldown, busy, budget or fixtures-missing refusal proves the key was never bound — nothing started. The gate
+ *  (503 EXECUTION_GATED) is checked before that look-up, a conflict means the key is bound to another scenario, a 4xx/5xx of another kind or
+ *  a lost answer proves nothing: those keep the reservation. */
+export function classifyReplay(res: { status: number; body: any } | null, cooldownMs: number): ReplayOutcome {
+  if (!res) return { kind: "ambiguous", detail: "no answer (lost response): the original admission may stand" };
+  if ((res.status === 200 || res.status === 202) && res.body?.runId) return { kind: "run", runId: res.body.runId, admission: res.body.admission ?? (res.status === 200 ? "existing" : "new") };
+  const err = res.body?.error;
+  if (res.status === 429 && (err === "DEMO_COOLDOWN" || err === "DEMO_BUSY")) return { kind: "retry", detail: `${err}: nothing started; asked again after the cooldown`, waitMs: err === "DEMO_BUSY" ? 5_000 : cooldownMs };
+  if (res.status === 429 && err === "DEMO_BUDGET_EXHAUSTED") return { kind: "nothing-started", detail: `${err}: the key was never bound (the admission look-up precedes the budget check)` };
+  if (res.status === 503 && err === "DEMO_UNAVAILABLE") return { kind: "nothing-started", detail: `${err}: the key was never bound (the admission look-up precedes the readiness checks)` };
+  if (res.status === 503 && err === "EXECUTION_GATED") return { kind: "ambiguous", detail: "EXECUTION_GATED: the gate is checked before the admission look-up, so the original admission cannot be checked (is ADMIN_TOKEN set and accepted?)" };
+  if (res.status === 409) return { kind: "ambiguous", detail: `${err ?? 409}: the key is bound to another scenario on the server — the record and the server disagree` };
+  return { kind: "ambiguous", detail: `HTTP ${res.status} ${JSON.stringify(res.body)?.slice(0, 120)}: proves nothing about the original admission` };
+}
+
+/** test seams: the heavy per-run verifications (chain re-reads, passport export) can be replaced when the recovery flow itself is under test */
+export type Deps = { verifyRun: typeof verifyRun; verifyRecovery: typeof verifyRecovery; verifyRunPassport: typeof verifyRunPassport; sleep: (ms: number) => Promise<void> };
+
+export async function main(deps: Partial<Deps> = {}, argv: string[] = process.argv): Promise<number> {
+  const vRun = deps.verifyRun ?? verifyRun, vRec = deps.verifyRecovery ?? verifyRecovery, vPass = deps.verifyRunPassport ?? verifyRunPassport, pause = deps.sleep ?? sleep;
+  const EXECUTE = argv.includes("--execute");
   const api = (process.env.API_URL ?? "https://arcpreflight.axiqo.xyz").replace(/\/+$/, "");
   if (EXECUTE && !process.env.API_URL) throw new Refused("--execute needs API_URL set explicitly (there is no default target for spending runs)");
   const repeats = Number(process.env.SELFTEST_REPEATS ?? 3);
@@ -292,6 +326,7 @@ async function main(): Promise<number> {
   const marginS = Number(process.env.COOLDOWN_MARGIN_SECONDS ?? 3);
   const rpc = process.env.ARC_RPC_URL ?? ARC.mainnet.rpc;
   const token = process.env.DEMO_RUNNER_TOKEN || undefined;
+  const adminHeaders = () => ({ "content-type": "application/json", ...(process.env.ADMIN_TOKEN ? { "x-admin-token": process.env.ADMIN_TOKEN } : {}) });
 
   const first = await getJson(`${api}/v1/network`).catch((e) => { throw new Refused(`GET ${api}/v1/network failed: ${e?.message ?? e}`); });
   const net = first.body as Network | null;
@@ -317,13 +352,26 @@ async function main(): Promise<number> {
   const cooldown = Number.isFinite(net.budget.clientCooldownSeconds) ? net.budget.clientCooldownSeconds! : FALLBACK_COOLDOWN_SECONDS;
   const [runnerBal, creatorBal] = await Promise.all([client.getBalance({ address: ACCOUNTS.demoRunner }), client.getBalance({ address: ACCOUNTS.orderCreator })]);
 
+  // ---- what previous invocations left (review of bf0c800, P1): completed positions are kept, open ones are recovered FIRST, and only the
+  //      remaining positions are budgeted — a pending commitment can never make the recovery path unreachable
+  const worstOf = (f: FixtureId) => (f === "APPROVED_PAYMENT" ? plan.worstPerRun.approved : plan.worstPerRun.other);
+  const allPositions: Position[] = []; for (let round = 1; round <= repeats; round++) for (const fixture of FIXTURES) allPositions.push({ round, fixture });
+  const prior = book.plan.steps.acceptance;
+  const settledPrior = prior.settledRuns.map((id) => ({ id, ...parseOpenId(id) }));
+  const openPrior = prior.openRuns.map((id) => ({ id, ...parseOpenId(id) }));
+  const taken = new Set([...settledPrior, ...openPrior].filter((x) => x.position).map((x) => positionId(x.position!)));
+  const remaining = allPositions.filter((p) => !taken.has(positionId(p)));
+  const remainingWorst = remaining.reduce((a, p) => a + worstOf(p.fixture), 0n);
+  const unrecoverable = openPrior.filter((x) => !x.key || !x.position);
+
   const problems: string[] = [];
   if (!plan.withinCap) problems.push(`plan worst case ${usdc(plan.totalWorst)} USDC (fees + business + gas ceilings) exceeds the cap ${usdc(cap)}`);
   if (runnerBal < plan.runnerNeed) problems.push(`demo-runner holds ${usdc(runnerBal)} USDC, needs >= ${usdc(plan.runnerNeed)}`);
   if (creatorBal < plan.creatorNeed) problems.push(`order-creator holds ${usdc(creatorBal)} USDC, needs >= ${usdc(plan.creatorNeed)} for createOrder gas`);
-  if (net.budget.usedToday + plan.runs > net.budget.maxRunsPerDay) problems.push(`daily live-run budget: ${net.budget.usedToday} used + ${plan.runs} planned > ${net.budget.maxRunsPerDay}`);
-  if (net.budget.activeRun) problems.push(`a run is already active (${net.budget.activeRun})`);
-  if (book) { const c = checkStep(book.plan, "acceptance", plan.totalWorst, cap); if (!c.ok) problems.push(c.reason!); }
+  if (net.budget.usedToday + remaining.length > net.budget.maxRunsPerDay) problems.push(`daily live-run budget: ${net.budget.usedToday} used + ${remaining.length} remaining > ${net.budget.maxRunsPerDay}`);
+  if (net.budget.activeRun && !openPrior.length) problems.push(`a run is already active (${net.budget.activeRun}) and this plan has no open operation to recover`);
+  { const c = checkStep(book.plan, "acceptance", remainingWorst, cap); if (!c.ok) problems.push(c.reason!); } // committed so far (settled + open at worst) + the REMAINING work
+  for (const x of unrecoverable) problems.push(`open operation ${x.id} carries no admission key or no position: it cannot be recovered mechanically — check the server's runs and settle it by hand before anything new starts`);
   for (const id of FIXTURES) {
     const f = net.fixtures.find((x) => x.id === id);
     if (!f?.merchant || !f.baselineDigest) problems.push(`${id}: fixture proxy or approved baseline missing in /v1/network`);
@@ -342,8 +390,11 @@ async function main(): Promise<number> {
   console.log(`  demo-runner       ${usdc(runnerBal)} USDC (needs >= ${usdc(plan.runnerNeed)}: spend + server floor ${usdc(floor)} + order ${usdc(businessNative)})`);
   console.log(`  order-creator     ${usdc(creatorBal)} USDC (needs >= ${usdc(plan.creatorNeed)}; the deployer-admin key is not used by the demo)`);
   console.log(`  server budget     ${net.budget.usedToday}/${net.budget.maxRunsPerDay} runs used today, cooldown ${cooldown} s${Number.isFinite(net.budget.clientCooldownSeconds) ? "" : " (fallback, not reported)"}, active run ${net.budget.activeRun ?? "none"}`);
+  console.log(`  recovery          ${openPrior.length} open operation(s) of previous invocations (recovered first: the same fixture and admission key re-sent), ${settledPrior.length} completed (re-verified from the server's record), ${remaining.length} of ${allPositions.length} runs remaining; budgeted for the remaining work: ${usdc(remainingWorst)} USDC`);
+  for (const x of openPrior) console.log(`    open      ${x.id}${x.position ? ` (round ${x.position.round}, ${x.position.fixture})` : " (no position: NOT recoverable mechanically)"}`);
+  for (const x of settledPrior) console.log(`    completed ${x.id}${x.runId ? "" : " (no run id recorded: counted done, evidence in that invocation's file)"}`);
   if (!expectedRelease) console.log(`  EXPECTED_RELEASE not set (required for --execute); the server reports ${net.release}`);
-  if (book) for (const l of book.lines()) console.log(l);
+  for (const l of book.lines()) console.log(l);
   for (const p of problems) console.log(`  PROBLEM: ${p}`);
   if (!EXECUTE) {
     console.log(problems.length ? `DRY RUN: NOT READY (${problems.length} problem(s)). Nothing was started.` : `DRY RUN OK: nothing was started. To run: API_URL=${api} EXPECTED_RELEASE=${net.release} pnpm exec tsx scripts/selftest/mainnet.ts --execute`);
@@ -366,6 +417,7 @@ async function main(): Promise<number> {
   const ctx: Ctx = { client, chainId: 5042, usdc: ARC.mainnet.usdc, runner: ACCOUNTS.demoRunner, creator: ACCOUNTS.orderCreator, payTo: ACCOUNTS.merchantPayTo, feeAtomic6: BigInt(net.priceTokenAtomic), businessNative,
     fixtures: Object.fromEntries(FIXTURES.map((id) => [id, { merchant: net.fixtures.find((x) => x.id === id)!.merchant! }])) as Ctx["fixtures"], requiredLabels: ["LIVE_REQUEST", "DEMO_ON_MAINNET"] };
   const reports: RunReport[] = [];
+  const recovered: { id: string; how: string; runId: string | null; position: Position | null }[] = [];
   const startedAtUTC = new Date().toISOString();
   const stamp = startedAtUTC.replace(/[:.]/g, "-");
   const dir = resolve(process.env.SELFTEST_OUTPUT_DIR ?? "evidence/selftest");
@@ -376,83 +428,121 @@ async function main(): Promise<number> {
     const file = resolve(dir, `mainnet-${stamp}${status === "PASS" ? "" : "-INCOMPLETE"}.json`);
     writeFileSync(file, JSON.stringify({ status, chainId: 5042, network: "mainnet", release: net.release, profile: net.profile, api, startedAtUTC, finishedAtUTC: new Date().toISOString(), repeats, accounts: ACCOUNTS,
       plan: { runs: plan.runs, serviceFeeUsdc: usdc(plan.fees), businessPaymentUsdc: usdc(plan.business), capUsdc: usdc(cap), gasCeilingUsdc: usdc(plan.gasCreateCeil + plan.gasPayCeil + plan.gasRelayCeil), totalWorstUsdc: usdc(plan.totalWorst) },
+      positions: { total: allPositions.length, recoveredOpen: openPrior.length, completedBefore: settledPrior.length, remainingAtStart: remaining.length, budgetedForRemainingUsdc: usdc(remainingWorst) }, recovered,
       measuredOutflowUsdc: measured === null ? null : usdc(measured),
       spent: { serviceFeeUsdc: usdc(BigInt(reports.length) * feeNative), businessPaymentUsdc: usdc(BigInt(approved) * businessNative), note: "service fees land in merchant-payto, business payments in the MAIN proxy; both stay inside the project" },
-      runs: reports, failure: failure ?? null }, null, 2));
+      runs: [...reports].sort((a, b) => (a.round ?? 0) - (b.round ?? 0) || FIXTURES.indexOf(a.fixture) - FIXTURES.indexOf(b.fixture)), failure: failure ?? null }, null, 2));
     return file;
   };
-  const total = plan.runs;
+  const total = allPositions.length;
   // the aggregate limit, measured: the summed balances of the three project keys the runs touch (internal fee transfers net out)
   const meterAddrs = [ACCOUNTS.demoRunner, ACCOUNTS.orderCreator, ACCOUNTS.merchantPayTo] as Hex[];
   const sumBalances = async () => (await Promise.all(meterAddrs.map((a) => client.getBalance({ address: a })))).reduce((x, y) => x + y, 0n);
   // the baseline: this invocation's balances on a first start, the FIRST invocation's balances when resuming (the plan record carries it)
   const startTotal = await sumBalances();
-  if (book) book.apply((p) => beginMeasured(p, "acceptance", meterAddrs, startTotal));
-  const baseline = book?.plan.steps.acceptance.baselineTotalNativeAtomic ?? startTotal;
+  book.apply((p) => beginMeasured(p, "acceptance", meterAddrs, startTotal));
+  const baseline = book.plan.steps.acceptance.baselineTotalNativeAtomic ?? startTotal;
   const meter = new OutflowMeter("mainnet acceptance outflow", cap, baseline);
-  if (book && baseline !== startTotal) console.log(`  resuming: measured outflow carried from the first invocation ${usdc(meter.outflow(startTotal))} USDC (baseline ${usdc(baseline)} USDC, now ${usdc(startTotal)})`);
-  const syncMeasured = async () => { const t = await sumBalances(); if (book) book.apply((p) => updateMeasured(p, "acceptance", t)); return t; };
+  if (baseline !== startTotal) console.log(`  resuming: measured outflow carried from the first invocation ${usdc(meter.outflow(startTotal))} USDC (baseline ${usdc(baseline)} USDC, now ${usdc(startTotal)})`);
+  const syncMeasured = async () => { const t = await sumBalances(); book.apply((p) => updateMeasured(p, "acceptance", t)); return t; };
   // audit 2026-10-10 (OP-03): the pending commitment is replaced by the measured outflow in ONE durable update, after the balance read succeeded;
   // a failed read keeps the commitment pending (never an understated record)
-  const settleOpen = async (id: string, worst: bigint) => { const t = await sumBalances(); book!.apply((p) => updateMeasured(noteOpen(p, "acceptance", id, false, worst), "acceptance", t)); return t; };
+  const settleOpen = async (id: string, worst: bigint) => { const t = await sumBalances(); book.apply((p) => updateMeasured(noteOpen(p, "acceptance", id, false, worst), "acceptance", t)); return t; };
+  const postAdmission = (fixture: FixtureId, key: string) => getJson(`${api}/v1/demo/run`, { method: "POST", headers: adminHeaders(), body: JSON.stringify({ fixture, clientRunRequestId: key }) }).catch(() => null);
+  /** a run the server names is followed to its end, settled in the plan, verified and recorded under its position */
+  const complete = async (openId: string, pos: Position, runId: string, worst: bigint, how: string) => {
+    const run = await awaitRun(api, runId);
+    await settleOpen(openId, worst); // one durable update: pending released and the measured outflow recorded together
+    const report = await vRun(ctx, pos.fixture, run);
+    report.round = pos.round;
+    report.recovery = await vRec(api, token, run.result);
+    report.passport = await vPass(api, run, rpc, net.fixtures.find((x) => x.id === pos.fixture)!.baselineDigest!, dir);
+    reports.push(report);
+    console.log(JSON.stringify({ round: pos.round, fixture: pos.fixture, runId, how, decision: report.decision, serviceFeeTx: report.serviceFee.tx, businessTx: report.businessPayment.tx, orderPaid: report.order.paidOnChain, durationMs: report.durationMs }));
+    return run;
+  };
   let current: { fixture: FixtureId; runId?: string; run?: any } | null = null, lastStart = 0;
+  const done = new Set<string>();
   try {
-    // audit 2026-10-10 (OP-03): operations a previous invocation reserved (their ADMISSION KEY is the durable identity, written before the POST)
-    // are recovered first: the same key re-sent returns the original run if the server admitted it (or admits it now — the same operation),
-    // and a refusal means nothing ever started, so the reservation is released. Nothing new starts before every open one is settled.
-    for (const open of [...(book?.plan.steps.acceptance.openRuns ?? [])]) {
-      const key = open.startsWith("key:") ? open.slice(4) : null;
-      console.log(`  resuming: operation ${open} was reserved by a previous invocation and is still open in the plan record — recovering it before starting anything`);
-      let r: any = null;
-      if (key) {
-        const res = await getJson(`${api}/v1/demo/run`, { method: "POST", headers: { "content-type": "application/json", ...(process.env.ADMIN_TOKEN ? { "x-admin-token": process.env.ADMIN_TOKEN } : {}) }, body: JSON.stringify({ fixture: "APPROVED_PAYMENT", clientRunRequestId: key }) }).catch(() => null);
-        if (res && (res.status === 200 || res.status === 202) && res.body?.runId) r = await awaitRun(api, res.body.runId);
-        else if (res && res.status === 409 && res.body?.error === "RUN_CONFLICT") throw new Refused(`reserved operation ${key} is bound to another scenario on the server — manual check`);
-        else console.log(`  ${open}: the server never admitted it (${res?.status ?? "no answer"} ${JSON.stringify(res?.body ?? null)?.slice(0, 80)}) — the reservation is released, nothing was spent`);
-      } else r = await awaitRun(api, open); // an older record that stored the run id
-      if (r) console.log(`  ${open}: ${r.runId} ${r.state} ${r.outcome?.kind ?? ""}`);
-      await settleOpen(open, plan.worstPerRun.approved);
-    }
-    for (let round = 1; round <= repeats; round++) {
-      for (const fixture of FIXTURES) {
-        const wait = lastStart ? lastStart + (cooldown + marginS) * 1000 - Date.now() : 0;
-        if (wait > 0) { console.log(`  cooldown: waiting ${Math.ceil(wait / 1000)} s before the next start`); await sleep(wait); }
-        const worstNow = fixture === "APPROVED_PAYMENT" ? plan.worstPerRun.approved : plan.worstPerRun.other;
-        const head = meter.headroomFor(await syncMeasured(), worstNow);
-        if (!head.ok) throw new Refused(head.reason!);
-        if (book) { const c = checkStep(book.plan, "acceptance", worstNow, cap); if (!c.ok) throw new Refused(c.reason!); }
-        console.log(`[${reports.length + 1}/${total}] ${fixture}: starting a live mainnet run (measured outflow so far ${usdc(head.outflow)} of ${usdc(cap)} USDC)`);
-        current = { fixture };
-        // OP-03: the operation's identity (its admission key) and its worst case are durable BEFORE the admission request leaves
-        const key = ADMISSION_KEY(); const openId = `key:${key}`;
-        book!.apply((p) => noteOpen(p, "acceptance", openId, true, worstNow));
-        const { runId, startedAt, admission } = await startRun(api, fixture, (cooldown + marginS) * 1000, key);
-        lastStart = startedAt; current.runId = runId;
-        current.run = await awaitRun(api, runId);
-        await settleOpen(openId, worstNow); // one durable update: pending released and the measured outflow recorded together
-        const report = await verifyRun(ctx, fixture, current.run);
-        report.round = round; report.admission = admission;
-        report.recovery = await verifyRecovery(api, token, current.run.result);
-        report.passport = await verifyRunPassport(api, current.run, rpc, net.fixtures.find((x) => x.id === fixture)!.baselineDigest!, dir);
-        reports.push(report);
-        console.log(JSON.stringify({ round, fixture, runId, decision: report.decision, serviceFeeTx: report.serviceFee.tx, businessTx: report.businessPayment.tx, orderPaid: report.order.paidOnChain, durationMs: report.durationMs }));
+    // ---- 1. open operations of previous invocations (review of bf0c800, P1): the SAME fixture and admission key are re-sent — the server
+    //         returns the run it admitted (or admits the same operation now); an answer that proves nothing keeps the reservation and stops
+    for (const x of openPrior) {
+      if (!x.key || !x.position) throw new Refused(`open operation ${x.id} cannot be recovered mechanically`); // already a PROBLEM above; never reached
+      const pos = x.position; const worst = worstOf(pos.fixture); current = { fixture: pos.fixture };
+      console.log(`  resuming: ${x.id} (round ${pos.round}, ${pos.fixture}) was reserved by a previous invocation and is still open in the plan record — recovering it before starting anything`);
+      let outcome: ReplayOutcome = x.runId ? { kind: "run", runId: x.runId, admission: "recorded" } : { kind: "ambiguous", detail: "not asked yet" };
+      for (let attempt = 0; !x.runId && attempt < 4; attempt++) {
+        outcome = classifyReplay(await postAdmission(pos.fixture, x.key), (cooldown + marginS) * 1000);
+        if (outcome.kind !== "retry") break;
+        console.log(`  ${x.id}: ${outcome.detail}`); await pause(outcome.waitMs);
       }
+      if (outcome.kind === "run") {
+        let openId = x.id;
+        if (!x.runId) { const withRun = `${x.id}:run:${outcome.runId}`; book.apply((p) => relabelOpen(p, "acceptance", x.id, withRun)); openId = withRun; }
+        console.log(`  ${x.id}: admission ${outcome.admission} → run ${outcome.runId}`);
+        current.runId = outcome.runId;
+        current.run = await complete(openId, pos, outcome.runId, worst, `recovered (admission ${outcome.admission})`);
+        recovered.push({ id: openId, how: `admission re-sent: ${outcome.admission}; run followed to its end and verified`, runId: outcome.runId, position: pos });
+        done.add(positionId(pos));
+      } else if (outcome.kind === "nothing-started") {
+        console.log(`  ${x.id}: ${outcome.detail} — the reservation is released, nothing was spent; the position is run later in order`);
+        await settleOpen(x.id, worst);
+        recovered.push({ id: x.id, how: `released: ${outcome.detail}`, runId: null, position: pos });
+      } else {
+        throw new Refused(`${x.id}: ${outcome.kind === "retry" ? outcome.detail : outcome.detail} — the reservation is KEPT (not released on an answer that proves nothing); check ${api}/v1/demo/runs and re-run to recover it`);
+      }
+    }
+    // ---- 2. positions completed by previous invocations: their runs are re-read and re-verified (reads only), so the evidence of this
+    //         invocation covers the whole plan; one without a run id counts as done with its evidence in the earlier invocation's file
+    for (const x of settledPrior) {
+      if (!x.position) continue; // a settled legacy id without a position says nothing about the schedule
+      if (done.has(positionId(x.position))) continue;
+      done.add(positionId(x.position));
+      if (!x.runId) { recovered.push({ id: x.id, how: "completed by a previous invocation; no run id recorded, its evidence is in that invocation's file", runId: null, position: x.position }); continue; }
+      const r = await withRetry(`run ${x.runId}`, async () => { const g = await getJson(`${api}/v1/demo/runs/${x.runId}`); if (g.status !== 200 || !g.body) throw new Error(`HTTP ${g.status}`); return g.body; }, 5, 2000);
+      const run = r.state === "DONE" ? r : await awaitRun(api, x.runId);
+      const report = await vRun(ctx, x.position.fixture, run); report.round = x.position.round;
+      report.recovery = await vRec(api, token, run.result); report.passport = await vPass(api, run, rpc, net.fixtures.find((f) => f.id === x.position!.fixture)!.baselineDigest!, dir);
+      reports.push(report); recovered.push({ id: x.id, how: "completed by a previous invocation; re-read and re-verified", runId: x.runId, position: x.position });
+      console.log(`  ${x.id}: completed earlier as run ${x.runId}; re-verified`);
+    }
+    // ---- 3. the remaining positions, in order
+    for (const pos of allPositions) {
+      if (done.has(positionId(pos))) continue;
+      const fixture = pos.fixture;
+      const wait = lastStart ? lastStart + (cooldown + marginS) * 1000 - Date.now() : 0;
+      if (wait > 0) { console.log(`  cooldown: waiting ${Math.ceil(wait / 1000)} s before the next start`); await pause(wait); }
+      const worstNow = worstOf(fixture);
+      const head = meter.headroomFor(await syncMeasured(), worstNow);
+      if (!head.ok) throw new Refused(head.reason!);
+      { const c = checkStep(book.plan, "acceptance", worstNow, cap); if (!c.ok) throw new Refused(c.reason!); }
+      console.log(`[${reports.length + 1}/${total}] round ${pos.round} ${fixture}: starting a live mainnet run (measured outflow so far ${usdc(head.outflow)} of ${usdc(cap)} USDC)`);
+      current = { fixture };
+      // OP-03: the operation's identity (its position and admission key) and its worst case are durable BEFORE the admission request leaves
+      const key = ADMISSION_KEY(); const openId = `${positionId(pos)}:key:${key}`;
+      book.apply((p) => noteOpen(p, "acceptance", openId, true, worstNow));
+      const { runId, startedAt, admission } = await startRun(api, fixture, (cooldown + marginS) * 1000, key);
+      const withRun = `${openId}:run:${runId}`; book.apply((p) => relabelOpen(p, "acceptance", openId, withRun)); // the server's name for it, durable too
+      lastStart = startedAt; current.runId = runId;
+      current.run = await complete(withRun, pos, runId, worstNow, "started");
+      reports.at(-1)!.admission = admission;
+      done.add(positionId(pos));
     }
   } catch (e: any) {
     const failure = { message: String(e?.message ?? e), fixture: current?.fixture ?? null, runId: current?.runId ?? null, lastStep: current?.run?.steps?.at(-1)?.step ?? null,
       serviceFeeTx: current?.run?.result?.serviceFeeTx ?? null, businessTxHash: current?.run?.result?.execution?.businessTxHash ?? null };
     measured = meter.outflow(await sumBalances().catch(() => meter.startTotal));
-    if (book) { try { await syncMeasured(); } catch { /* the record keeps its last reading */ } book.apply((p) => endStep(p, "acceptance", "stopped")); }
-    console.error(`STOPPED after ${reports.length}/${total} verified runs: ${failure.message}`);
+    try { await syncMeasured(); } catch { /* the record keeps its last reading */ } book.apply((p) => endStep(p, "acceptance", "stopped"));
+    console.error(`${e instanceof Refused ? "REFUSED" : "STOPPED"} after ${reports.length}/${total} verified runs: ${failure.message}`);
     console.error(`INCOMPLETE evidence (money trail of the failing run included): ${save("INCOMPLETE", failure)}`);
     return 1;
   }
   measured = meter.outflow(await syncMeasured());
-  if (book) book.apply((p) => endStep(p, "acceptance", "done"));
+  book.apply((p) => endStep(p, "acceptance", "done"));
   const file = save("PASS");
   console.log(`\n #  scenario                decision             service fee (0.01)   business payment (0.05)  order   ms      recovery`);
   reports.forEach((r, i) => console.log(`${String(i + 1).padStart(2)}  ${r.fixture.padEnd(22)}  ${r.decision.padEnd(19)}  ${short(r.serviceFee.tx).padEnd(18)}   ${short(r.businessPayment.tx).padEnd(22)}   ${r.order.paidOnChain ? "paid  " : "unpaid"}  ${String(r.durationMs).padStart(6)}  ${r.recovery?.authenticated.split(" ")[0]}  passport ${r.passport ? `${r.passport.counts.pass} pass / ${r.passport.counts.unverified} unverified / ${r.passport.counts.fail} fail` : "—"}`));
-  console.log(`PASS: ${reports.length} mainnet runs; digest chains, service fees, business payments and order states re-read from the mainnet RPC; every passport verified independently. Evidence: ${file}`);
+  console.log(`PASS: ${reports.length} mainnet runs (${recovered.filter((r) => r.runId && r.how.startsWith("completed")).length} re-verified from previous invocations, ${recovered.filter((r) => r.how.startsWith("admission")).length} recovered); digest chains, service fees, business payments and order states re-read from the mainnet RPC; every passport verified independently. Evidence: ${file}`);
   return 0;
 }
 

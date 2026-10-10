@@ -104,6 +104,23 @@ describe("shared wallet balances", () => {
     await vi.advanceTimersByTimeAsync(10_000); expect(p.request).toHaveBeenCalledTimes(4); // and nothing keeps polling
     off();
   });
+  it("review of bf0c800 (P2): a request queued behind an in-flight read is still served when that read settles the loop — the queued read goes out after the fresh value is shown, and its newer answer is what stands", async () => {
+    const answers: ((v: bigint) => void)[] = [];
+    const p: any = { request: vi.fn(async ({ method }: { method: string }) => { if (method !== "eth_getBalance") throw new Error(method); return new Promise<string>((r) => answers.push((v) => r(`0x${v.toString(16)}`))); }) };
+    const off = subscribeBalances(p, ACCOUNT, null, () => {});
+    answers.shift()!(180_000_000_000_000_000n); await flush(); expect(balancesOf(p, ACCOUNT).native).toBe(180_000_000_000_000_000n);
+    const loop = refreshBalances(p, ACCOUNT); await flush(); // read #1 on the wire (until-changed)
+    expect(answers).toHaveLength(1);
+    const queued = refreshBalances(p, ACCOUNT); await flush(); // a second request while #1 is on the wire: joins it, owed a read of its own
+    expect(p.request).toHaveBeenCalledTimes(2); // never two concurrent reads
+    answers.shift()!(117_000_000_000_000_000n); await flush(); // #1 lands CHANGED: it settles the loop's own question …
+    expect(balancesOf(p, ACCOUNT).native).toBe(117_000_000_000_000_000n); // … the fresh value is on screen …
+    expect(p.request).toHaveBeenCalledTimes(3); // … and the queued request still gets its read (it used to be settled away with #1)
+    answers.shift()!(100_000_000_000_000_000n); await flush(); await loop; await queued;
+    expect(balancesOf(p, ACCOUNT).native).toBe(100_000_000_000_000_000n); // the newest answer stands
+    await vi.advanceTimersByTimeAsync(10_000); expect(p.request).toHaveBeenCalledTimes(3); // and the loop is over
+    off();
+  });
   it("other tabs: a change is written under the signal key; a signal from another tab makes every view of that account re-read until it sees that value; this tab's own signal and other accounts are ignored", async () => {
     let bal = 180_000_000_000_000_000n, other = 7n;
     const p = provider({ [ACCOUNT.toLowerCase()]: () => bal, [OTHER]: () => other });

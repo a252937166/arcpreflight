@@ -49,6 +49,10 @@ const sleep = (ms: number) => new Promise((s) => setTimeout(s, ms));
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const outDir = resolve(process.cwd(), "evidence/selftest"); mkdirSync(resolve(outDir, "passports"), { recursive: true });
 const log = (m: string) => console.log(`${new Date().toISOString()} ${m}`);
+// review of bf0c800 (P2): the repository the verifier CLI is run from (the tests under scripts/test run this script from a scratch cwd so
+// nothing lands in the repository), and the bound on waiting for a recovered attempt to leave its open state (tests shorten it)
+const REPO_DIR = process.env.ARCPREFLIGHT_REPO ?? process.cwd();
+const RECOVERY_WAIT_MS = Number(process.env.LIFECYCLE_RECOVERY_WAIT_MS ?? 120_000);
 const j = async (r: Response) => ({ status: r.status, body: await r.json().catch(() => null) as any });
 const adminHeader: Record<string, string> = process.env.ADMIN_TOKEN ? { "x-admin-token": process.env.ADMIN_TOKEN } : {}; // the mainnet instance gates public execution until the acceptance is recorded; the operator's token passes the gate
 const post = (path: string, body: unknown, token?: string) => fetch(`${api}${path}`, { method: "POST", headers: { "content-type": "application/json", ...adminHeader, ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) }).then(j);
@@ -59,7 +63,7 @@ const evidence: any = { generatedAt: new Date().toISOString(), api, network: net
 function verifyInCleanProcess(passportPath: string, anchors: { baselineDigests: string[]; policyDigests: string[] }) {
   const anchorsPath = passportPath.replace(/\.passport\.json$/, ".anchors.json");
   writeFileSync(anchorsPath, JSON.stringify(anchors, null, 2));
-  const r = spawnSync("pnpm", ["exec", "tsx", "packages/verifier/src/cli.ts", passportPath, "--rpc", rpcUrl, "--anchors", anchorsPath, "--json"], { cwd: process.cwd(), encoding: "utf8", env: { ...process.env } });
+  const r = spawnSync("pnpm", ["exec", "tsx", resolve(REPO_DIR, "packages/verifier/src/cli.ts"), passportPath, "--rpc", rpcUrl, "--anchors", anchorsPath, "--json"], { cwd: REPO_DIR, encoding: "utf8", env: { ...process.env } });
   const out = r.stdout.trim(); const start = out.indexOf("{");
   const parsed = start >= 0 ? JSON.parse(out.slice(start)) : null;
   assert(parsed, `verifier produced no JSON (exit ${r.status}): ${r.stderr.slice(0, 300)}`);
@@ -100,6 +104,19 @@ const settleOpen = async (openId: string, worst: bigint) => { const t = await su
 const STOP_AFTER = process.env.LIFECYCLE_STOP_AFTER ?? null;
 if (STOP_AFTER && net === "mainnet") throw new SpendRefused("LIFECYCLE_STOP_AFTER is a testnet rehearsal hook; refused on mainnet");
 const stopAfter = (mark: string) => { if (STOP_AFTER === mark) { log(`LIFECYCLE_STOP_AFTER=${mark}: stopping here like an interrupted process; the plan record keeps the open scenario`); process.exit(3); } };
+const walletLedger = openGuard(ROOT_DIR, walletLimits, { write: !PREFLIGHT });
+const walletGuard = walletLedger.guard; const saveWallet = walletLedger.save;
+
+/** Review of bf0c800 (P2): the wallet scenario's session and identities, persisted PRIVATELY under data/ (gitignored; never under evidence/),
+ *  keyed by the scenario's base id. A restart observes the attempt through the session that owns it, exports its passport and proves the
+ *  outcome before the scenario counts as complete — a receipt alone proves nothing about payment, plan agreement or costs. */
+type WalletSession = { token: string; principal: string; payer?: string; orderId?: string; requestId?: string; attemptId?: string; policyDigest?: string; baselineDigest?: string; plan?: any; txHash?: string; updatedAt?: string };
+const sessionsPath = resolve(ROOT_DIR, "data", "lifecycle", `${net}-${book?.plan.planId ?? "no-plan"}.sessions.json`);
+const sessions = {
+  all(): Record<string, WalletSession> { try { return JSON.parse(readFileSync(sessionsPath, "utf8")); } catch { return {}; } },
+  get(base: string): WalletSession | null { const s = this.all()[base]; return s && typeof s.token === "string" && s.token ? s : null; },
+  put(base: string, patch: Partial<WalletSession>) { if (PREFLIGHT) return; const all = this.all(); all[base] = { ...(all[base] ?? { token: "", principal: "" }), ...patch, updatedAt: new Date().toISOString() }; mkdirSync(resolve(sessionsPath, ".."), { recursive: true }); writeFileSync(sessionsPath, JSON.stringify(all, null, 2)); },
+};
 
 /** follows a labelled-interruption run to its outcome, exports and verifies its passport (a fresh start and a recovery share this) */
 async function followInterruptRun(runId: string, clientRunRequestId: string, recovered: boolean) {
@@ -132,37 +149,103 @@ async function followInterruptRun(runId: string, clientRunRequestId: string, rec
 // as it learns them) and a restart settles the open scenarios of previous invocations FIRST, before anything new is started:
 //   interrupt  the same admission key is re-sent — the server returns the original run (or admits the same operation now); it is
 //              followed to its outcome, its passport verified, and the scenario counts as complete under this plan
-//   wallet     a broadcast hash → its receipt is awaited, nothing of the project's is left in flight; an attempt → the project's order
-//              creation and fee relay were already mined; earlier stops → settled from the balances once the server's receipt deadlines
-//              are past (10 minutes), refused before that
-//   anything else (a record written before this version) → refused unless LIFECYCLE_SETTLE_OPEN names it after a manual check
+//   wallet     an attempt or a broadcast hash → the attempt is OBSERVED through the recorded session (review of bf0c800, P2): only a
+//              CONFIRMED/SUCCESS attempt for that hash that matches the plan, whose receipt succeeded, whose order reads paid and whose
+//              cost statement agrees with the receipt, with its passport exported and verified, completes the scenario; a terminal
+//              attempt that did not succeed settles the money and stops; an open one keeps the reservation; earlier stops → settled
+//              from the balances once the server's receipt deadlines are past (10 minutes), refused before that
+//   anything else (a record written before this version, or no recorded session) → refused unless LIFECYCLE_SETTLE_OPEN names it after a manual check
 const completed = new Set<string>(); evidence.recovered = [];
 const GRACE_MS = 10 * 60_000; const settleExplicit = process.env.LIFECYCLE_SETTLE_OPEN ?? null;
-type OpenDecision = { action: "explicit" | "replay" | "receipt" | "settle" | "wait" | "refuse"; completes: boolean; note: string };
+type OpenDecision = { action: "explicit" | "replay" | "observe" | "settle" | "wait" | "refuse"; completes: boolean; note: string };
 /** what this invocation does with a scenario a previous invocation left open — the same decision in the read-only preflight and the run */
-const decideOpen = (open: string, sc: string, tags: Record<string, string>, ageMs: number): OpenDecision => {
+const decideOpen = (open: string, base: string, sc: string, tags: Record<string, string>, ageMs: number): OpenDecision => {
   if (settleExplicit === open) return { action: "explicit", completes: false, note: "settled by the operator (LIFECYCLE_SETTLE_OPEN) after a manual check of the server's state" };
   if (sc === "interrupt" && tags.key) return { action: "replay", completes: true, note: `the same admission key ${tags.key.slice(0, 14)}… is re-sent: the server returns the original run, which is followed to its outcome and verified` };
   if (sc === "wallet") {
-    if (tags.tx) return { action: "receipt", completes: true, note: `the wallet's transaction ${tags.tx} is awaited; once it is mined nothing of the project's is left in flight` };
-    if (tags.attempt) return { action: "settle", completes: false, note: `attempt ${tags.attempt} existed: the project's order creation and fee relay were already mined, the wallet had not broadcast` };
+    if (tags.tx || tags.attempt) {
+      const s = sessions.get(base);
+      if (!s || !(s.attemptId ?? tags.attempt)) return { action: "refuse", completes: false, note: `attempt ${tags.attempt ?? "?"}${tags.tx ? ` and transaction ${tags.tx}` : ""} are recorded, but no session for ${base} is stored under ${sessionsPath}, so the outcome cannot be observed through the session that owns the attempt — check the attempt and the receipt by hand and re-run with LIFECYCLE_SETTLE_OPEN=${open}` };
+      return { action: "observe", completes: !!tags.tx, note: `attempt ${s.attemptId ?? tags.attempt} is observed through the recorded session: only CONFIRMED/SUCCESS for ${tags.tx ?? s.txHash ?? "its transaction"}, matching the plan, with a successful receipt, the order paid, the costs as the receipt says and a passport that verifies, completes the scenario; anything else stops` };
+    }
     if (ageMs >= GRACE_MS) return { action: "settle", completes: false, note: `stopped before its attempt ${Math.round(ageMs / 60_000)} min ago, past the server's receipt deadlines: settled from the balances` };
     return { action: "wait", completes: false, note: `stopped before its attempt only ${Math.round(ageMs / 1000)} s ago: the project's order creation or fee relay may still be in flight — retry after ${GRACE_MS / 60_000} minutes` };
   }
   return { action: "refuse", completes: false, note: `no durable identity to recover from (a record written before this version, or an unknown scenario): check the server's state (GET /v1/demo/runs newest first, the attempt) and re-run with LIFECYCLE_SETTLE_OPEN=${open} to settle it from the balances` };
 };
+const OPEN_ATTEMPT = ["VALIDATED", "BROADCAST_ATTEMPTED"], NOTHING_SENT = ["VALIDATED", "NOT_SENT", "REFUSED", "NOT_EXECUTED"];
+/** The open wallet scenario, proven or not (review of bf0c800, P2): the attempt is read through the session that owns it; the money is settled
+ *  from the receipt whatever the outcome; the scenario completes only on the full proof (attempt, receipt, plan, order, costs, passport). */
+async function observeWalletScenario(open: string, base: string, tags: Record<string, string>) {
+  const s = sessions.get(base)!; const attemptId = (s.attemptId ?? tags.attempt) as string;
+  const read = async () => { const a = await get(`/v1/wallet/attempts/${attemptId}`, s.token); assert.equal(a.status, 200, `the recorded session cannot read attempt ${attemptId}: HTTP ${a.status} ${JSON.stringify(a.body)?.slice(0, 200)} — manual check, the reservation is kept`); return a.body; };
+  let view = await read();
+  if (s.payer && view.payer && view.payer.toLowerCase() !== s.payer.toLowerCase()) assert.fail(`attempt ${attemptId} belongs to ${view.payer}, the record says ${s.payer}`);
+  const hash = (tags.tx ?? s.txHash ?? view.businessTxHash ?? view.txHash ?? null) as string | null;
+  if (!hash && NOTHING_SENT.includes(view.state)) { // nothing of the visitor's ever left; the project's order creation and fee relay were mined before the attempt existed
+    return { completes: false, failed: false, how: `attempt ${attemptId} is ${view.state} with no transaction: the wallet never broadcast; the project's order creation and fee relay were already mined`, extra: { attemptId, state: view.state } };
+  }
+  assert(hash, `attempt ${attemptId} is ${view.state} but neither the record nor the server names its transaction — manual check, the reservation is kept`);
+  // the server reconciles an open attempt from the chain: wait, bounded, for it to leave the open states — unless the chain already answers
+  const deadline = Date.now() + RECOVERY_WAIT_MS;
+  let rc = await client.getTransactionReceipt({ hash: hash as Hex }).catch(() => null);
+  while (OPEN_ATTEMPT.includes(view.state) && !rc && Date.now() < deadline) { await sleep(2000); view = await read(); rc = await client.getTransactionReceipt({ hash: hash as Hex }).catch(() => null); }
+  if (!rc && OPEN_ATTEMPT.includes(view.state)) {
+    const windowOver = view.state === "VALIDATED" && view.validUntil && new Date(view.validUntil).getTime() < Date.now() - 60_000;
+    if (!windowOver) throw new SpendRefused(`${open}: attempt ${attemptId} is still ${view.state} and ${hash} has no receipt after ${Math.round(RECOVERY_WAIT_MS / 1000)} s; the reservation is KEPT — retry later (the server keeps reconciling)`);
+    return { completes: false, failed: false, how: `the recorded transaction ${hash} never reached the chain (no receipt; the attempt's window closed VALIDATED): nothing of the visitor's moved; its sent entry stays at its worst case in the visitor ledger`, extra: { attemptId, txHash: hash, state: view.state } };
+  }
+  // one more read once the receipt exists, so the server's reconciliation of this very attempt is what is judged
+  if (rc && OPEN_ATTEMPT.includes(view.state)) { for (let i = 0; i < 5 && OPEN_ATTEMPT.includes(view.state); i++) { await sleep(2000); view = await read(); } }
+  if (OPEN_ATTEMPT.includes(view.state)) throw new SpendRefused(`${open}: ${hash} is mined (status ${rc!.status}) but the server still reports attempt ${attemptId} as ${view.state}; the reservation is KEPT — retry once the server has reconciled it`);
+  const gas = rc!.gasUsed * rc!.effectiveGasPrice;
+  const value = BigInt(view.amountNativeAtomic ?? s.plan?.valueNativeAtomic ?? 0);
+  const actual = rc!.status === "success" ? value + gas : gas; // a reverted payment cost its gas only
+  // the visitor ledger: the entry that was `sent` with this hash settles to what the receipt says — the money is final either way
+  const idx = walletGuard.entries.findIndex((e) => e.status === "sent" && e.txHash?.toLowerCase() === hash.toLowerCase());
+  if (idx >= 0) { walletGuard.settle(idx, actual); saveWallet(); }
+  const problems: string[] = [];
+  if (view.state !== "CONFIRMED") problems.push(`attempt state ${view.state}`);
+  if (view.businessStatus !== "SUCCESS") problems.push(`business status ${view.businessStatus ?? "unknown"}`);
+  if (!view.businessTxHash || view.businessTxHash.toLowerCase() !== hash.toLowerCase()) problems.push(`the server names transaction ${view.businessTxHash ?? "none"}, the record ${hash}`);
+  if (!view.deviations || !Array.isArray(view.deviations.mismatch)) problems.push("no plan comparison recorded"); else if (view.deviations.mismatch.length) problems.push(`the transaction deviates from the plan in ${view.deviations.mismatch.join(", ")}`);
+  if (view.recovery?.counters?.businessSignatures !== 0) problems.push(`the recovery counters report ${view.recovery?.counters?.businessSignatures ?? "unknown"} business signature(s) by the service`);
+  if (rc!.status !== "success") problems.push(`receipt status ${rc!.status}`);
+  if (view.costStatement?.buyer?.complete !== true) problems.push("the cost statement's buyer total is not complete");
+  if (view.costStatement?.actual?.businessGasNativeAtomic !== gas.toString()) problems.push(`the cost statement's business gas ${view.costStatement?.actual?.businessGasNativeAtomic ?? "none"} differs from the receipt's ${gas.toString()}`);
+  const orderId = (s.orderId ?? tags.order ?? view.orderId) as string | undefined;
+  const order = orderId ? await get(`/v1/demo/orders/${orderId}`, s.token) : null;
+  if (!order || order.status !== 200) problems.push(`order ${orderId ?? "?"} not readable (${order?.status ?? "no id"})`);
+  else if (order.body.paid !== true) problems.push(`order ${orderId} reads paid=${order.body.paid}`);
+  else if (!(order.body.attempts ?? []).some((x: any) => x.attemptId === attemptId)) problems.push(`order ${orderId} does not list attempt ${attemptId}`);
+  const base_extra = { attemptId, txHash: hash, state: view.state, businessStatus: view.businessStatus ?? null, receiptStatus: rc!.status, block: rc!.blockNumber.toString(), visitorActualNativeAtomic: actual.toString() };
+  if (problems.length) return { completes: false, failed: true, how: `the wallet scenario did not succeed: ${problems.join("; ")} — manual check`, extra: base_extra };
+  // the original passport, exported through the session that owns the attempt and verified in a clean process against the recorded anchors
+  const passport = await get(`/v1/wallet/attempts/${attemptId}/passport`, s.token); assert.equal(passport.status, 200, `passport export answered ${passport.status} ${JSON.stringify(passport.body)?.slice(0, 200)}`);
+  const passportPath = resolve(outDir, "passports", `${net}-wallet-${stamp}.passport.json`); writeFileSync(passportPath, JSON.stringify(passport.body, null, 2));
+  assert(s.baselineDigest && s.policyDigest, `the recorded session for ${base} lacks the approval anchors (baseline and policy digests): the passport cannot be verified independently — manual check`);
+  const v = verifyInCleanProcess(passportPath, { baselineDigests: [s.baselineDigest], policyDigests: [s.policyDigest] });
+  log(`verifier: exit ${v.exit}, pass ${v.counts.pass}, fail ${v.counts.fail}, unverified ${v.counts.unverified ?? 0}; TRANSACTION_PLAN_AGREEMENT=${v.findings.TRANSACTION_PLAN_AGREEMENT} ORDER_OUTCOME=${v.findings.ORDER_OUTCOME} COST_STATEMENT=${v.findings.COST_STATEMENT}`);
+  assert.equal(v.counts.fail, 0, JSON.stringify(v.findings));
+  for (const id of ["TRANSACTION_PLAN_AGREEMENT", "ORDER_OUTCOME", "COST_STATEMENT", "FEE_ATTRIBUTION"]) assert.equal(v.findings[id], "PASS", `passport finding ${id} is ${v.findings[id]}, expected PASS`);
+  const manifest = JSON.parse(passport.body.files["manifest.json"]); assert.equal(manifest.subject.kind, "wallet-run"); assert.equal(manifest.subject.executionMode, "wallet");
+  evidence.scenarios.wallet = { recoveredFromPreviousInvocation: true, payer: view.payer, order: { orderId, paid: order!.body.paid, amountNativeAtomic: view.amountNativeAtomic }, requestId: s.requestId ?? view.requestId, attemptId, plan: s.plan ?? view.plan ?? null, txHash: hash,
+    outcome: { state: view.state, businessStatus: view.businessStatus, block: view.block, deviations: view.deviations }, receipt: { status: rc!.status, block: rc!.blockNumber.toString(), gasUsed: rc!.gasUsed.toString(), effectiveGasPrice: rc!.effectiveGasPrice.toString() }, costStatement: view.costStatement, passport: passportPath, verifier: v };
+  return { completes: true, failed: false, how: `attempt ${attemptId} CONFIRMED/SUCCESS for ${hash}: receipt success, plan matched, order paid, costs as the receipt says; passport exported through the recorded session and verified (${v.counts.pass} PASS, ${v.counts.fail} FAIL)`, extra: { ...base_extra, verifier: v.counts } };
+}
+const writeEvidence = (status: "PASS" | "FAILED") => { evidence.status = status; const outPath = resolve(outDir, `${net}-lifecycle-${stamp}.json`); writeFileSync(outPath, JSON.stringify(evidence, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2)); return outPath; };
 if (book && previous && previous.openRuns.length) for (const open of previous.openRuns) {
   const { base, tags } = openIdTags(open); const sc = base.split("-")[0]; const worst = worstOf[sc] ?? 0n;
   const ageMs = Date.now() - new Date(previous.updatedAt ?? 0).getTime();
-  const d = decideOpen(open, sc, tags, ageMs);
-  if (PREFLIGHT) { // read-only: say what a run would do and show the record as it would stand after that (in memory only; nothing is written)
+  const d = decideOpen(open, base, sc, tags, ageMs);
+  if (PREFLIGHT) { // read-only: say what a run would do and show the record as it would stand after that (in memory only; nothing is written, nothing asked of the API)
     if (d.action === "wait" || d.action === "refuse") { log(`open from invocation ${previous.invocations}: ${open} — a run would stop: ${d.note}`); continue; }
     log(`open from invocation ${previous.invocations}: ${open} — a run settles it first (${d.action}): ${d.note}`);
     book.apply((p) => noteOpen(p, "lifecycle", open, false, worst)); if (d.completes) completed.add(sc); continue;
   }
   log(`resuming: ${open} was started by invocation ${previous.invocations} and is still open in the plan record — settling it before starting anything (${d.action})`);
   if (d.action === "wait" || d.action === "refuse") throw new SpendRefused(`${open}: ${d.note}`);
-  const extra: Record<string, unknown> = {};
+  let extra: Record<string, unknown> = {}; let completes = d.completes; let how = d.note; let failed = false;
   if (d.action === "replay") {
     const body = { fixture: "APPROVED_PAYMENT", clientRunRequestId: tags.key, interruptAfterBroadcast: true };
     let r = await post("/v1/demo/run", body);
@@ -172,20 +255,19 @@ if (book && previous && previous.openRuns.length) for (const open of previous.op
     evidence.scenarios.interrupt = await followInterruptRun(r.body.runId as string, tags.key, true);
     extra.runId = r.body.runId; extra.admission = r.body.admission;
   }
-  if (d.action === "receipt") {
-    const rc = await client.waitForTransactionReceipt({ hash: tags.tx as Hex, timeout: 120_000 }).catch(() => null);
-    assert(rc, `${open}: no receipt for the wallet's transaction ${tags.tx} within 2 minutes — if it was never broadcast the visitor's nonce is still free; check and re-run with LIFECYCLE_SETTLE_OPEN=${open}`);
-    extra.txHash = tags.tx; extra.block = rc.blockNumber.toString();
-  }
+  if (d.action === "observe") { const r = await observeWalletScenario(open, base, tags); extra = r.extra; completes = r.completes; how = r.how; failed = r.failed; }
   const t = await settleOpen(open, worst); const measured = usdc18(meter.outflow(t));
-  if (d.completes) completed.add(sc);
-  evidence.recovered.push({ open, scenario: sc, action: d.action, how: d.note, ...extra, measuredProjectOutflowUsdc: measured });
-  log(`  settled: ${d.note}; measured project outflow ${measured} USDC`);
+  evidence.recovered.push({ open, scenario: sc, action: d.action, how, succeeded: !failed, ...extra, measuredProjectOutflowUsdc: measured });
+  if (failed) { // the money is final and recorded; the scenario is not complete — the operator checks before anything else runs
+    book.apply((p) => endStep(p, "lifecycle", "stopped"));
+    log(`  settled (money final), scenario NOT complete: ${how}; measured project outflow ${measured} USDC; evidence ${writeEvidence("FAILED")}`);
+    assert.fail(`${open}: ${how}`);
+  }
+  if (completes) completed.add(sc);
+  log(`  settled: ${how}; measured project outflow ${measured} USDC`);
 }
 const toRun = scenarios.filter((sc) => !completed.has(sc));
 for (const sc of scenarios) if (completed.has(sc)) log(`${sc}: completed by the recovered scenario of a previous invocation; not started again under this plan`);
-const walletLedger = openGuard(ROOT_DIR, walletLimits, { write: !PREFLIGHT });
-const walletGuard = walletLedger.guard; const saveWallet = walletLedger.save;
 {
   const fees = await client.estimateFeesPerGas().catch(() => null);
   const rows = toRun.map((sc) => `  ${sc.padEnd(10)} worst ${usdc18(worstOf[sc] ?? 0n)} USDC`);
@@ -219,7 +301,7 @@ const afterScenario = async (sc: string, openId: string) => { const t = await su
 const relabel = (from: string, to: string) => { if (book && !PREFLIGHT) book.apply((p) => relabelOpen(p, "lifecycle", from, to)); return to; };
 
 if (toRun.includes("wallet")) {
-  let walletOpen = scenarioId("wallet"); await beforeScenario("wallet", walletOpen);
+  const walletBase = scenarioId("wallet"); let walletOpen = walletBase; await beforeScenario("wallet", walletOpen);
   const keyFile = process.env.WALLET_KEY_FILE; assert(keyFile, "WALLET_KEY_FILE (path to the scripted wallet's key) is required for the wallet scenario");
   const keyText = readFileSync(keyFile, "utf8").trim(); // a raw hex key, or a keys/*.json file with a privateKey field; never printed
   const wallet = privateKeyToAccount((keyText.startsWith("{") ? JSON.parse(keyText).privateKey : keyText) as Hex);
@@ -235,6 +317,7 @@ if (toRun.includes("wallet")) {
   }
   assert(balance >= needed, `wallet balance ${balance} too low for fee + amount + gas (needed ${needed})`);
   const session = await post("/v1/session", {}); assert.equal(session.status, 201, JSON.stringify(session.body)); const token = session.body.token as string;
+  sessions.put(walletBase, { token, principal: session.body.principal, payer: wallet.address }); // private: the session that will own the order, the check and the attempt
   // 1. the order: identity durable before the send; amount and reference are the visitor's
   let order = await post("/v1/demo/orders", { payer: wallet.address, proxy: "MAIN", amountNativeAtomic: amount.toString(), reference }, token);
   if (order.status === 202 && order.body?.orderId) { // the creation was recorded but not confirmed within the server's wait: follow THAT order, never create another
@@ -244,12 +327,12 @@ if (toRun.includes("wallet")) {
   }
   assert.equal(order.status, 201, JSON.stringify(order.body)); assert.equal(order.body.state, "CONFIRMED"); assert.equal(order.body.reference, reference);
   log(`order ${order.body.orderId.slice(0, 12)}… created in ${order.body.tx} (block ${order.body.block}) on ${order.body.merchant}`);
-  walletOpen = relabel(walletOpen, `${walletOpen}:order:${order.body.orderId}`); stopAfter("wallet-order");
+  walletOpen = relabel(walletOpen, `${walletOpen}:order:${order.body.orderId}`); sessions.put(walletBase, { orderId: order.body.orderId, baselineDigest: order.body.baselineDigest ?? undefined }); stopAfter("wallet-order");
   const listed = await get("/v1/demo/orders", token); assert.equal(listed.status, 200); assert(listed.body.orders.some((o: any) => o.orderId === order.body.orderId.toLowerCase()), "the owner's order list must contain the new order");
   assert.equal((await get("/v1/demo/orders", `vs_${"0".repeat(48)}`)).status, 401);
   // 2. policy + intent as the Developer page builds them (human-paced validation window)
   const policy = PolicyCore.parse({ schemaVersion: "1.0", ownerPrincipal: "lifecycle-rehearsal", allowedSenders: [wallet.address], allowedTargets: [order.body.merchant], allowedSelectors: [PAY_SELECTOR], maxNativePaymentAtomic: amount.toString(), maxTokenPaymentAtomic: "0", maxServiceFeeTokenAtomic: "10000", maxGasCostNativeAtomic: "2000000000000000", maxReportAgeSeconds: 60, maxFinalValidationAgeSeconds: 60, requiredSignalIds: ["PROXY_TEMPLATE_VERIFIED", "SUPPORTED_STATE_ORDER_PAYABLE", "CALL_SIMULATION"], unknownAction: "REVIEW_REQUIRED", implementationChangeAction: "REVIEW_REQUIRED", allowedTransactionTypes: [2], allowAuthorizationList: false });
-  const pDigest = policyDigest(policy);
+  const pDigest = policyDigest(policy); sessions.put(walletBase, { policyDigest: pDigest });
   const makeIntent = () => IntentCore.parse({ schemaVersion: "1.0", clientRequestId: `lc-${crypto.randomUUID()}`, chainId, walletMode: "EOA_DIRECT_NON_DELEGATED", from: wallet.address, operation: "CALL", to: order.body.merchant, data: encodeFunctionData({ abi: DEMO_MERCHANT_ABI, functionName: "pay", args: [order.body.orderId] }), valueNativeAtomic: amount.toString(),
     businessExpectation: { sourceId: `order:${order.body.orderId}`, sourceDigest: keccak256(toHex(`order:${order.body.orderId}:${wallet.address}:${amount}`)), action: "MERCHANT_PAY", recipient: order.body.merchant, asset: "ARC_NATIVE_USDC", amountNativeAtomic: amount.toString(), orderId: order.body.orderId },
     baselineDigest: order.body.baselineDigest, policyDigest: pDigest, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() });
@@ -257,6 +340,7 @@ if (toRun.includes("wallet")) {
   let intent = makeIntent(); let quoted = await post("/v1/preflight", { intent }, token);
   for (let i = 0; i < 5 && quoted.status === 402 && BigInt(quoted.body.pinnedBlock ?? 0) < BigInt(order.body.block); i++) { log("quote pinned before the order; re-requesting under a new clientRequestId (nothing paid)"); await sleep(1500); intent = makeIntent(); quoted = await post("/v1/preflight", { intent }, token); }
   assert.equal(quoted.status, 402, JSON.stringify(quoted.body)); assert(BigInt(quoted.body.pinnedBlock) >= BigInt(order.body.block));
+  sessions.put(walletBase, { requestId: quoted.body.requestId });
   // 3. ONE fee authorization signed by the wallet; the report is delivered once the fee settles
   const feeIdx = walletGuard.reserve({ purpose: "check fee authorization", to: quoted.body.quote.payTo, tokenNativeEquivalent: BigInt(quoted.body.quote.amountTokenAtomic) * 10n ** 12n, gasLimit: 0n, maxFeePerGas: 0n, authorization: true }); saveWallet();
   const { signature, authorization } = await signTransferAuthorization(wallet, net, { payTo: quoted.body.quote.payTo, valueTokenAtomic: BigInt(quoted.body.quote.amountTokenAtomic) });
@@ -271,7 +355,7 @@ if (toRun.includes("wallet")) {
   assert.equal(attempt.body.state, "VALIDATED"); assert.equal(attempt.body.decision, "NO_POLICY_VIOLATION"); assert(attempt.body.plan?.nonce !== undefined);
   const plan = attempt.body.plan; const attemptId = attempt.body.attemptId as string;
   log(`attempt ${attemptId} VALIDATED until ${attempt.body.validUntil}; plan nonce ${plan.nonce} gas ${plan.gasLimit} maxFee ${Number(plan.maxFeePerGasNativeAtomic) / 1e9} gwei`);
-  walletOpen = relabel(walletOpen, `${walletOpen}:attempt:${attemptId}`); stopAfter("wallet-attempt");
+  walletOpen = relabel(walletOpen, `${walletOpen}:attempt:${attemptId}`); sessions.put(walletBase, { attemptId, plan }); stopAfter("wallet-attempt");
   assert.equal((await get(`/v1/wallet/attempts/${attemptId}/passport`, token)).status, 409, "an open attempt is not exported");
   const second = await post("/v1/wallet/attempts", { requestId: quoted.body.requestId, orderId: order.body.orderId, policy }, token);
   assert.equal(second.status, 409); assert.equal(second.body.error, "ATTEMPT_OPEN");
@@ -294,7 +378,7 @@ if (toRun.includes("wallet")) {
   const parsed = parseTransaction(raw); assert.equal(parsed.to?.toLowerCase(), plan.to.toLowerCase()); assert.equal(parsed.data?.toLowerCase(), plan.data.toLowerCase());
   const txHash = keccak256(raw);
   walletGuard.sent(payIdx, txHash); saveWallet();
-  walletOpen = relabel(walletOpen, `${walletOpen}:tx:${txHash}`); // the hash is in the plan record before the broadcast
+  walletOpen = relabel(walletOpen, `${walletOpen}:tx:${txHash}`); sessions.put(walletBase, { txHash }); // the hash is in the plan record and the session store before the broadcast
   await client.sendRawTransaction({ serializedTransaction: raw });
   log(`wallet broadcast ${txHash}`); stopAfter("wallet-sent");
   const sent = await post(`/v1/wallet/attempts/${attemptId}/sent`, { txHash }, token);
@@ -337,6 +421,4 @@ if (toRun.includes("interrupt")) {
 evidence.spend = { visitorKey: walletGuard.summary(), projectOutflow: { capUsdc: usdc18(projectCap), measuredUsdc: usdc18(meter.outflow(await syncMeasured())), baselineUsdc: usdc18(baseline), carriedBaseline: baseline !== startTotal, addresses: projectAddresses }, plan: book ? book.lines() : null };
 if (book) book.apply((p) => endStep(p, "lifecycle", "done"));
 log(`measured project outflow: ${evidence.spend.projectOutflow.measuredUsdc} USDC of the ${usdc18(projectCap)} USDC cap`);
-const outPath = resolve(outDir, `${net}-lifecycle-${stamp}.json`);
-writeFileSync(outPath, JSON.stringify(evidence, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2));
-log(`evidence written to ${outPath}`);
+log(`evidence written to ${writeEvidence("PASS")}`);

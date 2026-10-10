@@ -54,7 +54,10 @@ describe("plan ledger", () => {
     const restarted = beginMeasured(parsePlan(serializePlan(p)), "acceptance", ["0x0687", "0xC618", "0xb6eE"], U("9.80"));
     expect(restarted.steps.acceptance).toMatchObject({ invocations: 2, baselineTotalNativeAtomic: U("10.0"), openRuns: ["run-1"] });
     const measured = updateMeasured(restarted, "acceptance", U("9.80")); expect(measured.steps.acceptance.outflowNativeAtomic).toBe(U("0.20")); // from the first baseline, not from 9.88
-    const settled = noteOpen(measured, "acceptance", "run-1", false, U("0.06")); expect(settled.steps.acceptance).toMatchObject({ pendingNativeAtomic: 0n, openRuns: [] });
+    const settled = noteOpen(measured, "acceptance", "run-1", false, U("0.06")); expect(settled.steps.acceptance).toMatchObject({ pendingNativeAtomic: 0n, openRuns: [], settledRuns: ["run-1"] }); // review of bf0c800: closing an open operation records it as settled, so a restart knows what is done
+    expect(noteOpen(settled, "acceptance", "never-open", false, U("0.06")).steps.acceptance.settledRuns).toEqual(["run-1"]); // closing an id that was not open records nothing
+    expect(parsePlan(serializePlan(settled)).steps.acceptance.settledRuns).toEqual(["run-1"]);
+    { const raw = JSON.parse(serializePlan(settled)); delete raw.steps.acceptance.settledRuns; expect(parsePlan(JSON.stringify(raw)).steps.acceptance.settledRuns).toEqual([]); } // a record written before this field reads as none settled
     expect(() => beginMeasured(settled, "acceptance", ["0xC618"], U("9.80"))).toThrow(/would not be comparable/);
     expect(() => updateMeasured(plan(), "lifecycle", U("1"))).toThrow(/no baseline/);
     expect(endStep(settled, "acceptance", "done").steps.acceptance.status).toBe("done");

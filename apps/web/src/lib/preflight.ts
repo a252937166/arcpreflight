@@ -1,7 +1,7 @@
 import { encodeFunctionData, keccak256, toHex, type Hex } from "viem";
 import { BaselineCore, IntentCore, PolicyCore, QuoteCore, baselineDigest, intentDigest, policyDigest } from "@arcpreflight/schema";
 import { DEMO_MERCHANT_ABI, PAY_SELECTOR } from "@arcpreflight/policy";
-import { api, type BaselineRecord } from "./api";
+import { api, type ApiClient, type BaselineRecord } from "./api";
 
 export type DeveloperOrder = { orderId: Hex; tx: Hex; block: string; merchant: Hex; amountNativeAtomic: string; baselineDigest: Hex | null };
 export type PinnedQuote = { requestId: string; pinnedBlock: string; quote: QuoteCore; __status: number };
@@ -42,12 +42,12 @@ export function quoteReady(prepared: PreparedQuote | null, orderBlock: string, n
 /** Re-request stale observations under new IDs; retrying the old ID would reuse the same pinned quote. */
 export async function prepareOrderQuote(intent: IntentCore, orderBlock: string, token: string, options: {
   maxAttempts?: number; wait?: () => Promise<void>; isCurrent?: () => boolean;
-} = {}): Promise<PreparedQuote> {
+} = {}, client: ApiClient = api): Promise<PreparedQuote> {
   const maxAttempts = options.maxAttempts ?? 8;
   let current = intent;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (options.isCurrent?.() === false) throw new Error("Wallet or intent changed; request a new quote.");
-    const response = await api.preflight(current, token);
+    const response = await client.preflight(current, token);
     if (options.isCurrent?.() === false) throw new Error("Wallet or intent changed; request a new quote.");
     if (response.__status !== 402 || !response.quote) throw new Error(`expected 402 quote, got ${response.__status}`);
     const quote = QuoteCore.parse(response.quote);
@@ -63,8 +63,8 @@ export async function prepareOrderQuote(intent: IntentCore, orderBlock: string, 
   throw new Error("The pinned block cannot see this order yet. Nothing was paid; request a new quote shortly.");
 }
 
-export async function approvedBaseline(digest: string, token: string): Promise<BaselineRecord> {
-  const response = await api.baseline(digest, token);
+export async function approvedBaseline(digest: string, token: string, client: ApiClient = api): Promise<BaselineRecord> {
+  const response = await client.baseline(digest, token);
   const baseline = BaselineCore.parse(response.baseline);
   if (baselineDigest(baseline) !== digest || response.baselineDigest !== digest || typeof response.revoked !== "boolean") throw new Error("baseline digest or revocation metadata mismatch");
   return { baselineDigest: response.baselineDigest, baseline, revoked: response.revoked };

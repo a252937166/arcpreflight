@@ -1,8 +1,10 @@
 // Published evidence (audit 2026-10-10, API-01 P0). The old route resolved the request path under evidence/ with path.resolve, and an
 // absolute path discards the root: any readable .json on the host could be fetched. Now the route serves ONLY files that appear in an
-// explicit publish manifest built from the evidence directory itself (regular files, `.json`, never under a `private` directory at any
-// depth, never through a symlink that leaves the root), and a request is answered only when its exact relative path is in that manifest
-// AND the real path of the file is still inside the real path of the root. Nothing outside evidence/ is ever opened.
+// explicit publish manifest built from the evidence directory itself (REGULAR files, `.json`, never under a `private` directory at any
+// depth), and a request is answered only when its exact relative path is in that manifest AND the path contains no symbolic link at all.
+// Review of bf0c800 (P2): symlinks are never published — an alias inside the root used to be allowed when its target stayed inside the
+// root, which let `selftest/alias.json → private/secret.json` publish an excluded file; the exclusion rules now apply to what is actually
+// opened, and the simplest sound rule is that nothing reached through a link is ever opened. Nothing outside evidence/ is ever opened.
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
@@ -18,8 +20,8 @@ const realRoot = (root: string): string | null => { try { return realpathSync(re
 /** `child` is `root` itself or below it, compared on real paths */
 const within = (child: string, root: string) => child === root || child.startsWith(root.endsWith(sep) ? root : root + sep);
 
-/** The publish manifest: every publishable file under evidence/, walked without following symlinked directories; a symlinked file counts only
- *  when its target stays inside the root. Sorted by path. */
+/** The publish manifest: every publishable REGULAR file under evidence/; symbolic links (to files or directories, wherever they point) are
+ *  skipped. Sorted by path. */
 export function evidenceManifest(root: string): EvidenceEntry[] {
   const base = realRoot(root);
   if (!base) return [];
@@ -30,13 +32,7 @@ export function evidenceManifest(root: string): EvidenceEntry[] {
     for (const e of entries) {
       const path = resolve(dir, e.name); const r = rel ? `${rel}/${e.name}` : e.name;
       if (e.name.toLowerCase() === "private") continue;
-      if (e.isSymbolicLink()) { // a symlink is published only as a FILE whose target is inside the root; symlinked directories are not walked
-        let target: string; try { target = realpathSync(path); } catch { continue; }
-        if (!within(target, base)) continue;
-        let st; try { st = statSync(target); } catch { continue; }
-        if (st.isFile() && publishablePath(r)) out.push({ path: r, bytes: st.size });
-        continue;
-      }
+      if (e.isSymbolicLink()) continue; // never published, wherever it points (review of bf0c800, P2)
       if (e.isDirectory()) { walk(path, r); continue; }
       if (e.isFile() && publishablePath(r)) { try { out.push({ path: r, bytes: statSync(path).size }); } catch { /* vanished */ } }
     }
@@ -44,7 +40,8 @@ export function evidenceManifest(root: string): EvidenceEntry[] {
   walk(base, "");
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
-/** The content of ONE published file, or null: the exact relative path must be in the manifest and its real path inside the real root. */
+/** The content of ONE published file, or null: the exact relative path must be in the manifest, resolve under the real root, and contain no
+ *  symbolic link anywhere (its real path equals the path itself, the root being real already); the entry must be a regular file. */
 export function publishedEvidence(root: string, rel: string): string | null {
   if (!publishablePath(rel)) return null;
   const base = realRoot(root); if (!base) return null;
@@ -52,7 +49,7 @@ export function publishedEvidence(root: string, rel: string): string | null {
   const candidate = resolve(base, ...rel.split("/"));
   if (!within(candidate, base)) return null;
   let real: string; try { real = realpathSync(candidate); } catch { return null; }
-  if (!within(real, base)) return null;
-  try { if (!lstatSync(candidate).isFile() && !statSync(real).isFile()) return null; return readFileSync(real, "utf8"); } catch { return null; }
+  if (real !== candidate) return null; // a link somewhere in the path (file or ancestor directory): not opened, wherever it points
+  try { if (!lstatSync(candidate).isFile()) return null; return readFileSync(candidate, "utf8"); } catch { return null; }
 }
 export const evidenceDirExists = (root: string) => existsSync(resolve(root, "evidence"));
