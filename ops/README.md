@@ -136,8 +136,10 @@ The plan, budget and stop conditions are in `docs/MAINNET-PLAN.md`. `preflight` 
   run it admitted, or admits the same operation now; a cooldown/busy refusal is waited out and re-sent; a budget or fixtures-missing refusal proves
   nothing started and releases the reservation; a lost answer, `503 EXECUTION_GATED`, `409` or any other answer proves nothing, so the reservation is
   KEPT and the script stops — then re-reads and re-verifies the positions completed earlier (by run id), and budgets ONLY the remaining positions
-  (the dry run shows the same recovery plan). A record without a key or position stops the step for a manual check. The recovery flow is tested
-  end to end against a fake API and a fake Arc RPC: `pnpm -C scripts test` (`scripts/test/mainnet-recovery.test.ts`).
+  (the dry run shows the same recovery plan). A record without a key or position stops the step for a manual check. Review of `0d1088e`: a released
+  reservation goes to `releasedRuns` (unfinished work, run again), only an operation settled with its run id counts as done, PASS needs a verified
+  report for every planned position, and the balances are checked against the remaining work only (again after recovery, before any new start).
+  The recovery flow is tested end to end against a fake API and a fake Arc RPC: `pnpm -C scripts test` (`scripts/test/mainnet-recovery.test.ts`).
 
 ## Delayed chain RPC (acceptance row S12, testnet only)
 
