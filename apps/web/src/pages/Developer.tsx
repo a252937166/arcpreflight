@@ -9,7 +9,7 @@ import type { Hex as HexT } from "viem";
 import { intentDigest, policyDigest, type IntentCore } from "@arcpreflight/schema";
 import { decide } from "@arcpreflight/policy";
 import { useNet } from "../App";
-import { api, apiPath, explorerAddr, explorerTx, type AttemptView, type BaselineRecord, type CheckRow, type OrderView, type PassportBundle } from "../lib/api";
+import { api, apiPath, ApiError, explorerAddr, explorerTx, type AttemptView, type BaselineRecord, type CheckRow, type OrderView, type PassportBundle } from "../lib/api";
 import { approvedBaseline, developerIntent, developerPolicy, prepareOrderQuote, quoteReady, WALLET_VALIDATION_WINDOW_SECONDS, type PreparedQuote, WALLET_REPORT_AGE_SECONDS } from "../lib/preflight";
 import { useWallet } from "../lib/wallet";
 import { purchaseReport, signFeeAuthorization, type Delivered } from "../lib/walletRun";
@@ -21,7 +21,8 @@ import { baselineDigestFor, creationStopped, creationUnconfirmed, fixtureForProx
 import { executeAttempt, executionInFlight, insideWindow, isOpen, isTerminal, isUncertain, reconcileUncertainAttempt, rememberedAttempts, sendValidatedAttempt, stateTone, type ExecutePhase, type Refusal } from "../lib/attempts";
 import { clearWorkflow, loadWorkflow, loadWorkflows, saveWorkflow } from "../lib/workflow";
 import { LIFECYCLE_LABELS, type LifecycleId, type LifecycleStage, type StageStatus } from "../lib/outcome";
-import { budgetCheck, budgetComponents, useBalances } from "../lib/faucet";
+import { budgetCheck, budgetComponents } from "../lib/faucet";
+import { useBalances } from "../lib/balances";
 import { verificationStageStatus, type VerificationKind } from "../lib/verifyInBrowser";
 import { Chip, DecisionBadge, Hex, Spinner } from "../components/Badges";
 import { ReportView } from "../components/Report";
@@ -78,7 +79,10 @@ export default function Developer() {
   const [approved, setApproved] = useState(false);
   const [unitMistake, setUnitMistake] = useState(false);
   const [check, setCheck] = useState<Check | null>(null);
-  const [baseline, setBaseline] = useState<BaselineRecord | null>(null);
+  /** the referenced approval as last read for `digest`: `loading` until the first answer, `loaded`, `missing` (the API has no such baseline: a
+   *  definitive answer), or `error` (the read failed; `record` keeps the last successful read of the same digest, if any). The decision is
+   *  never made from a read that has not finished (presentation review 2026-10-09, finding 1). */
+  const [baselineRead, setBaselineRead] = useState<{ digest: string | null; record: BaselineRecord | null; status: "none" | "loading" | "loaded" | "missing" | "error"; error: Described | null }>({ digest: null, record: null, status: "none", error: null });
   const [now, setNow] = useState(Date.now);
   const [attempt, setAttempt] = useState<AttemptView | null>(null);
   const [exec, setExec] = useState<Exec>(IDLE);
@@ -95,7 +99,10 @@ export default function Developer() {
   // balances on the API's chain (native = gas and the business payment, ERC-20 face = the same balance); re-read after orders, purchases and faucet claims
   const bal = useBalances(w.provider, w.account, onArc && !!net, net?.usdc ?? null);
   const refreshBal = bal.refresh;
-  useEffect(() => { if (order || check?.delivered || attempt) refreshBal(); }, [order, check?.delivered, attempt, refreshBal]);
+  // re-read on the events that move the wallet's balance: an order created, a check fee settled, an attempt that reached a terminal state (a
+  // confirmed payment); the store is shared with the nav chip and every other view of this wallet (lib/balances.ts), other tabs are told
+  const balanceEvent = `${order?.orderId ?? ""}|${order?.state ?? ""}|${check?.delivered?.requestId ?? ""}|${attempt?.attemptId ?? ""}|${attempt?.state ?? ""}|${attempt?.businessStatus ?? ""}`;
+  useEffect(() => { if (order || check?.delivered || attempt) refreshBal(); }, [balanceEvent, refreshBal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- derived facts
   // 2026-10-09: an order is usable only once its creation is CONFIRMED — approval, quote, purchase and execution stay closed before that;
@@ -115,9 +122,17 @@ export default function Developer() {
   // step 4 comes after the report was bought: its fee is already paid, so the execution needs the order amount and the gas reserve
   const budgetExec = useMemo(() => budgetCheck(bal.native, { feeTokenAtomic: feeToken, amountNativeAtomic: order?.amountNativeAtomic ?? 0n, plan: attempt?.state === "VALIDATED" ? attempt?.plan ?? null : null, feePaid: !!delivered }), [bal.native, feeToken, order?.amountNativeAtomic, attempt?.plan, attempt?.state, delivered]);
   const canBuy = orderConfirmed && !delivered && quoteOk && !!account && onArc && !busy && budgetBuy.enough !== false;
-  const decision = useMemo(() => (intent && policy && pDigest && delivered
+  // the approval the decision may use: the record read for THIS digest (a stale record of another proxy never stands in)
+  const baseline = baselineRead.digest === orderMeta.baselineDigest ? baselineRead.record : null;
+  // no decision before the first read of the referenced approval has finished (or the API answered that there is none); a failed re-read
+  // keeps the last successful read, a failed first read keeps waiting (the effect retries) — a network error is not "no approval"
+  const baselinePending = !!orderMeta.baselineDigest && (baselineRead.digest !== orderMeta.baselineDigest || baselineRead.status === "loading" || baselineRead.status === "none" || (baselineRead.status === "error" && !baselineRead.record));
+  const decision = useMemo(() => (intent && policy && pDigest && delivered && !baselinePending
     ? decide({ intent, policy, policyDigest: pDigest, baseline: baseline?.baseline ?? null, baselineDigest: (baseline?.baselineDigest as HexT | undefined) ?? null, baselineRevoked: baseline?.revoked ?? false, report: delivered.report as any, reportDigest: delivered.digest as HexT, now: new Date(now), simulation: delivered.simulation })
-    : null), [intent, policy, pDigest, delivered, baseline, now]);
+    : null), [intent, policy, pDigest, delivered, baseline, baselinePending, now]);
+  /** a report is delivered and the referenced approval is still being read: the check stage is in progress, nothing is decided, stopped or opened */
+  const deciding = !!delivered && !attempt && baselinePending;
+  const baselineRereadFailed = !!delivered && !deciding && baselineRead.status === "error" && !!baselineRead.record;
   const reconciling = (exec.phase === "unknown-submission" || exec.phase === "uncertain") && busy === "execute";
   /** §10 item 1: the attempt carries a prompt marker (server view, or this browser's memory of having opened the prompt) and this page is not mid-execution
    *  with it — the transaction may have been submitted: never "Continue in wallet", never "Abandon (nothing sent)" */
@@ -137,7 +152,7 @@ export default function Developer() {
   const checkStopped = (!!decision && decision.decision !== "NO_POLICY_VIOLATION" && !expired && !attempt) || (attempt?.state === "REFUSED" && !expired);
   // a VALIDATED attempt inside its window is still step 4's business (the prompt may be opened again, or abandoned); one that is broadcast or whose
   // window closed is recovery's (step 5)
-  const stage = !orderConfirmed ? 1 : !approved ? 2 : (!delivered && !attempt) || expired ? 3 : checkStopped ? (passport ? (verification ? 8 : 7) : 6) : !attempt || executing ? 4 : attemptOpen ? (attempt.state === "VALIDATED" && (insideWindow(attempt, now) || ambiguous) ? 4 : 5) : !attemptSettled ? 4 : passport ? (verification ? 8 : 7) : 6;
+  const stage = !orderConfirmed ? 1 : !approved ? 2 : (!delivered && !attempt) || expired || deciding ? 3 : checkStopped ? (passport ? (verification ? 8 : 7) : 6) : !attempt || executing ? 4 : attemptOpen ? (attempt.state === "VALIDATED" && (insideWindow(attempt, now) || ambiguous) ? 4 : 5) : !attemptSettled ? 4 : passport ? (verification ? 8 : 7) : 6;
   const isStepOpen = (n: number) => openSteps[n] ?? n === stage;
   const toggle = (n: number) => setOpenSteps((o) => ({ ...o, [n]: !isStepOpen(n) }));
   const jump = (id: LifecycleId) => { const n = STEP_OF[id]; setOpenSteps((o) => ({ ...o, [n]: true })); if (typeof document !== "undefined") document.getElementById(`step-${n}`)?.scrollIntoView?.({ behavior: "smooth", block: "start" }); };
@@ -151,7 +166,7 @@ export default function Developer() {
       note: !order ? null : orderConfirmed ? `${nativeAtomicToUsdcText(order.amountNativeAtomic)} USDC · ${paymentLabel(order).text}` : orderPending ? "waiting for the creation receipt" : "creation not established — create a new order" },
     { id: "approve", label: LIFECYCLE_LABELS.approve, status: sstat(2, approved && orderConfirmed), note: approved && orderConfirmed ? "policy approved" : null },
     // once an attempt exists its RECORDED decision is the fact; the live re-evaluation ages with the report (maxReportAgeSeconds) and would mislead
-    { id: "check", label: LIFECYCLE_LABELS.check, status: expired ? sstat(3, false) : attempt ? (attempt.decision === "BLOCKED" ? "stop" : attempt.decision === "REVIEW_REQUIRED" || attempt.state === "REFUSED" ? "review" : "done") : delivered ? (decision?.decision === "BLOCKED" ? "stop" : decision?.decision === "REVIEW_REQUIRED" ? "review" : "done") : sstat(3, false), note: expired ? "report expired — re-run the check" : attempt ? attempt.decision.toLowerCase().replace(/_/g, " ") : decision ? decision.decision.toLowerCase().replace(/_/g, " ") : null },
+    { id: "check", label: LIFECYCLE_LABELS.check, status: deciding ? "active" : expired ? sstat(3, false) : attempt ? (attempt.decision === "BLOCKED" ? "stop" : attempt.decision === "REVIEW_REQUIRED" || attempt.state === "REFUSED" ? "review" : "done") : delivered ? (decision?.decision === "BLOCKED" ? "stop" : decision?.decision === "REVIEW_REQUIRED" ? "review" : "done") : sstat(3, false), note: deciding ? "reading the referenced approval before deciding…" : expired ? "report expired — re-run the check" : attempt ? attempt.decision.toLowerCase().replace(/_/g, " ") : decision ? decision.decision.toLowerCase().replace(/_/g, " ") : null },
     { id: "execute", label: LIFECYCLE_LABELS.execute, status: execStatus, note: checkStopped ? "nothing executed" : ambiguous ? (exec.phase === "unknown-submission" ? "wallet answer unexplained — reconciling" : "wallet was asked to sign — submission uncertain") : attempt ? attempt.state.toLowerCase().replace(/_/g, " ") : exec.phase === "refused" ? "refused" : null },
     { id: "recover", label: LIFECYCLE_LABELS.recover, status: recoverStatus, note: recoverStatus === "done" ? "reconciled" : recoverStatus === "active" ? "attempt still open" : "not needed" },
     { id: "passport", label: LIFECYCLE_LABELS.passport, status: sstat(6, !!passport), note: passport ? passport.name : null },
@@ -245,10 +260,17 @@ export default function Developer() {
   }, [check?.quote, delivered, attemptOpen]);
   // the referenced approval, re-read every 5 s while a report is on screen (a revocation flips the decision)
   useEffect(() => {
-    setBaseline(null);
-    const digest = orderMeta.baselineDigest; if (!digest) return;
+    const digest = orderMeta.baselineDigest;
+    if (!digest) { setBaselineRead({ digest: null, record: null, status: "none", error: null }); return; }
+    // a new digest starts a fresh read (nothing stands in for it meanwhile); the same digest keeps its record while it is re-read — the
+    // re-read that follows a purchase used to clear it, and the page decided "review required" from the gap (2026-10-09)
+    setBaselineRead((b) => (b.digest === digest ? b : { digest, record: null, status: "loading", error: null }));
     let alive = true; let request = 0;
-    const refresh = () => { const current = ++request; return withSession((t) => approvedBaseline(digest, t)).then((b) => { if (alive && current === request) setBaseline(b); }).catch(() => { if (alive && current === request) setBaseline(null); }); };
+    const refresh = () => { const current = ++request; return withSession((t) => approvedBaseline(digest, t))
+      .then((b) => { if (alive && current === request) setBaselineRead({ digest, record: b, status: "loaded", error: null }); })
+      .catch((e) => { if (!alive || current !== request) return;
+        if (e instanceof ApiError && e.status === 404) setBaselineRead({ digest, record: null, status: "missing", error: null }); // a definitive answer: no approved baseline
+        else setBaselineRead((prev) => ({ digest, record: prev.digest === digest ? prev.record : null, status: "error", error: describeError(e) })); }); };
     refresh();
     const timer = delivered ? setInterval(refresh, 5000) : null;
     return () => { alive = false; if (timer) clearInterval(timer); };
@@ -371,7 +393,7 @@ export default function Developer() {
   const myOrders = mine.orders.filter((o) => same(o.payer, account)), otherOrders = mine.orders.filter((o) => !same(o.payer, account));
   const otherSaved = loadWorkflows().filter((s) => !same(s.payer, account));
   const passportSource = attempt?.passportAvailable ? "attempt" : check?.delivered ? "check" : null;
-  const execDisabledWhy = gated ? "execution is gated on this instance" : !orderConfirmed ? "the order's creation is not confirmed" : !executable ? (expired ? "the report expired — re-run the check (a new quote and fee)" : decision ? `the decision is ${decision.decision}` : "run the preflight check first") : !onArc ? `switch your wallet to ${netLabel}` : budgetExec.enough === false ? budgetExec.sentence! : attemptOpen ? "an attempt is already open: continue, abandon or recover it" : executing ? "in progress" : busy ? "busy" : "";
+  const execDisabledWhy = gated ? "execution is gated on this instance" : !orderConfirmed ? "the order's creation is not confirmed" : deciding ? "the referenced approval is being read — the decision follows" : !executable ? (expired ? "the report expired — re-run the check (a new quote and fee)" : decision ? `the decision is ${decision.decision}` : "run the preflight check first") : !onArc ? `switch your wallet to ${netLabel}` : budgetExec.enough === false ? budgetExec.sentence! : attemptOpen ? "an attempt is already open: continue, abandon or recover it" : executing ? "in progress" : busy ? "busy" : "";
   const faucetRequired = stage >= 4 ? budgetExec.required : budgetBuy.required;
   const faucetStep = stage >= 4 ? "executing the payment" : stage === 3 ? "buying the report" : "the first paid step (report + order + gas)";
   const faucetNeeds = budgetComponents({ feePaid: stage >= 4 && !!delivered }).long;
@@ -462,7 +484,7 @@ export default function Developer() {
 
           {/* 3 · preflight check */}
           <StepSection n={3} id="step-3" title="Preflight check" status={stages[2].status} open={isStepOpen(3)} onToggle={() => toggle(3)}
-            summary={(delivered || attempt) && <>{attempt ? <DecisionBadge decision={attempt.decision} size="sm" /> : decision ? <DecisionBadge decision={decision.decision} size="sm" /> : null}{delivered?.serviceFeeTx && <> · fee <Hex value={delivered.serviceFeeTx} n={4} link={explorerTx(net, delivered.serviceFeeTx)} /></>}{check && <> · request <code>{check.requestId.slice(0, 8)}</code></>}</>}>
+            summary={(delivered || attempt) && <>{attempt ? <DecisionBadge decision={attempt.decision} size="sm" /> : deciding ? <span className="tiny dim"><Spinner /> reading the referenced approval…</span> : decision ? <DecisionBadge decision={decision.decision} size="sm" /> : null}{delivered?.serviceFeeTx && <> · fee <Hex value={delivered.serviceFeeTx} n={4} link={explorerTx(net, delivered.serviceFeeTx)} /></>}{check && <> · request <code>{check.requestId.slice(0, 8)}</code></>}</>}>
             {!approved || !orderConfirmed ? <p className="dim small">{order && !orderConfirmed ? "the order's creation is not confirmed — nothing can be checked yet" : "approve the policy first"}</p> : (<>
               <div className="row between" style={{ gap: 10 }}>
                 <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={unitMistake} disabled={!!busy} onChange={(e) => { setUnitMistake(e.target.checked); setCheck(null); setAttempt(null); setExec(IDLE); }} /> encode the value in 6-decimal units — the classic Arc mistake → BLOCKED</label>
@@ -477,6 +499,8 @@ export default function Developer() {
               {check?.quote && <div className="small muted">quote {usdcToken(check.quote.response.quote.amountTokenAtomic)} → payTo <Hex value={check.quote.response.quote.payTo} n={5} /> · report pinned at #{check.quote.response.pinnedBlock} · expires {utc(check.quote.response.quote.expiresAt)} · request <code>{check.requestId}</code>{delivered ? " · purchased" : !quoteOk && " · expired; request a new quote"}</div>}
               {delivered && (<>
                 <div className="small muted">fee settled by the project's relayer: {delivered.serviceFeeTx ? <Hex value={delivered.serviceFeeTx} link={explorerTx(net, delivered.serviceFeeTx)} /> : "—"} · digest recomputed here, bound to your intent ✓ · pinned #{delivered.report.observation.blockNumber}{freshLeft !== null && <> · <Chip tone={freshLeft > 60 ? "info" : "warn"}>{freshLeft > 0 ? `usable for ${Math.floor(freshLeft / 60)}:${String(freshLeft % 60).padStart(2, "0")}` : "report expired — get a new quote and buy again"}</Chip></>}</div>
+                {deciding && <div className="row small muted" role="status" data-testid="decision-pending" style={{ gap: 8, alignItems: "center" }}><Spinner /> reading the referenced approval before deciding — the decision and the next step appear together once it is read{baselineRead.status === "error" && baselineRead.error ? <> · the read failed ({baselineRead.error.text}); retrying every 5 s</> : null}</div>}
+                {baselineRereadFailed && <div className="tiny" style={{ color: "var(--amber)" }} role="status" data-testid="baseline-reread-failed">the referenced approval could not be re-read ({baselineRead.error?.text}); the decision below is from the last successful read · retrying every 5 s</div>}
                 {decision && !attempt && (
                   <div className="two" style={{ gap: 20 }}>
                     <div className="stack" style={{ gap: 8 }}>

@@ -8,7 +8,8 @@
 import { useEffect, useRef, useState } from "react";
 import { explorerAddr, explorerTx, type NetworkInfo } from "../lib/api";
 import { useWallet, friendlyName } from "../lib/wallet";
-import { faucetAvailable, useBalances, useFaucetClaim, type FaucetProgress } from "../lib/faucet";
+import { faucetAvailable, useFaucetClaim, type FaucetProgress } from "../lib/faucet";
+import { useBalances } from "../lib/balances";
 import { exactUsdc } from "../lib/costTable";
 import { short, usdcNative } from "../lib/format";
 import { Chip, Spinner } from "./Badges";

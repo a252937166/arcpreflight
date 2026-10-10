@@ -37,6 +37,7 @@ import { describeError, describeBody } from "../src/lib/errors";
 import { ApiError, setApiBase } from "../src/lib/api";
 import { resetSessions, storedSession } from "../src/lib/session";
 import { previewBundle } from "../src/lib/passportPreview";
+import { BALANCE_SIGNAL_KEY, balancesOf, resetBalanceStore } from "../src/lib/balances";
 
 function render(Page: () => any) { h.cursor = 0; const tree = Page(); for (const effect of h.pending.splice(0)) effect(); return tree; }
 function nodes(tree: any): any[] { const all: any[] = []; const walk = (x: any) => { if (Array.isArray(x)) return x.forEach(walk); if (x && typeof x === "object") { all.push(x); walk(x.props?.children); } }; walk(tree); return all; }
@@ -44,11 +45,13 @@ function content(tree: any): string { return nodes(tree).map((n) => JSON.stringi
 function button(tree: any, label: string) { const b = nodes(tree).find((n) => n.type === "button" && content(n).includes(label)); if (!b) throw new Error(`button missing: ${label}`); return b; }
 function checkbox(tree: any) { return nodes(tree).find((n) => n.type === "input" && n.props.type === "checkbox"); }
 function badge(tree: any) { return nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "DecisionBadge"); }
+/** the lifecycle strip's stages by id (status + note), as the page handed them to <Lifecycle> */
+function lifecycleOf(tree: any): Record<string, { status: string; note?: string | null }> { const l = nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "Lifecycle"); return Object.fromEntries(l.props.stages.map((s: any) => [s.id, s])); }
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(NOW);
-  h.cursor = 0; h.state = []; h.memo = []; h.effects = []; h.pending = []; h.params = {}; h.ctx = {}; h.balance = 10n ** 18n; resetSessions(); setApiBase("");
+  h.cursor = 0; h.state = []; h.memo = []; h.effects = []; h.pending = []; h.params = {}; h.ctx = {}; h.balance = 10n ** 18n; resetSessions(); setApiBase(""); resetBalanceStore();
   h.net = { network: "testnet", chainId: 5042002, caip2: "eip155:5042002", usdc: "0x3600000000000000000000000000000000000000", rpc: "http://offline.invalid", explorer: "http://offline.invalid", priceTokenAtomic: "10000", fixtures: [], accounts: {}, budget: { maxRunsPerDay: 10, usedToday: 0, clientCooldownSeconds: 60, amountNativeAtomic: "50000000000000000" } };
   h.verifyResult = null;
   // a wallet that answers the pre-send reads (account, chain) like an extension; eth_sendTransaction is what each test decides
@@ -69,6 +72,8 @@ const PLAN = { chainId: 5042002, from: ACCOUNT, type: 2, to: MERCHANT, data: "0x
 const VALIDATED: any = { attemptId: ATTEMPT_ID, executionMode: "wallet", state: "VALIDATED", requestId: REQUEST, orderId: order.orderId, merchant: MERCHANT, payer: ACCOUNT, amountNativeAtomic: order.amountNativeAtomic, labels: ["LIVE_REQUEST"], decision: "NO_POLICY_VIOLATION", decisionReasons: [], refusal: null, validUntil: new Date(NOW.getTime() + 60_000).toISOString(), txHash: null, nonce: null, from: null, broadcastBlock: null, businessStatus: null, businessTxHash: null, block: null, note: null, deviations: null, nextAction: "confirm in your wallet", passportAvailable: false, businessExecution: { state: "VALIDATED", txHash: null, nonce: null, broadcastBlock: null, consumedBy: null, note: null, validUntil: null }, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(), plan: PLAN, costStatement: null, recovery: null };
 function developerApi(firstPin = "100") {
   const sent: any[] = []; const attempts: any[] = []; const prompts: any[] = []; let revoked = false; let sessions = 0;
+  // the referenced approval's read can be held (a slow API) and released later, or made to answer an error or a 404
+  let baselineHold: ((r: Response) => void)[] | null = null; let baselineAnswer: () => Response = () => response({ baselineDigest: baselineHash, baseline, revoked });
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     if (path === "/v1/session") return response(SESSION(++sessions), 201);
@@ -82,7 +87,7 @@ function developerApi(firstPin = "100") {
     if (path === `/v1/wallet/attempts/${ATTEMPT_ID}/sent`) return response({ ...VALIDATED, state: "BROADCAST_ATTEMPTED", txHash: D, broadcastBlock: "150" });
     if (path === `/v1/wallet/attempts/${ATTEMPT_ID}`) return response({ ...VALIDATED, state: "CONFIRMED", txHash: D, businessTxHash: D, businessStatus: "SUCCESS", block: "200", passportAvailable: true, deviations: { mismatch: [], deviations: {} } });
     if (path === "/v1/requests") return response({ requests: [] });
-    if (path.startsWith("/v1/baselines/")) return response({ baselineDigest: baselineHash, baseline, revoked });
+    if (path.startsWith("/v1/baselines/")) { if (baselineHold) return new Promise<Response>((resolve) => baselineHold!.push(resolve)); return baselineAnswer(); }
     if (path === "/v1/preflight") {
       const body = JSON.parse(init!.body as string); sent.push(body);
       if (!body.payment) return response(quoteFor(body.intent, sent.length === 1 ? firstPin : "100"), 402);
@@ -92,7 +97,10 @@ function developerApi(firstPin = "100") {
     throw new Error(`Unexpected URL: ${path}`);
   });
   vi.stubGlobal("fetch", fetch);
-  return { sent, attempts, prompts, fetch, revoke: () => { revoked = true; }, sessions: () => sessions };
+  const baselines = { hold: () => { baselineHold = []; }, release: () => { const waiting = baselineHold ?? []; baselineHold = null; for (const r of waiting) r(baselineAnswer()); },
+    fail: (status: number, body: unknown) => { baselineAnswer = () => response(body, status); }, restore: () => { baselineAnswer = () => response({ baselineDigest: baselineHash, baseline, revoked }); },
+    reads: () => fetch.mock.calls.filter((c) => String(c[0]).startsWith("/v1/baselines/")).length };
+  return { sent, attempts, prompts, fetch, revoke: () => { revoked = true; }, sessions: () => sessions, baselines };
 }
 const dialogNode = (tree: any) => nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "OrderDialog");
 /** step 1 through the dialog (the dialog's own form is exercised in isolation below), then step 2 "Approve & continue" */
@@ -152,6 +160,67 @@ describe("Developer interactions", () => {
     await button(tree, "Get quote").props.onClick(); tree = render(Developer);
     expect(button(tree, "Sign TransferWithAuthorization").props.disabled).toBe(false);
     expect(api.sent[2].intent.clientRequestId).not.toBe(api.sent[0].intent.clientRequestId);
+  });
+});
+
+describe("presentation review 2026-10-09 · the decision waits for the referenced approval; one balance for every view", () => {
+  it("buying a report never shows a transient 'review required': the approval read once is kept while it is re-read, and the decision lands with the report", async () => {
+    const api = developerApi(); let tree = await createDeveloperOrder();
+    expect(api.baselines.reads()).toBe(1); // read once when the order was created
+    await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    api.baselines.hold(); // the re-read that follows the purchase hangs (a slow API)
+    await button(tree, "Sign TransferWithAuthorization").props.onClick(); render(Developer); await flush(); tree = render(Developer);
+    expect(api.baselines.reads()).toBe(2); // the re-read was asked for …
+    expect(badge(tree).props.decision).toBe("NO_POLICY_VIOLATION"); // … and the decision neither waited for it nor regressed
+    let lc = lifecycleOf(tree); expect(lc.check.status).toBe("done"); expect(lc.execute.status).toBe("active"); expect(lc.passport.status).toBe("todo");
+    expect(content(tree)).not.toContain("review required"); expect(content(tree)).not.toContain("nothing executed");
+    expect(button(tree, "Execute with your wallet").props.disabled).toBe(false);
+    api.baselines.release(); await flush(); tree = render(Developer);
+    expect(badge(tree).props.decision).toBe("NO_POLICY_VIOLATION"); lc = lifecycleOf(tree); expect(lc.check.status).toBe("done"); expect(lc.execute.status).toBe("active");
+  });
+  it("while the referenced approval is still being read after a purchase nothing is decided: a loading note on the check stage, execution and export closed; the decision, the stages and the button update together when the read lands", async () => {
+    const api = developerApi(); api.baselines.hold(); // the approval was never read before the report is delivered
+    let tree = await createDeveloperOrder();
+    await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    await button(tree, "Sign TransferWithAuthorization").props.onClick(); render(Developer); await flush(); tree = render(Developer);
+    expect(badge(tree)).toBeUndefined(); // no decision badge of any kind — not "review required", not "pending"
+    expect(content(byTestId(tree, "decision-pending"))).toContain("reading the referenced approval");
+    let lc = lifecycleOf(tree); expect(lc.check.status).toBe("active"); expect(lc.check.note).toContain("reading the referenced approval"); expect(lc.execute.status).toBe("todo"); expect(lc.passport.status).toBe("todo");
+    expect(content(tree)).not.toContain("review required"); expect(content(tree)).not.toContain("nothing executed");
+    const exec = button(tree, "Execute with your wallet"); expect(exec.props.disabled).toBe(true); expect(exec.props.title).toContain("referenced approval is being read");
+    expect(nodes(tree).find((n) => n.props?.id === "step-6").props.status).toBe("todo"); // the export step is not the current one
+    api.baselines.release(); await flush(); tree = render(Developer);
+    expect(badge(tree).props.decision).toBe("NO_POLICY_VIOLATION"); expect(byTestId(tree, "decision-pending")).toBeUndefined();
+    lc = lifecycleOf(tree); expect(lc.check.status).toBe("done"); expect(lc.execute.status).toBe("active"); expect(lc.passport.status).toBe("todo");
+    expect(button(tree, "Execute with your wallet").props.disabled).toBe(false);
+  });
+  it("a failed re-read keeps the decision from the last read and says so; a 404 is an answer — no approved baseline → review required", async () => {
+    const api = developerApi(); let tree = await createDeveloperOrder();
+    await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    await button(tree, "Sign TransferWithAuthorization").props.onClick(); render(Developer); await flush(); tree = render(Developer);
+    expect(badge(tree).props.decision).toBe("NO_POLICY_VIOLATION");
+    api.baselines.fail(503, { error: "UPSTREAM_UNAVAILABLE", reason: "node unavailable" }); await vi.advanceTimersByTimeAsync(5000); tree = render(Developer);
+    expect(badge(tree).props.decision).toBe("NO_POLICY_VIOLATION"); expect(content(byTestId(tree, "baseline-reread-failed"))).toContain("could not be re-read");
+    expect(lifecycleOf(tree).execute.status).toBe("active");
+    api.baselines.fail(404, { error: "NOT_FOUND", reason: "no such baseline" }); await vi.advanceTimersByTimeAsync(5000); tree = render(Developer);
+    expect(badge(tree).props.decision).toBe("REVIEW_REQUIRED"); expect(byTestId(tree, "baseline-reread-failed")).toBeUndefined(); expect(byTestId(tree, "decision-pending")).toBeUndefined();
+  });
+  it("the Developer page refreshes the SHARED balance after the fee settles and after the payment confirms, and tells other tabs", async () => {
+    const api = developerApi(); const store = memStorage();
+    h.wallet.provider.request.mockImplementation(async ({ method }: { method: string }) => (method === "eth_sendTransaction" ? D : method === "eth_accounts" ? [ACCOUNT] : method === "eth_chainId" ? "0x4cef52" : "0x1"));
+    let tree = await createDeveloperOrder();
+    expect(balancesOf(h.wallet.provider, ACCOUNT).native).toBe(10n ** 18n); // the store every view (the nav chip included) reads
+    await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    h.balance = 990_000_000_000_000_000n; // the node reports the fee gone
+    await button(tree, "Sign TransferWithAuthorization").props.onClick(); render(Developer); await flush(); tree = render(Developer);
+    expect(balancesOf(h.wallet.provider, ACCOUNT).native).toBe(990_000_000_000_000_000n); expect(content(tree)).toContain("0.9900");
+    expect(JSON.parse(store.get(BALANCE_SIGNAL_KEY)!)).toMatchObject({ account: ACCOUNT.toLowerCase(), native: "990000000000000000" });
+    h.balance = 939_000_000_000_000_000n; // the payment and its gas
+    await button(tree, "Execute with your wallet").props.onClick(); render(Developer); await flush(); tree = render(Developer); await flush(); tree = render(Developer);
+    expect(nodes(tree).find((n) => typeof n.type === "function" && n.type.name === "AttemptPanel").props.attempt.state).toBe("CONFIRMED");
+    expect(balancesOf(h.wallet.provider, ACCOUNT).native).toBe(939_000_000_000_000_000n); expect(content(tree)).toContain("0.9390");
+    expect(JSON.parse(store.get(BALANCE_SIGNAL_KEY)!)).toMatchObject({ native: "939000000000000000" });
+    expect(api.attempts).toHaveLength(1);
   });
 });
 
@@ -269,7 +338,7 @@ it("Inspect shows the server's refusal for a non-curated subject and offers the 
 
 // ---- v3.2 workbench: admission keys, recovery desk, passport export, verifier preview, §7 messages ----
 const memStorage = (seed: Record<string, string> = {}) => { const store = new Map(Object.entries(seed)); vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); }, removeItem: (k: string) => { store.delete(k); } }); return store; };
-const freshHooks = () => { h.cursor = 0; h.state = []; h.memo = []; h.effects = []; h.pending = []; };
+const freshHooks = () => { h.cursor = 0; h.state = []; h.memo = []; h.effects = []; h.pending = []; resetBalanceStore(); }; // a fresh component tree never keeps the old tree's balance listeners
 const DONE_RUN: any = { runId: REQUEST, fixture: "AMOUNT_UNIT_MISMATCH", state: "DONE", labels: ["LIVE_REQUEST"], steps: [{ step: "createOrder", atMs: 1 }, { step: "signServiceFee", atMs: 2 }, { step: "decision", atMs: 3, decision: "BLOCKED" }], createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(), expected: "BLOCKED", headline: "BLOCKED",
   recovery: { recoveryVersion: "1.0", attemptId: "a", interrupted: false, counters: { ordersCreated: 1, checkFeeAuthorizations: 1, businessSignatures: 0, broadcastsOfOriginalBytes: 0, replacementSignatures: 0 }, originalTransaction: { hash: null, status: "none" }, reconciliation: [] },
   result: { fixture: "AMOUNT_UNIT_MISMATCH", network: "testnet", chainId: 5042002, attemptId: "a", orderId: D, merchant: MERCHANT, intent: { baselineDigest: D, valueNativeAtomic: "50000", businessExpectation: { amountNativeAtomic: "50000000000000000" } }, intentDigest: D, policy: {}, policyDigest: D, requestId: REQUEST, serviceFeeTx: D,

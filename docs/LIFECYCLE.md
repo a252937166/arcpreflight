@@ -330,3 +330,16 @@ chain RPC on the testnet). Every receipt wait (runner business and order receipt
 retries "receipt not found" until its own deadline; a real timeout and every other error still end it. The deploy, fund and relay-probe
 scripts sign locally, write the hash into the step's spend ledger before the broadcast, and re-send only the identical signed bytes; if no
 node accepts them, nothing else is sent and the step stops.
+
+**Presentation after the `305882d` re-run (2026-10-09).** *The decision waits for the referenced approval.* The Developer page reads the
+approval the order references once per digest and re-reads it every 5 s while a report is on screen. The read carries a status: until the
+first read of a digest has finished nothing is decided — the check stage shows "reading the referenced approval before deciding…", execution is
+closed with that reason, export is not the current step; when the read lands the decision, the lifecycle stages and the execute button change in
+the same render. A re-read of the same digest keeps the record already loaded (so buying a report never shows a transient "review required").
+The API answering 404 is a definitive answer (no approved baseline → REVIEW_REQUIRED); any other failure keeps the last successful read, says
+"could not be re-read … retrying", and a failed first read keeps waiting. *One balance per wallet.* Every view of a connected wallet's balance
+(nav chip, Developer, Demo, faucet cards) subscribes to one store entry per (provider, account); a refresh anywhere updates all of them; the
+page refreshes after an order is created, a check fee settles, an attempt reaches a terminal state and a faucet claim settles; the re-read
+loop (2 s, at most 8) stops when the value changes or equals one another view or tab already saw; other tabs are told through the `storage`
+event and re-read — a tab never displays another tab's number unread.
+

@@ -17,6 +17,7 @@ vi.mock("react", async (original) => ({
 vi.mock("../src/lib/wallet", () => ({ useWallet: () => h.wallet, friendlyName: (i: any) => i.name, nativeBalance: async (p: any, a: string) => BigInt(await p.request({ method: "eth_getBalance", params: [a, "latest"] })), erc20Balance: async () => 1n, setTargetNetwork: vi.fn(), ensureChain: vi.fn() }));
 import { WalletChip } from "../src/components/WalletChip";
 import { awaitFaucetReceipt } from "../src/lib/faucet";
+import { BALANCE_SIGNAL_KEY, onBalanceSignal, refreshBalances, resetBalanceStore } from "../src/lib/balances";
 import { setApiBase } from "../src/lib/api";
 
 function render(Page: () => any) { h.cursor = 0; const tree = Page(); for (const effect of h.pending.splice(0)) effect(); return tree; }
@@ -43,7 +44,7 @@ async function openPanel() {
 
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(NOW);
-  h.cursor = 0; h.state = []; h.memo = []; h.effects = []; h.pending = []; h.receipt = () => null; setApiBase("");
+  h.cursor = 0; h.state = []; h.memo = []; h.effects = []; h.pending = []; h.receipt = () => null; setApiBase(""); resetBalanceStore();
   h.net = { network: "testnet", chainId: 5042002, caip2: "eip155:5042002", usdc: "0x3600000000000000000000000000000000000000", rpc: "http://offline.invalid", explorer: "http://explorer.invalid", priceTokenAtomic: "10000", fixtures: [], accounts: {},
     budget: { maxRunsPerDay: 10, usedToday: 0, clientCooldownSeconds: 45, amountNativeAtomic: "50000000000000000", activeRun: null }, faucet: { enabled: true, amountNativeAtomic: "200000000000000000", perDay: 30, usedToday: 1, perAddressPer24h: 1, sender: null } };
   h.wallet = {
@@ -87,6 +88,19 @@ describe("the connected-wallet panel", () => {
     expect(text(panel)).toContain("1 USDC on Arc Testnet");
     expect(balanceReads()).toBe(before + 1);
     await vi.advanceTimersByTimeAsync(6000); expect(balanceReads()).toBe(before + 1); // one read on open, no polling
+  });
+  it("the chip follows a refresh made by another view of the same wallet (the Developer page after a settled fee) and a signal from another tab — without the panel opening or a reload (2026-10-09)", async () => {
+    let balance = "0x27f7d0bdb920000"; // 0.18 USDC
+    h.wallet.provider.request.mockImplementation(async ({ method }: { method: string }) => (method === "eth_getBalance" ? balance : method === "eth_chainId" ? "0x4cef52" : "0x1"));
+    let tree = chip(); await flush(); tree = chip();
+    expect(content(tree)).toContain("0.18 USDC");
+    balance = "0x19fb5ae2c7c4000"; // 0.117 USDC after the check fee: the Developer page's hook refreshes the shared store
+    await refreshBalances(h.wallet.provider, ACCOUNT); tree = chip();
+    expect(content(tree)).toContain("0.12 USDC"); expect(content(tree)).not.toContain("0.18 USDC");
+    balance = "0xc6f3b40b6c0000"; // 0.056 USDC: another tab paid and wrote the signal
+    onBalanceSignal(JSON.stringify({ account: ACCOUNT.toLowerCase(), native: "56000000000000000", at: 1, tab: "another-tab" })); await flush(); tree = chip();
+    expect(content(tree)).toContain("0.06 USDC");
+    expect(BALANCE_SIGNAL_KEY).toBe("arcpreflight.balances:signal");
   });
   it("off the API's chain: an amber 'not Arc' badge, the switch action, and no balance claim", async () => {
     h.wallet.chainId = 1;

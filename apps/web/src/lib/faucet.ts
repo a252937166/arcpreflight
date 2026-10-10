@@ -4,7 +4,7 @@
 // it on a mainnet instance. Budgeted on the server (one claim per wallet and per client every 24 h, a daily cap).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type FaucetClaim, type NetworkInfo } from "./api";
-import { erc20Balance, nativeBalance, type Eip1193 } from "./wallet";
+import type { Eip1193 } from "./wallet";
 import { exactUsdc } from "./costTable";
 import { describeError, type Described } from "./errors";
 
@@ -41,30 +41,8 @@ export function faucetOffered(net: NetworkInfo | null, wallet: FaucetWallet, bal
 }
 export const claimFaucet = (address: string): Promise<FaucetClaim> => api.faucet(address);
 
-/** The connected wallet's balances on the API's chain. `refresh()` re-reads; because public RPC nodes lag a few blocks, a refresh
- *  keeps re-reading every 2 s (up to 8 times) until the native value actually changes — so a faucet claim or a paid fee shows up.
- *  `refresh({ untilChanged: false })` reads once (a panel opening, where nothing is expected to have changed). */
-export function useBalances(provider: Eip1193 | null, account: string | null, enabled: boolean, usdc?: string | null) {
-  const [bal, setBal] = useState<{ native: bigint | null; erc20: bigint | null }>({ native: null, erc20: null });
-  const [tick, setTick] = useState(0);
-  const last = useRef<bigint | null>(null);
-  const once = useRef(false);
-  useEffect(() => {
-    if (!provider || !account || !enabled) { setBal({ native: null, erc20: null }); last.current = null; return; }
-    let alive = true; let attempts = 0; let timer: ReturnType<typeof setTimeout> | null = null;
-    const read = () => Promise.all([nativeBalance(provider, account), usdc ? erc20Balance(provider, usdc, account) : Promise.resolve<bigint | null>(null)]).then(([native, erc20]) => {
-      if (!alive) return;
-      const changed = last.current === null || native !== last.current;
-      if (changed || tick === 0 || attempts >= 8 || once.current) { last.current = native; setBal({ native, erc20 }); return; }
-      attempts++; timer = setTimeout(read, 2000); // a refresh was asked for but the node still reports the old value
-    }).catch(() => {});
-    read();
-    return () => { alive = false; if (timer) clearTimeout(timer); };
-  }, [provider, account, enabled, usdc, tick]);
-  // the parameter is deliberately loose: callers hand `refresh` to `onClaimed(claim)`-style callbacks too
-  const refresh = useCallback((opts?: { untilChanged?: boolean } | object) => { once.current = !!opts && typeof opts === "object" && (opts as { untilChanged?: boolean }).untilChanged === false; setTick((t) => t + 1); }, []);
-  return { ...bal, refresh };
-}
+/** the wallet's balances are one shared store for every view (lib/balances.ts); re-exported so the callers' import stays */
+export { useBalances } from "./balances";
 
 // ---- the faucet claim as the connected-wallet panel shows it (review item 7)
 /** "sent" is the API's answer (a hash exists); "confirmed" is said only once the transaction's receipt was read through the wallet's
