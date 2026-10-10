@@ -16,7 +16,8 @@ import crypto from "node:crypto";
 import { resolve } from "node:path";
 import { createPublicClient, http, keccak256, toHex, type Chain, type Hex, type PublicClient } from "viem";
 import { arc } from "viem/chains";
-import { ARC, OutflowMeter } from "@arcpreflight/client";
+import { ARC, OutflowMeter, pinCaps, checkStep, beginMeasured, updateMeasured, noteOpen, endStep } from "@arcpreflight/client";
+import { openPlan } from "../lib/plan-ledger.js";
 import { SLOTS, slotToAddress } from "@arcpreflight/observer";
 import { PAY_SELECTOR } from "@arcpreflight/policy";
 import { executionDigest, intentDigest, reportDigest, decisionDigest, finalValidationDigest, transactionPlanDigest } from "@arcpreflight/schema";
@@ -283,6 +284,10 @@ async function main(): Promise<number> {
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 5) throw new Refused("SELFTEST_REPEATS must be an integer 1..5 (the G2 minimum is 3)");
   const cap = parseUsdc(process.env.SPEND_CAP_USDC ?? "0.35");
   if (cap > E18) throw new Refused("SPEND_CAP_USDC above 1 USDC is refused");
+  // the plan ledger (review 2026-10-10, P1): the approved cap is pinned (SPEND_CAP_USDC may lower it, never raise it); the measured outflow
+  // is carried across restarts from the FIRST invocation's balance baseline; runs still open count at their worst case until they settle
+  const book = openPlan(process.env.ARCPREFLIGHT_ROOT ?? process.cwd(), "mainnet", { write: EXECUTE });
+  if (book) pinCaps(book.plan, "acceptance", { totalNativeAtomic: cap });
   const floor = parseUsdc(process.env.RUNNER_FLOOR_USDC ?? "0.15");
   const marginS = Number(process.env.COOLDOWN_MARGIN_SECONDS ?? 3);
   const rpc = process.env.ARC_RPC_URL ?? ARC.mainnet.rpc;
@@ -318,6 +323,7 @@ async function main(): Promise<number> {
   if (creatorBal < plan.creatorNeed) problems.push(`order-creator holds ${usdc(creatorBal)} USDC, needs >= ${usdc(plan.creatorNeed)} for createOrder gas`);
   if (net.budget.usedToday + plan.runs > net.budget.maxRunsPerDay) problems.push(`daily live-run budget: ${net.budget.usedToday} used + ${plan.runs} planned > ${net.budget.maxRunsPerDay}`);
   if (net.budget.activeRun) problems.push(`a run is already active (${net.budget.activeRun})`);
+  if (book) { const c = checkStep(book.plan, "acceptance", plan.totalWorst, cap); if (!c.ok) problems.push(c.reason!); }
   for (const id of FIXTURES) {
     const f = net.fixtures.find((x) => x.id === id);
     if (!f?.merchant || !f.baselineDigest) problems.push(`${id}: fixture proxy or approved baseline missing in /v1/network`);
@@ -337,6 +343,7 @@ async function main(): Promise<number> {
   console.log(`  order-creator     ${usdc(creatorBal)} USDC (needs >= ${usdc(plan.creatorNeed)}; the deployer-admin key is not used by the demo)`);
   console.log(`  server budget     ${net.budget.usedToday}/${net.budget.maxRunsPerDay} runs used today, cooldown ${cooldown} s${Number.isFinite(net.budget.clientCooldownSeconds) ? "" : " (fallback, not reported)"}, active run ${net.budget.activeRun ?? "none"}`);
   if (!expectedRelease) console.log(`  EXPECTED_RELEASE not set (required for --execute); the server reports ${net.release}`);
+  if (book) for (const l of book.lines()) console.log(l);
   for (const p of problems) console.log(`  PROBLEM: ${p}`);
   if (!EXECUTE) {
     console.log(problems.length ? `DRY RUN: NOT READY (${problems.length} problem(s)). Nothing was started.` : `DRY RUN OK: nothing was started. To run: API_URL=${api} EXPECTED_RELEASE=${net.release} pnpm exec tsx scripts/selftest/mainnet.ts --execute`);
@@ -378,20 +385,39 @@ async function main(): Promise<number> {
   // the aggregate limit, measured: the summed balances of the three project keys the runs touch (internal fee transfers net out)
   const meterAddrs = [ACCOUNTS.demoRunner, ACCOUNTS.orderCreator, ACCOUNTS.merchantPayTo] as Hex[];
   const sumBalances = async () => (await Promise.all(meterAddrs.map((a) => client.getBalance({ address: a })))).reduce((x, y) => x + y, 0n);
-  const meter = new OutflowMeter("mainnet acceptance outflow", cap, await sumBalances());
+  // the baseline: this invocation's balances on a first start, the FIRST invocation's balances when resuming (the plan record carries it)
+  const startTotal = await sumBalances();
+  if (book) book.apply((p) => beginMeasured(p, "acceptance", meterAddrs, startTotal));
+  const baseline = book?.plan.steps.acceptance.baselineTotalNativeAtomic ?? startTotal;
+  const meter = new OutflowMeter("mainnet acceptance outflow", cap, baseline);
+  if (book && baseline !== startTotal) console.log(`  resuming: measured outflow carried from the first invocation ${usdc(meter.outflow(startTotal))} USDC (baseline ${usdc(baseline)} USDC, now ${usdc(startTotal)})`);
+  const syncMeasured = async () => { const t = await sumBalances(); if (book) book.apply((p) => updateMeasured(p, "acceptance", t)); return t; };
   let current: { fixture: FixtureId; runId?: string; run?: any } | null = null, lastStart = 0;
   try {
+    // runs a previous invocation started and never saw finish: wait for them first (their worst case stays pending until they settle)
+    for (const openRun of book?.plan.steps.acceptance.openRuns ?? []) {
+      console.log(`  resuming: run ${openRun} was started by a previous invocation and is still open in the plan record — waiting for it before starting anything`);
+      const r = await awaitRun(api, openRun);
+      console.log(`  ${openRun}: ${r.state} ${r.outcome?.kind ?? ""}`);
+      book!.apply((p) => noteOpen(p, "acceptance", openRun, false, plan.worstPerRun.approved));
+      await syncMeasured();
+    }
     for (let round = 1; round <= repeats; round++) {
       for (const fixture of FIXTURES) {
         const wait = lastStart ? lastStart + (cooldown + marginS) * 1000 - Date.now() : 0;
         if (wait > 0) { console.log(`  cooldown: waiting ${Math.ceil(wait / 1000)} s before the next start`); await sleep(wait); }
-        const head = meter.headroomFor(await sumBalances(), fixture === "APPROVED_PAYMENT" ? plan.worstPerRun.approved : plan.worstPerRun.other);
+        const worstNow = fixture === "APPROVED_PAYMENT" ? plan.worstPerRun.approved : plan.worstPerRun.other;
+        const head = meter.headroomFor(await syncMeasured(), worstNow);
         if (!head.ok) throw new Refused(head.reason!);
+        if (book) { const c = checkStep(book.plan, "acceptance", worstNow, cap); if (!c.ok) throw new Refused(c.reason!); }
         console.log(`[${reports.length + 1}/${total}] ${fixture}: starting a live mainnet run (measured outflow so far ${usdc(head.outflow)} of ${usdc(cap)} USDC)`);
         current = { fixture };
         const { runId, startedAt, admission } = await startRun(api, fixture, (cooldown + marginS) * 1000);
         lastStart = startedAt; current.runId = runId;
+        if (book) book.apply((p) => noteOpen(p, "acceptance", runId, true, worstNow)); // pending at its worst case until it settles
         current.run = await awaitRun(api, runId);
+        if (book) book.apply((p) => noteOpen(p, "acceptance", runId, false, worstNow));
+        await syncMeasured();
         const report = await verifyRun(ctx, fixture, current.run);
         report.round = round; report.admission = admission;
         report.recovery = await verifyRecovery(api, token, current.run.result);
@@ -404,11 +430,13 @@ async function main(): Promise<number> {
     const failure = { message: String(e?.message ?? e), fixture: current?.fixture ?? null, runId: current?.runId ?? null, lastStep: current?.run?.steps?.at(-1)?.step ?? null,
       serviceFeeTx: current?.run?.result?.serviceFeeTx ?? null, businessTxHash: current?.run?.result?.execution?.businessTxHash ?? null };
     measured = meter.outflow(await sumBalances().catch(() => meter.startTotal));
+    if (book) { try { await syncMeasured(); } catch { /* the record keeps its last reading */ } book.apply((p) => endStep(p, "acceptance", "stopped")); }
     console.error(`STOPPED after ${reports.length}/${total} verified runs: ${failure.message}`);
     console.error(`INCOMPLETE evidence (money trail of the failing run included): ${save("INCOMPLETE", failure)}`);
     return 1;
   }
-  measured = meter.outflow(await sumBalances());
+  measured = meter.outflow(await syncMeasured());
+  if (book) book.apply((p) => endStep(p, "acceptance", "done"));
   const file = save("PASS");
   console.log(`\n #  scenario                decision             service fee (0.01)   business payment (0.05)  order   ms      recovery`);
   reports.forEach((r, i) => console.log(`${String(i + 1).padStart(2)}  ${r.fixture.padEnd(22)}  ${r.decision.padEnd(19)}  ${short(r.serviceFee.tx).padEnd(18)}   ${short(r.businessPayment.tx).padEnd(22)}   ${r.order.paidOnChain ? "paid  " : "unpaid"}  ${String(r.durationMs).padStart(6)}  ${r.recovery?.authenticated.split(" ")[0]}  passport ${r.passport ? `${r.passport.counts.pass} pass / ${r.passport.counts.unverified} unverified / ${r.passport.counts.fail} fail` : "—"}`));

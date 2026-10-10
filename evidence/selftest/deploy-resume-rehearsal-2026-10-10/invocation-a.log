@@ -1,0 +1,32 @@
+network=testnet chainId=5042002 mode=EXECUTE
+deployer 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 7.7699225 USDC · nonce 47 · runner 0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE · orderCreator 0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b
+fees: base 20 gwei · max fee sent 29 gwei · priority 5 gwei · ceiling 40 gwei
+caps: 0.05 USDC per transaction · 0.15 USDC total (gas included) · ledger /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-deploy.json (0 prior entries, 0 USDC committed)
+plan rehearsal-deploy-20261010 (testnet) · budget cap 0.69 USDC · committed 0 · remaining 0.69
+  deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (new record: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-rehearsal-deploy-20261010.json)
+journal /private/tmp/claude-501/-Users-ouyangduning-Documents-project-interesting-dorahacks-microgrants/87d205e9-cdb3-437f-9201-de53cf6758b0/scratchpad/r3/deploy-rehearsal/deploy-testnet-journal.json (new):
+  deploy implementation A (DemoMerchantV1)     pending  
+  deploy implementation B (DemoMerchantV2)     pending  
+  deploy MAIN proxy on A                       pending  
+  deploy CHANGED proxy on A                    pending  
+  setOrderCreator on MAIN                      pending  
+  setOrderCreator on CHANGED                   pending  
+  upgrade CHANGED proxy A -> B                 pending  
+plan (7 unfinished steps):
+  deploy implementation A (DemoMerchantV1)     gas  1076707 (live estimate) · limit  1292049 · worst 0.037469421  · expected 0.026917675
+  deploy implementation B (DemoMerchantV2)     gas  1105057 (live estimate) · limit  1326069 · worst 0.038456001  · expected 0.027626425
+  deploy MAIN proxy on A                       gas   178416 (measured on testnet) · limit   214100 · worst 0.0062089    · expected 0.0044604
+  deploy CHANGED proxy on A                    gas   178416 (measured on testnet) · limit   214100 · worst 0.0062089    · expected 0.0044604
+  setOrderCreator on MAIN                      gas    52167 (measured on testnet) · limit    62601 · worst 0.001815429  · expected 0.001304175
+  setOrderCreator on CHANGED                   gas    52167 (measured on testnet) · limit    62601 · worst 0.001815429  · expected 0.001304175
+  upgrade CHANGED proxy A -> B                 gas    37633 (measured on testnet) · limit    45160 · worst 0.00130964   · expected 0.000940825
+  total worst 0.09328372 USDC · expected 0.067014075 USDC
+predicted addresses: implA 0xC33f4355E5B88C4FA90eE3D04746A4e327802bD8 · implB 0x57F23414cA2C36D8BeCFb83dc230B87523a66bD2 · proxyMAIN 0x9d8be60787993Ce1BbFaA0c043cC76F824204618 · proxyCHANGED 0x7E99693a310AAf59798262702FF375de2b8c83e7
+deploy implementation A (DemoMerchantV1): 0x8328b6e495df1c33de15060c972ca56b3e61342d7c58f38ff97c5f9d7d23fcce block 66408031 gas 1067071 cost 0.026676775 USDC → 0xc33f4355e5b88c4fa90ee3d04746a4e327802bd8 · committed 0.026676775/0.15
+deploy implementation B (DemoMerchantV2): 0x6c222e00919ddebc9e40694c9c59db91dba51d5ce26d0781afad1ecc85de8276 block 66408037 gas 1095198 cost 0.02737995 USDC → 0x57f23414ca2c36d8becfb83dc230b87523a66bd2 · committed 0.054056725/0.15
+REHEARSAL STOP: DEPLOY_STOP_AFTER=implB: confirmed, manifest not written — the process ends here as an interruption would

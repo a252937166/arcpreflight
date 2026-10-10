@@ -98,6 +98,13 @@ The plan, budget and stop conditions are in `docs/MAINNET-PLAN.md`. `preflight` 
   refuses uncommitted changes there or in `fixtures/`.
 - **Real-wallet evidence:** `ops/wallet-evidence.sh <address> [since]` copies a read-only query to the server and saves what the API
   recorded for that wallet to `evidence/selftest/wallet-acceptance-<ts>.json`.
+- **Deployment journal (review 2026-10-10):** `scripts/demo/deploy.ts` writes `evidence/deploy-<net>-journal.json` before every broadcast and
+  after every receipt; re-running `--execute` after an interruption reconciles the journal against the chain and continues with the
+  unfinished steps only. Testnet rehearsal hooks: `DEPLOY_OUT_DIR` (keeps the journal, manifest and evidence out of `fixtures/`),
+  `DEPLOY_STOP_AFTER=<step>` (exit after that step's confirmation), `DEPLOY_STOP_AFTER_SEND=<step>` (exit after its broadcast); refused on mainnet.
+- **Plan ledger:** `evidence/spend/<net>-plan-<id>.json` (`PLAN_ID`; mainnet defaults to `gate-d-mainnet-2026-10`, testnet has none unless set)
+  carries every step's settled outflow, pending commitments and first baseline across restarts, with the approved caps pinned; environment
+  cap overrides may lower, never raise. `pnpm exec tsx scripts/lib/plan-status.ts` prints it (read-only; part of `preflight`).
 
 ## Delayed chain RPC (acceptance row S12, testnet only)
 

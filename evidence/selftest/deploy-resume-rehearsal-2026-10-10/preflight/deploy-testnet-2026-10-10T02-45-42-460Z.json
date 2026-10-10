@@ -1,0 +1,162 @@
+{
+  "network": "testnet",
+  "chainId": 5042002,
+  "at": "2026-10-10T02:45:42.460Z",
+  "deployer": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
+  "balanceNativeAtomic": "7769922500000000000",
+  "nonce": 47,
+  "baseFeeGwei": 20,
+  "maxFeeGwei": 29,
+  "caps": {
+    "label": "deploy",
+    "network": "testnet",
+    "perTxCapUsdc": "0.05",
+    "totalCapUsdc": "0.15",
+    "maxFeeCeilingGwei": "40",
+    "committedUsdc": "0",
+    "remainingUsdc": "0.15",
+    "entries": []
+  },
+  "plan": {
+    "planId": "rehearsal-deploy-20261010",
+    "lines": [
+      "plan rehearsal-deploy-20261010 (testnet) · budget cap 0.69 USDC · committed 0 · remaining 0.69",
+      "  deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0",
+      "  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0",
+      "  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0",
+      "  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0",
+      "  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0",
+      "  (new record: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-rehearsal-deploy-20261010.json)"
+    ]
+  },
+  "journal": {
+    "path": "/private/tmp/claude-501/-Users-ouyangduning-Documents-project-interesting-dorahacks-microgrants/87d205e9-cdb3-437f-9201-de53cf6758b0/scratchpad/r3/deploy-rehearsal/deploy-testnet-journal.json",
+    "resuming": false,
+    "steps": [
+      {
+        "key": "implA",
+        "status": "pending",
+        "nonce": null,
+        "txHash": null,
+        "address": null
+      },
+      {
+        "key": "implB",
+        "status": "pending",
+        "nonce": null,
+        "txHash": null,
+        "address": null
+      },
+      {
+        "key": "proxyMAIN",
+        "status": "pending",
+        "nonce": null,
+        "txHash": null,
+        "address": null
+      },
+      {
+        "key": "proxyCHANGED",
+        "status": "pending",
+        "nonce": null,
+        "txHash": null,
+        "address": null
+      },
+      {
+        "key": "creatorMAIN",
+        "status": "pending",
+        "nonce": null,
+        "txHash": null,
+        "address": null
+      },
+      {
+        "key": "creatorCHANGED",
+        "status": "pending",
+        "nonce": null,
+        "txHash": null,
+        "address": null
+      },
+      {
+        "key": "upgrade",
+        "status": "pending",
+        "nonce": null,
+        "txHash": null,
+        "address": null
+      }
+    ],
+    "restartActions": []
+  },
+  "steps": [
+    {
+      "key": "implA",
+      "label": "deploy implementation A (DemoMerchantV1)",
+      "source": "live estimate",
+      "gas": "1076707",
+      "gasLimit": "1292049",
+      "worstUsdc": "0.037469421",
+      "expectedUsdc": "0.026917675"
+    },
+    {
+      "key": "implB",
+      "label": "deploy implementation B (DemoMerchantV2)",
+      "source": "live estimate",
+      "gas": "1105057",
+      "gasLimit": "1326069",
+      "worstUsdc": "0.038456001",
+      "expectedUsdc": "0.027626425"
+    },
+    {
+      "key": "proxyMAIN",
+      "label": "deploy MAIN proxy on A",
+      "source": "measured on testnet",
+      "gas": "178416",
+      "gasLimit": "214100",
+      "worstUsdc": "0.0062089",
+      "expectedUsdc": "0.0044604"
+    },
+    {
+      "key": "proxyCHANGED",
+      "label": "deploy CHANGED proxy on A",
+      "source": "measured on testnet",
+      "gas": "178416",
+      "gasLimit": "214100",
+      "worstUsdc": "0.0062089",
+      "expectedUsdc": "0.0044604"
+    },
+    {
+      "key": "creatorMAIN",
+      "label": "setOrderCreator on MAIN",
+      "source": "measured on testnet",
+      "gas": "52167",
+      "gasLimit": "62601",
+      "worstUsdc": "0.001815429",
+      "expectedUsdc": "0.001304175"
+    },
+    {
+      "key": "creatorCHANGED",
+      "label": "setOrderCreator on CHANGED",
+      "source": "measured on testnet",
+      "gas": "52167",
+      "gasLimit": "62601",
+      "worstUsdc": "0.001815429",
+      "expectedUsdc": "0.001304175"
+    },
+    {
+      "key": "upgrade",
+      "label": "upgrade CHANGED proxy A -> B",
+      "source": "measured on testnet",
+      "gas": "37633",
+      "gasLimit": "45160",
+      "worstUsdc": "0.00130964",
+      "expectedUsdc": "0.000940825"
+    }
+  ],
+  "totalWorstUsdc": "0.09328372",
+  "totalExpectedUsdc": "0.067014075",
+  "predicted": {
+    "implA": "0xC33f4355E5B88C4FA90eE3D04746A4e327802bD8",
+    "implB": "0x57F23414cA2C36D8BeCFb83dc230B87523a66bD2",
+    "proxyMAIN": "0x9d8be60787993Ce1BbFaA0c043cC76F824204618",
+    "proxyCHANGED": "0x7E99693a310AAf59798262702FF375de2b8c83e7"
+  },
+  "problems": []
+}

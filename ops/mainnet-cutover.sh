@@ -2,7 +2,8 @@
 # Mainnet cutover (Gate D). Each spending or server-changing step runs ONLY after the operator's typed go for that step
 # (export CUTOVER_GO=<step>); nothing here is automatic. Public mainnet execution stays CLOSED (PUBLIC_EXECUTION=0) until `open`,
 # which is a separate approval after the acceptance evidence is recorded. Steps, in order:
-#   preflight  read-only: release, RPC, balances + nonces, fees, server state, and the read-only preflights of fund / deploy / probe
+#   preflight  read-only: release, RPC, balances + nonces, fees, server state, the plan ledger, and the read-only preflights of fund / deploy / probe
+#              (the deploy preflight also shows the deployment journal and what a restart would do with it)
 #   fund       deployer-admin → order-creator + visitor-rehearsal (allow-listed project keys; scripts/demo/fund.ts, guarded)
 #   deploy     deployer-admin: 4 deployments + 2 setOrderCreator + 1 upgrade (scripts/demo/deploy.ts, guarded: 0.05/tx, 0.15 total)
 #   probe      ONE self-relayed 0.01 USDC check fee on mainnet (scripts/selftest/relay-probe.ts, guarded) — before `server`: single sender
@@ -94,6 +95,7 @@ case "$step" in
     [ ! -f fixtures/deployments-mainnet.json ] && echo "fixtures/deployments-mainnet.json: absent (nothing deployed by this project yet)" || echo "fixtures/deployments-mainnet.json: PRESENT"
     echo "== server (read-only)"; ssh -o ConnectTimeout=15 "$HOST" "grep -E '^(ARC_NET|PORT|DB_PATH|PUBLIC_EXECUTION|MAINNET_VERIFIED|RELEASE_SHA)=' /opt/arcpreflight/arcpreflight.env; ls /opt/arcpreflight/keys/; ls /opt/arcpreflight/arcpreflight-testnet.env 2>/dev/null || echo 'no testnet instance env yet'"
     echo "== public API now"; curl -s -m 15 "$API/v1/network" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("network",d["caip2"],"release",d["release"],"access",d.get("access"))'
+    echo "== plan ledger (read-only): what every step committed across its invocations, pending, remaining budget"; pnpm exec tsx scripts/lib/plan-status.ts || true
     echo "== fund preflight"; FUND_PLAN="${FUND_PLAN:-$FUND_PLAN_DEFAULT}" pnpm exec tsx scripts/demo/fund.ts || true
     echo "== deploy preflight"; pnpm exec tsx scripts/demo/deploy.ts || true
     echo "== probe preflight (nothing is signed on mainnet in a dry run)"; pnpm exec tsx scripts/selftest/relay-probe.ts || true

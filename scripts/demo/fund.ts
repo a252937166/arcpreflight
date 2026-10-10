@@ -9,9 +9,10 @@ import { resolve } from "node:path";
 import { getAddress, keccak256, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { createWalletClient, http } from "viem";
-import { SpendRefused, parseUsdc18, waitForReceiptPatiently, sendIdentical } from "@arcpreflight/client";
+import { SpendRefused, parseUsdc18, waitForReceiptPatiently, sendIdentical, pinCaps, checkStep, recordGuard, beginStep, endStep } from "@arcpreflight/client";
 import { ROOT, net, chain, rpc, publicClient, writeJson, evidenceDir, feeParams } from "./common.js";
 import { limitsFrom, openGuard, usdc18 } from "../lib/spend-ledger.js";
+import { openPlan } from "../lib/plan-ledger.js";
 
 const EXECUTE = process.argv.includes("--execute");
 const ROLES = ["deployer-admin", "order-creator", "demo-runner", "merchant-payto", "visitor-rehearsal"] as const;
@@ -26,6 +27,13 @@ if (!planText) throw new SpendRefused('FUND_PLAN is required, e.g. FUND_PLAN="or
 const plan = planText.split(",").map((x) => x.trim()).filter(Boolean).map((x) => { const [role, amount] = x.split(":"); if (!ROLES.includes(role as Role) || role === from) throw new SpendRefused(`destination ${role} is not an allow-listed project key (or is the sender)`); if (!existsSync(keyFile(role as Role))) throw new SpendRefused(`keys/${role}.json missing`); return { role: role as Role, to: addressOf(role as Role), value: parseUsdc18(amount ?? "") }; });
 const limits = limitsFrom({ label: "fund", network: net, perTxUsdc: "0.20", totalUsdc: "0.20", maxFeeGwei: 40, envPrefix: "FUND", maxPerTxUsdc: "0.50", maxTotalUsdc: "0.60" });
 const { guard, save, path: ledger } = openGuard(ROOT, limits, { write: EXECUTE });
+// the plan ledger (review 2026-10-10, P1): the approved caps are pinned, the budget is carried across every step and restart; the value that
+// reaches allow-listed project keys stays internal (not outflow), the gas does not
+const book = openPlan(ROOT, net, { write: EXECUTE });
+if (book) pinCaps(book.plan, "fund", { totalNativeAtomic: limits.totalNativeAtomic, perTxNativeAtomic: limits.perTxNativeAtomic });
+const internalSettled = () => guard.entries.filter((e) => e.status === "settled").reduce((a, e) => { const row = rows.find((r) => r.to.toLowerCase() === (e.to ?? "").toLowerCase()); return a + (row ? row.value : 0n); }, 0n);
+const syncPlan = () => { if (book) book.apply((p) => recordGuard(p, "fund", guard.entries, internalSettledSafe())); };
+const internalSettledSafe = () => { const settled = guard.entries.filter((e) => e.status === "settled").reduce((a, e) => a + BigInt(e.actualNativeAtomic ?? e.worstNativeAtomic), 0n); const i = internalSettled(); return i > settled ? settled : i; };
 const sender = addressOf(from);
 const chainId = await publicClient.getChainId(); if (chainId !== chain.id) throw new SpendRefused(`RPC serves chain ${chainId}, not ${net}`);
 const [bal, nonceLatest, noncePending, fees] = await Promise.all([publicClient.getBalance({ address: sender }), publicClient.getTransactionCount({ address: sender, blockTag: "latest" }), publicClient.getTransactionCount({ address: sender, blockTag: "pending" }), feeParams()]);
@@ -36,28 +44,33 @@ const totalWorst = rows.reduce((a, r) => a + r.worst, 0n);
 if (nonceLatest !== noncePending) problems.push(`${from} has pending transactions (nonce ${nonceLatest} vs ${noncePending})`);
 if (bal < totalWorst) problems.push(`${from} holds ${usdc18(bal)} USDC, below the plan's worst case ${usdc18(totalWorst)} USDC`);
 { const dry = openGuard(ROOT, limits, { write: false }).guard; for (const r of rows) { try { dry.reserve({ purpose: `fund ${r.role}`, to: r.to, valueNativeAtomic: r.value, gasLimit: r.gasLimit, maxFeePerGas: fees.maxFeePerGas }); } catch (e: any) { problems.push(e.message); } } }
+if (book) { const c = checkStep(book.plan, "fund", totalWorst, limits.totalNativeAtomic); if (!c.ok) problems.push(c.reason!); }
 console.log(`network=${net} chainId=${chainId} mode=${EXECUTE ? "EXECUTE" : "PREFLIGHT (read-only; nothing is signed)"}`);
 console.log(`from ${from} ${sender} balance ${usdc18(bal)} USDC nonce ${noncePending} · max fee ${Number(fees.maxFeePerGas) / 1e9} gwei · caps ${usdc18(limits.perTxNativeAtomic)} per transfer, ${usdc18(limits.totalNativeAtomic)} total (gas included) · ledger ${ledger} (${usdc18(guard.committed())} committed)`);
 for (const r of rows) console.log(`  → ${r.role.padEnd(18)} ${r.to} +${usdc18(r.value)} USDC · gas ${r.gas} (limit ${r.gasLimit}) · worst ${usdc18(r.worst)} · balance now ${usdc18(r.before)}`);
 console.log(`  total worst ${usdc18(totalWorst)} USDC`);
+if (book) for (const l of book.lines()) console.log(l);
 if (problems.length) { console.log(`NOT READY (${problems.length}):`); for (const p of problems) console.log(`  - ${p}`); process.exit(2); }
 if (!EXECUTE) { console.log("PREFLIGHT OK: nothing was signed or sent."); process.exit(0); }
 const account = privateKeyToAccount(JSON.parse(readFileSync(keyFile(from), "utf8")).privateKey as Hex);
 if (getAddress(account.address) !== sender) throw new SpendRefused(`the ${from} key does not match its address field`);
 const wallet = createWalletClient({ account, chain, transport: http(rpc, { timeout: 20_000 }) });
 let nonce = noncePending; const out: any[] = [];
+if (book) book.apply((p) => beginStep(p, "fund"));
+try {
 for (const r of rows) {
   const f = await feeParams();
-  const idx = guard.reserve({ purpose: `fund ${r.role}`, to: r.to, valueNativeAtomic: r.value, gasLimit: r.gasLimit, maxFeePerGas: f.maxFeePerGas }); save();
+  if (book) { const c = checkStep(book.plan, "fund", r.value + r.gasLimit * f.maxFeePerGas, limits.totalNativeAtomic); if (!c.ok) throw new SpendRefused(c.reason!); }
+  const idx = guard.reserve({ purpose: `fund ${r.role}`, to: r.to, valueNativeAtomic: r.value, gasLimit: r.gasLimit, maxFeePerGas: f.maxFeePerGas }); save(); syncPlan();
   let raw: Hex;
-  try { raw = await wallet.signTransaction({ chain, to: r.to, value: r.value, gas: r.gasLimit, nonce, type: "eip1559", ...f } as any); } catch (e) { guard.release(idx); save(); throw e; } // nothing was sent
+  try { raw = await wallet.signTransaction({ chain, to: r.to, value: r.value, gas: r.gasLimit, nonce, type: "eip1559", ...f } as any); } catch (e) { guard.release(idx); save(); syncPlan(); throw e; } // nothing was sent
   const hash = keccak256(raw);
-  guard.sent(idx, hash); save(); // the identical bytes may be re-sent: one hash, one nonce, never a second transfer
+  guard.sent(idx, hash); save(); syncPlan(); // the identical bytes may be re-sent: one hash, one nonce, never a second transfer
   const sent = await sendIdentical(publicClient, raw, () => true, 3, 1500);
   if (!sent.accepted && !(await publicClient.getTransaction({ hash }).catch(() => null))) throw new SpendRefused(`transfer to ${r.role}: the node did not accept ${hash} after ${sent.attempts} attempt(s) (${sent.sendError}) — stopping; it stays committed at its worst case in the ledger`);
   nonce++;
   const rc = await waitForReceiptPatiently(publicClient, hash, 120_000);
-  const actual = r.value + rc.gasUsed * rc.effectiveGasPrice; guard.settle(idx, actual); save();
+  const actual = r.value + rc.gasUsed * rc.effectiveGasPrice; guard.settle(idx, actual); save(); syncPlan();
   if (rc.status !== "success") throw new SpendRefused(`transfer to ${r.role} reverted: ${hash} — stopping`);
   let after = r.before; for (let i = 0; i < 15 && after - r.before !== r.value; i++) { after = await publicClient.getBalance({ address: r.to }); if (after - r.before !== r.value) await new Promise((s) => setTimeout(s, 2000)); }
   const moved = after - r.before;
@@ -65,5 +78,7 @@ for (const r of rows) {
   out.push({ role: r.role, to: r.to, valueUsdc: usdc18(r.value), tx: hash, block: rc.blockNumber.toString(), gasUsed: rc.gasUsed.toString(), costUsdc: usdc18(actual), receivedUsdc: usdc18(moved), ok: moved === r.value });
   if (moved !== r.value) throw new SpendRefused(`${r.role} received ${usdc18(moved)} USDC, expected ${usdc18(r.value)} — stopping`);
 }
-writeJson(`${evidenceDir}/fund-${net}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, { network: net, from, sender, transfers: out, spend: guard.summary() });
+} catch (e) { if (book) book.apply((p) => endStep(p, "fund", "stopped")); throw e; }
+if (book) book.apply((p) => endStep(p, "fund", "done"));
+writeJson(`${evidenceDir}/fund-${net}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, { network: net, from, sender, transfers: out, spend: guard.summary(), plan: book ? book.lines() : null });
 console.log(`done · committed ${usdc18(guard.committed())} USDC of ${usdc18(limits.totalNativeAtomic)}`);

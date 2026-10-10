@@ -1,0 +1,192 @@
+{
+  "network": "testnet",
+  "chainId": 5042002,
+  "deployer": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
+  "runner": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+  "orderCreator": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b",
+  "deployedAtUTC": "2026-10-10T02:48:04.540Z",
+  "implA": {
+    "address": "0xc33f4355e5b88c4fa90ee3d04746a4e327802bd8",
+    "tx": "0x8328b6e495df1c33de15060c972ca56b3e61342d7c58f38ff97c5f9d7d23fcce",
+    "codeHash": "0x7c0466ecb480f447f8e0f621cdd7bec2fffbb1ad786e20033c7c3c4110ecba3c",
+    "block": "66408031"
+  },
+  "implB": {
+    "address": "0x57f23414ca2c36d8becfb83dc230b87523a66bd2",
+    "tx": "0x6c222e00919ddebc9e40694c9c59db91dba51d5ce26d0781afad1ecc85de8276",
+    "codeHash": "0x7319fd08e63b0e782067ecf91bd37fb6546065dc6f863723cf03d1e351fe3024",
+    "block": "66408037"
+  },
+  "proxies": {
+    "MAIN": {
+      "address": "0x9d8be60787993ce1bbfaa0c043cc76f824204618",
+      "tx": "0x8b2a1b94586ea77bb6e37882f99ca386ace7c0bc7464ace62484b546c70e2dad",
+      "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
+      "block": "66408184",
+      "setOrderCreatorTx": "0x06f57c44058a7a4fef29ff702ea90b9170a4bc942d941284fccc77ad819e501f",
+      "setOrderCreatorBlock": "66408287"
+    },
+    "CHANGED": {
+      "address": "0x7e99693a310aaf59798262702ff375de2b8c83e7",
+      "tx": "0x6e696fab0024db263bfc4fa4bbe38bbfa21a5e52450538c4e2ee77925c2acb78",
+      "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
+      "block": "66408282",
+      "setOrderCreatorTx": "0x6e2721459cfac15a1159b1b0d70d255ff85a83ea854d0ddbe7c0023ba4173f1b",
+      "setOrderCreatorBlock": "66408294",
+      "upgradeTx": "0x63bb48ab6fe259f574104156f1f6d6596438ed40e663c72ee7406c4c8e357e0e",
+      "upgradeBlock": "66408301",
+      "currentImpl": "0x57f23414ca2c36d8becfb83dc230b87523a66bd2"
+    }
+  },
+  "compiler": {
+    "solc": "0.8.28",
+    "evm": "cancun",
+    "optimizerRuns": 200
+  },
+  "transactions": {
+    "implA": {
+      "tx": "0x8328b6e495df1c33de15060c972ca56b3e61342d7c58f38ff97c5f9d7d23fcce",
+      "block": "66408031",
+      "gasUsed": "1067071",
+      "effectiveGasPrice": "25000000000",
+      "costUsdc": "0.026676775",
+      "contractAddress": "0xc33f4355e5b88c4fa90ee3d04746a4e327802bd8"
+    },
+    "implB": {
+      "tx": "0x6c222e00919ddebc9e40694c9c59db91dba51d5ce26d0781afad1ecc85de8276",
+      "block": "66408037",
+      "gasUsed": "1095198",
+      "effectiveGasPrice": "25000000000",
+      "costUsdc": "0.02737995",
+      "contractAddress": "0x57f23414ca2c36d8becfb83dc230b87523a66bd2"
+    },
+    "proxyMAIN": {
+      "tx": "0x8b2a1b94586ea77bb6e37882f99ca386ace7c0bc7464ace62484b546c70e2dad",
+      "block": "66408184",
+      "gasUsed": "178428",
+      "effectiveGasPrice": "25000000000",
+      "costUsdc": "0.0044607",
+      "contractAddress": "0x9d8be60787993ce1bbfaa0c043cc76f824204618"
+    },
+    "proxyCHANGED": {
+      "tx": "0x6e696fab0024db263bfc4fa4bbe38bbfa21a5e52450538c4e2ee77925c2acb78",
+      "block": "66408282",
+      "gasUsed": "178428",
+      "effectiveGasPrice": "25000000000",
+      "costUsdc": "0.0044607",
+      "contractAddress": "0x7e99693a310aaf59798262702ff375de2b8c83e7"
+    },
+    "creatorMAIN": {
+      "tx": "0x06f57c44058a7a4fef29ff702ea90b9170a4bc942d941284fccc77ad819e501f",
+      "block": "66408287",
+      "gasUsed": "52167",
+      "effectiveGasPrice": "25000000000",
+      "costUsdc": "0.001304175",
+      "contractAddress": null
+    },
+    "creatorCHANGED": {
+      "tx": "0x6e2721459cfac15a1159b1b0d70d255ff85a83ea854d0ddbe7c0023ba4173f1b",
+      "block": "66408294",
+      "gasUsed": "52167",
+      "effectiveGasPrice": "25000000000",
+      "costUsdc": "0.001304175",
+      "contractAddress": null
+    },
+    "upgrade": {
+      "tx": "0x63bb48ab6fe259f574104156f1f6d6596438ed40e663c72ee7406c4c8e357e0e",
+      "block": "66408301",
+      "gasUsed": "37633",
+      "effectiveGasPrice": "25000000000",
+      "costUsdc": "0.000940825",
+      "contractAddress": null
+    }
+  },
+  "spend": {
+    "label": "deploy",
+    "network": "testnet",
+    "perTxCapUsdc": "0.05",
+    "totalCapUsdc": "0.15",
+    "maxFeeCeilingGwei": "40",
+    "committedUsdc": "0.0665273",
+    "remainingUsdc": "0.0834727",
+    "entries": [
+      {
+        "purpose": "deploy implementation A (DemoMerchantV1)",
+        "to": null,
+        "worstNativeAtomic": "37469421000000000",
+        "actualNativeAtomic": "26676775000000000",
+        "status": "settled",
+        "txHash": "0x8328b6e495df1c33de15060c972ca56b3e61342d7c58f38ff97c5f9d7d23fcce",
+        "at": "2026-10-10T02:45:43.709Z"
+      },
+      {
+        "purpose": "deploy implementation B (DemoMerchantV2)",
+        "to": null,
+        "worstNativeAtomic": "38456001000000000",
+        "actualNativeAtomic": "27379950000000000",
+        "status": "settled",
+        "txHash": "0x6c222e00919ddebc9e40694c9c59db91dba51d5ce26d0781afad1ecc85de8276",
+        "at": "2026-10-10T02:45:46.490Z"
+      },
+      {
+        "purpose": "deploy MAIN proxy on A",
+        "to": null,
+        "worstNativeAtomic": "6299206000000000",
+        "actualNativeAtomic": "4460700000000000",
+        "status": "settled",
+        "txHash": "0x8b2a1b94586ea77bb6e37882f99ca386ace7c0bc7464ace62484b546c70e2dad",
+        "at": "2026-10-10T02:47:01.018Z"
+      },
+      {
+        "purpose": "deploy CHANGED proxy on A",
+        "to": null,
+        "worstNativeAtomic": "6299206000000000",
+        "actualNativeAtomic": "4460700000000000",
+        "status": "settled",
+        "txHash": "0x6e696fab0024db263bfc4fa4bbe38bbfa21a5e52450538c4e2ee77925c2acb78",
+        "at": "2026-10-10T02:47:51.199Z"
+      },
+      {
+        "purpose": "setOrderCreator on MAIN",
+        "to": null,
+        "worstNativeAtomic": "1842921000000000",
+        "actualNativeAtomic": "1304175000000000",
+        "status": "settled",
+        "txHash": "0x06f57c44058a7a4fef29ff702ea90b9170a4bc942d941284fccc77ad819e501f",
+        "at": "2026-10-10T02:47:53.222Z"
+      },
+      {
+        "purpose": "setOrderCreator on CHANGED",
+        "to": null,
+        "worstNativeAtomic": "1842921000000000",
+        "actualNativeAtomic": "1304175000000000",
+        "status": "settled",
+        "txHash": "0x6e2721459cfac15a1159b1b0d70d255ff85a83ea854d0ddbe7c0023ba4173f1b",
+        "at": "2026-10-10T02:47:56.709Z"
+      },
+      {
+        "purpose": "upgrade CHANGED proxy A -> B",
+        "to": null,
+        "worstNativeAtomic": "1322342000000000",
+        "actualNativeAtomic": "940825000000000",
+        "status": "settled",
+        "txHash": "0x63bb48ab6fe259f574104156f1f6d6596438ed40e663c72ee7406c4c8e357e0e",
+        "at": "2026-10-10T02:48:00.565Z"
+      }
+    ]
+  },
+  "journal": {
+    "path": "/private/tmp/claude-501/-Users-ouyangduning-Documents-project-interesting-dorahacks-microgrants/87d205e9-cdb3-437f-9201-de53cf6758b0/scratchpad/r3/deploy-rehearsal/deploy-testnet-journal.json",
+    "startedAt": "2026-10-10T02:45:39.245Z",
+    "resumed": true
+  },
+  "plan": [
+    "plan rehearsal-deploy-20261010 (testnet) · budget cap 0.69 USDC · committed 0.0665273 · remaining 0.6234727",
+    "  deploy      done     cap 0.15   outflow 0.0665273            pending 0                    internal 0      invocations 3",
+    "  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0",
+    "  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0",
+    "  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0",
+    "  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0",
+    "  (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-rehearsal-deploy-20261010.json)"
+  ]
+}

@@ -1,0 +1,23 @@
+2026-10-10T02:50:58.813Z visitor key ledger: 2 prior entries, 0.0160091 USDC committed of 0.05 (carried across runs)
+2026-10-10T02:50:59.128Z limits · eip155:5042002 release ed1d501 · gate: publicExecution true · operatorAcceptance false · executionReady true · admin token absent
+2026-10-10T02:50:59.128Z caps: visitor key 0.03 per transaction / 0.05 total (fee authorization + business tx + gas) · project outflow 0.12 (measured over 4 keys, baseline 48.4918378315 USDC carried from the first invocation; now 48.4254478815, outflow so far 0.06638995)
+2026-10-10T02:50:59.128Z plan rehearsal-lifecycle-20261010 (testnet) · budget cap 0.69 USDC · committed 0.06638995 · remaining 0.62361005
+2026-10-10T02:50:59.129Z   deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T02:50:59.129Z   fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T02:50:59.129Z   probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T02:50:59.129Z   acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T02:50:59.129Z   lifecycle   running  cap 0.12   outflow 0.06638995           pending 0                    internal 0      invocations 2 baseline 48.4918378315
+2026-10-10T02:50:59.129Z   (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-rehearsal-lifecycle-20261010.json)
+2026-10-10T02:50:59.129Z   wallet     worst 0.028 USDC
+2026-10-10T02:50:59.129Z   interrupt  worst 0.073 USDC
+2026-10-10T02:50:59.129Z   total worst 0.101 USDC
+2026-10-10T02:50:59.129Z PROBLEM: lifecycle: 0.06638995 USDC committed across every invocation + worst case 0.101 USDC exceeds the step cap 0.12 USDC — stopping
+/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/scripts/selftest/lifecycle.ts:114
+  if (problems.length) throw new SpendRefused(problems.join("; "));
+                             ^
+
+SpendRefused: lifecycle: 0.06638995 USDC committed across every invocation + worst case 0.101 USDC exceeds the step cap 0.12 USDC — stopping
+    at <anonymous> (/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/scripts/selftest/lifecycle.ts:114:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+Node.js v22.23.1

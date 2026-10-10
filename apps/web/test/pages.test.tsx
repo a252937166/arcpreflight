@@ -204,6 +204,12 @@ describe("presentation review 2026-10-09 · the decision waits for the reference
     expect(lifecycleOf(tree).execute.status).toBe("active");
     api.baselines.fail(404, { error: "NOT_FOUND", reason: "no such baseline" }); await vi.advanceTimersByTimeAsync(5000); tree = render(Developer);
     expect(badge(tree).props.decision).toBe("REVIEW_REQUIRED"); expect(byTestId(tree, "baseline-reread-failed")).toBeUndefined(); expect(byTestId(tree, "decision-pending")).toBeUndefined();
+    // P3 (2026-10-10): a transient error after the 404 keeps "no approved baseline → review required"; it never turns back into loading
+    api.baselines.fail(503, { error: "UPSTREAM_UNAVAILABLE", reason: "node unavailable" }); await vi.advanceTimersByTimeAsync(5000); tree = render(Developer);
+    expect(badge(tree).props.decision).toBe("REVIEW_REQUIRED"); expect(byTestId(tree, "decision-pending")).toBeUndefined();
+    expect(content(byTestId(tree, "baseline-reread-failed"))).toContain("no approved baseline"); expect(lifecycleOf(tree).check.status).toBe("review");
+    api.baselines.restore(); await vi.advanceTimersByTimeAsync(5000); tree = render(Developer);
+    expect(badge(tree).props.decision).toBe("NO_POLICY_VIOLATION"); expect(byTestId(tree, "baseline-reread-failed")).toBeUndefined(); // the approval is back: decided from it
   });
   it("the Developer page refreshes the SHARED balance after the fee settles and after the payment confirms, and tells other tabs", async () => {
     const api = developerApi(); const store = memStorage();

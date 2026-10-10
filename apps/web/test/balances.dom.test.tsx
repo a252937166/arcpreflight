@@ -38,7 +38,7 @@ describe("one balance for the header chip and the page", () => {
     await settle();
     expect(chipText()).toContain("0.18 USDC"); expect(pageText()).toBe("180000000000000000");
     const reads = () => provider.request.mock.calls.filter((c) => c[0].method === "eth_getBalance").length;
-    expect(reads()).toBe(1); // both views mounted together: the second one joined the read in flight — one reading, read once
+    expect(reads()).toBe(2); // both views mounted together: the page joined the chip's read in flight; its token requirement added one follow-up read (the ERC-20 face)
     // the fee settled: the page refreshes — the header follows at once (before: it kept 0.18 until a reload)
     balance = 117_000_000_000_000_000n;
     await act(async () => { (host.querySelector("[data-testid=page-refresh]") as HTMLButtonElement).click(); });
@@ -51,6 +51,6 @@ describe("one balance for the header chip and the page", () => {
     await settle();
     expect(pageText()).toBe("56000000000000000"); expect(chipText()).toContain("0.06 USDC");
     await act(async () => { window.dispatchEvent(new StorageEvent("storage", { key: "arcpreflight.something-else", newValue: "x" })); }); await settle();
-    expect(reads()).toBe(3); // a foreign key changes nothing
+    expect(reads()).toBe(4); // a foreign key changes nothing
   });
 });

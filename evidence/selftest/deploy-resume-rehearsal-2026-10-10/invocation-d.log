@@ -1,0 +1,28 @@
+network=testnet chainId=5042002 mode=PREFLIGHT (read-only; nothing is signed) · RESUMING from the journal
+deployer 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 7.711405075 USDC · nonce 50 · runner 0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE · orderCreator 0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b
+fees: base 20 gwei · max fee sent 29 gwei · priority 5 gwei · ceiling 40 gwei
+caps: 0.05 USDC per transaction · 0.15 USDC total (gas included) · ledger /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-deploy.json (3 prior entries, 0.060355931 USDC committed)
+plan rehearsal-deploy-20261010 (testnet) · budget cap 0.69 USDC · committed 0.060355931 · remaining 0.629644069
+  deploy      running  cap 0.15   outflow 0.054056725          pending 0.006299206          internal 0      invocations 2
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-rehearsal-deploy-20261010.json)
+journal /private/tmp/claude-501/-Users-ouyangduning-Documents-project-interesting-dorahacks-microgrants/87d205e9-cdb3-437f-9201-de53cf6758b0/scratchpad/r3/deploy-rehearsal/deploy-testnet-journal.json:
+  deploy implementation A (DemoMerchantV1)     confirmed nonce 47 0x8328b6e495… → 0xc33f4355e5b88c4fa90ee3d04746a4e327802bd8 block 66408031
+  deploy implementation B (DemoMerchantV2)     confirmed nonce 48 0x6c222e0091… → 0x57f23414ca2c36d8becfb83dc230b87523a66bd2 block 66408037
+  deploy MAIN proxy on A                       signed    nonce 49 0x8b2a1b9458…
+  deploy CHANGED proxy on A                    pending  
+  setOrderCreator on MAIN                      pending  
+  setOrderCreator on CHANGED                   pending  
+  upgrade CHANGED proxy A -> B                 pending  
+  restart → confirm: deploy MAIN proxy on A: 0x8b2a1b94586ea77bb6e37882f99ca386ace7c0bc7464ace62484b546c70e2dad is mined in block 66408184
+plan (4 unfinished steps):
+  deploy CHANGED proxy on A                    gas   178416 (measured on testnet) · limit   214100 · worst 0.0062089    · expected 0.0044604
+  setOrderCreator on MAIN                      gas    52167 (measured on testnet) · limit    62601 · worst 0.001815429  · expected 0.001304175
+  setOrderCreator on CHANGED                   gas    52167 (measured on testnet) · limit    62601 · worst 0.001815429  · expected 0.001304175
+  upgrade CHANGED proxy A -> B                 gas    37633 (measured on testnet) · limit    45160 · worst 0.00130964   · expected 0.000940825
+  total worst 0.011149398 USDC · expected 0.008009575 USDC
+predicted addresses: proxyCHANGED 0x7E99693a310AAf59798262702FF375de2b8c83e7
+PREFLIGHT OK: nothing was signed or sent.

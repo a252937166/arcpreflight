@@ -52,15 +52,39 @@ describe("shared wallet balances", () => {
     const n2 = p.reads(); await refreshBalances(p, ACCOUNT, { untilChanged: false }); expect(p.reads()).toBe(n2 + 1);
     off();
   });
-  it("a new refresh supersedes a running loop; the last view leaving stops it; a provider error keeps the last reading", async () => {
+  it("a request during a running loop joins it and reads at once; the last view leaving stops the loop; a provider error keeps the last reading", async () => {
     let bal = 10n ** 18n; let fail = false;
     const p = provider({ [ACCOUNT.toLowerCase()]: () => { if (fail) throw new Error("rpc down"); return bal; } });
     const off = subscribeBalances(p, ACCOUNT, null, () => {}); await flush();
-    const first = refreshBalances(p, ACCOUNT); await flush();
-    bal = 5n; const second = refreshBalances(p, ACCOUNT, { untilChanged: false }); await first; await second;
+    const first = refreshBalances(p, ACCOUNT); await flush(); // unchanged → the loop waits
+    bal = 5n; const second = refreshBalances(p, ACCOUNT, { untilChanged: false }); await flush(); await first; await second; // joined: read now, sees 5, both settle
     expect(balancesOf(p, ACCOUNT).native).toBe(5n);
     const n = p.reads(); void refreshBalances(p, ACCOUNT); await flush(); off(); await vi.advanceTimersByTimeAsync(10_000); expect(p.reads()).toBe(n + 1); // stopped with the view
     const off2 = subscribeBalances(p, ACCOUNT, null, () => {}); await flush(); fail = true; await refreshBalances(p, ACCOUNT); expect(balancesOf(p, ACCOUNT).native).toBe(5n); off2();
+  });
+  it("P2 (2026-10-10): a single read while an until-changed loop waits for a lagging node JOINS the loop instead of replacing it; the value lands when the node catches up", async () => {
+    let bal = 180_000_000_000_000_000n; const p = provider({ [ACCOUNT.toLowerCase()]: () => bal });
+    const off = subscribeBalances(p, ACCOUNT, null, () => {}); await flush(); expect(balancesOf(p, ACCOUNT).native).toBe(180_000_000_000_000_000n);
+    const payment = refreshBalances(p, ACCOUNT); await flush(); // the node still reports 0.18 → the loop waits 2 s
+    const n = p.reads();
+    const menu = refreshBalances(p, ACCOUNT, { untilChanged: false }); // opening the wallet menu
+    await flush(); expect(p.reads()).toBe(n + 1); // joined: one read now (still 0.18), no competing single read — the loop keeps waiting
+    bal = 117_000_000_000_000_000n; await vi.advanceTimersByTimeAsync(2000); await payment; await menu;
+    expect(balancesOf(p, ACCOUNT).native).toBe(117_000_000_000_000_000n); // the page AND the menu see the new value
+    // a second until-changed request during a loop keeps the loop and adopts the expected value
+    const first = refreshBalances(p, ACCOUNT); await flush(); const n2 = p.reads();
+    const second = refreshBalances(p, ACCOUNT, { expect: 56_000_000_000_000_000n }); await flush(); expect(p.reads()).toBe(n2 + 1); // read now, still 0.117: the loop goes on
+    bal = 56_000_000_000_000_000n; await vi.advanceTimersByTimeAsync(2000); await first; await second; expect(balancesOf(p, ACCOUNT).native).toBe(56_000_000_000_000_000n);
+    off();
+  });
+  it("P3 (2026-10-10): the header mounts first without a token requirement, the page joins the read in flight WITH one — the ERC-20 face is read in a follow-up, never left on '…'", async () => {
+    const bal = 10n ** 18n; const p = provider({ [ACCOUNT.toLowerCase()]: () => bal });
+    const offChip = subscribeBalances(p, ACCOUNT, null, () => {}); // the chip: native only, read in flight
+    const offPage = subscribeBalances(p, ACCOUNT, USDC, () => {}); // the Developer page, same tick
+    await flush(); await flush();
+    expect(balancesOf(p, ACCOUNT)).toMatchObject({ native: 10n ** 18n, erc20: 1n });
+    expect(p.request.mock.calls.filter((c: any[]) => c[0].method === "eth_call")).toHaveLength(1); // exactly one follow-up ERC-20 read
+    offChip(); offPage();
   });
   it("other tabs: a change is written under the signal key; a signal from another tab makes every view of that account re-read until it sees that value; this tab's own signal and other accounts are ignored", async () => {
     let bal = 180_000_000_000_000_000n, other = 7n;

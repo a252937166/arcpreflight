@@ -1,0 +1,29 @@
+2026-10-10T02:48:58.097Z limits · eip155:5042002 release ed1d501 · gate: publicExecution true · operatorAcceptance false · executionReady true · admin token absent
+2026-10-10T02:48:58.097Z caps: visitor key 0.03 per transaction / 0.05 total (fee authorization + business tx + gas) · project outflow 0.12 (measured over 4 keys, baseline 48.4918378315 USDC)
+2026-10-10T02:48:58.098Z plan rehearsal-lifecycle-20261010 (testnet) · budget cap 0.69 USDC · committed 0 · remaining 0.69
+2026-10-10T02:48:58.098Z   deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T02:48:58.098Z   fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T02:48:58.098Z   probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T02:48:58.098Z   acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-10T02:48:58.098Z   lifecycle   running  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 1 baseline 48.4918378315
+2026-10-10T02:48:58.098Z   (new record: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-rehearsal-lifecycle-20261010.json)
+2026-10-10T02:48:58.098Z   wallet     worst 0.028 USDC
+2026-10-10T02:48:58.098Z   interrupt  worst 0.073 USDC
+2026-10-10T02:48:58.098Z   total worst 0.101 USDC
+2026-10-10T02:48:58.503Z wallet: measured project outflow so far 0 USDC; worst case of this scenario 0.028 USDC; cap 0.12 USDC
+2026-10-10T02:48:58.518Z wallet scenario: payer 0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2, amount 5000000000000000 native units, reference "lifecycle rehearsal 2026-10-10T02-48-55"
+2026-10-10T02:49:02.771Z order 0x70e659b4bb… created in 0xa28f8014ad0b984f0bd155358db8c26699279cdd69249d7731caa1553a77caa1 (block 66408421) on 0xA8eB51EF994567B84215981E8d1Fe17cb8e42252
+2026-10-10T02:49:18.061Z report delivered; fee settled in 0x55e102e4736e3e6dd008885f4b1e6a7e26b158e074323df729357d224c81c44a; baselineResult MATCH
+2026-10-10T02:49:25.359Z attempt f97471a6-8d46-4c0e-8588-2ffa5ffd603e VALIDATED until 2026-10-10T02:50:25.487Z; plan nonce 10 gas 40735 maxFee 29 gwei
+2026-10-10T02:49:31.126Z prompt claim probe: granted once (200), second claim 409 PROMPT_CLAIMED, stranger's hand-back 409 PROMPT_CLAIMED, holder's hand-back 200 → plain VALIDATED again
+2026-10-10T02:49:32.431Z wallet broadcast 0x75fc10b2c5fbf59af0c564c1582c3cf6f2fdd7a95da7e48d9cd90c73da5c9e11
+2026-10-10T02:49:36.415Z attempt CONFIRMED: order paid in block 66408482; cost statement buyer total 0.0160091 USDC
+2026-10-10T02:49:36.723Z visitor key spend: 0.0160091 USDC of the 0.05 USDC cap
+2026-10-10T02:49:44.787Z verifier: exit 0, pass 10, fail 0, unverified 0; TRANSACTION_PLAN_AGREEMENT=PASS ORDER_OUTCOME=PASS COST_STATEMENT=PASS
+2026-10-10T02:49:47.904Z interrupt: measured project outflow so far 0.010695825 USDC; worst case of this scenario 0.073 USDC; cap 0.12 USDC
+2026-10-10T02:49:49.901Z live demo run 0ec2d7a3-4024-4fbb-81a9-a555c484457c started with a labelled interruption after the broadcast
+2026-10-10T02:50:10.798Z run stopped: state RECONCILE_REQUIRED, outcome BROADCAST_UNRESOLVED (store), store BROADCAST_ATTEMPTED
+2026-10-10T02:50:14.659Z reconciled: 0x744c9fb75ceec144b1dd298ce9cefb1aa149bc5bd5a6b2b1575394559921fe79 CONFIRMED/SUCCESS; recovery added orders=0 signatures=0
+2026-10-10T02:50:25.015Z verifier: exit 0, pass 10, fail 0; ORDER_OUTCOME=PASS TRANSACTION_PLAN_AGREEMENT=PASS COST_STATEMENT=PASS
+2026-10-10T02:50:26.814Z measured project outflow: 0.06638995 USDC of the 0.12 USDC cap
+2026-10-10T02:50:26.816Z evidence written to /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/selftest/testnet-lifecycle-2026-10-10T02-48-55-560Z.json

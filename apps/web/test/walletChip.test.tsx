@@ -94,13 +94,23 @@ describe("the connected-wallet panel", () => {
     h.wallet.provider.request.mockImplementation(async ({ method }: { method: string }) => (method === "eth_getBalance" ? balance : method === "eth_chainId" ? "0x4cef52" : "0x1"));
     let tree = chip(); await flush(); tree = chip();
     expect(content(tree)).toContain("0.18 USDC");
-    balance = "0x19fb5ae2c7c4000"; // 0.117 USDC after the check fee: the Developer page's hook refreshes the shared store
+    balance = "0x19faae14eb88000"; // 0.117 USDC after the check fee: the Developer page's hook refreshes the shared store
     await refreshBalances(h.wallet.provider, ACCOUNT); tree = chip();
     expect(content(tree)).toContain("0.12 USDC"); expect(content(tree)).not.toContain("0.18 USDC");
     balance = "0xc6f3b40b6c0000"; // 0.056 USDC: another tab paid and wrote the signal
     onBalanceSignal(JSON.stringify({ account: ACCOUNT.toLowerCase(), native: "56000000000000000", at: 1, tab: "another-tab" })); await flush(); tree = chip();
     expect(content(tree)).toContain("0.06 USDC");
     expect(BALANCE_SIGNAL_KEY).toBe("arcpreflight.balances:signal");
+  });
+  it("P2 (2026-10-10): opening the menu while the post-payment refresh waits for a lagging node does not cancel it — the new balance still lands", async () => {
+    let balance = "0x27f7d0bdb920000"; // 0.18 USDC
+    h.wallet.provider.request.mockImplementation(async ({ method }: { method: string }) => (method === "eth_getBalance" ? balance : method === "eth_chainId" ? "0x4cef52" : "0x1"));
+    let tree = chip(); await flush(); tree = chip(); expect(content(tree)).toContain("0.18 USDC");
+    const payment = refreshBalances(h.wallet.provider, ACCOUNT); await flush(); // the Developer page's refresh; the node still says 0.18 → waits
+    await button(tree, CHIP).props.onClick(); tree = chip(); await flush(); tree = chip(); // the menu opens: its single read joins the loop
+    balance = "0x19faae14eb88000"; // 0.117 USDC: the node catches up 2 s later
+    await vi.advanceTimersByTimeAsync(2000); await payment; tree = chip();
+    expect(content(tree)).toContain("0.12 USDC"); expect(text(panelOf(tree))).toContain("0.117 USDC on Arc Testnet");
   });
   it("off the API's chain: an amber 'not Arc' badge, the switch action, and no balance claim", async () => {
     h.wallet.chainId = 1;

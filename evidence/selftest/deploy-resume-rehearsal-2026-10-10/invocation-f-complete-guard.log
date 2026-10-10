@@ -1,0 +1,23 @@
+network=testnet chainId=5042002 mode=PREFLIGHT (read-only; nothing is signed) · RESUMING from the journal
+deployer 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 7.7033952 USDC · nonce 54 · runner 0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE · orderCreator 0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b
+fees: base 20 gwei · max fee sent 29 gwei · priority 5 gwei · ceiling 40 gwei
+caps: 0.05 USDC per transaction · 0.15 USDC total (gas included) · ledger /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-deploy.json (7 prior entries, 0.0665273 USDC committed)
+plan rehearsal-deploy-20261010 (testnet) · budget cap 0.69 USDC · committed 0.0665273 · remaining 0.6234727
+  deploy      done     cap 0.15   outflow 0.0665273            pending 0                    internal 0      invocations 3
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/testnet-plan-rehearsal-deploy-20261010.json)
+journal /private/tmp/claude-501/-Users-ouyangduning-Documents-project-interesting-dorahacks-microgrants/87d205e9-cdb3-437f-9201-de53cf6758b0/scratchpad/r3/deploy-rehearsal/deploy-testnet-journal.json:
+  deploy implementation A (DemoMerchantV1)     confirmed nonce 47 0x8328b6e495… → 0xc33f4355e5b88c4fa90ee3d04746a4e327802bd8 block 66408031
+  deploy implementation B (DemoMerchantV2)     confirmed nonce 48 0x6c222e0091… → 0x57f23414ca2c36d8becfb83dc230b87523a66bd2 block 66408037
+  deploy MAIN proxy on A                       confirmed nonce 49 0x8b2a1b9458… → 0x9d8be60787993ce1bbfaa0c043cc76f824204618 block 66408184
+  deploy CHANGED proxy on A                    confirmed nonce 50 0x6e696fab00… → 0x7e99693a310aaf59798262702ff375de2b8c83e7 block 66408282
+  setOrderCreator on MAIN                      confirmed nonce 51 0x06f57c4405… block 66408287
+  setOrderCreator on CHANGED                   confirmed nonce 52 0x6e2721459c… block 66408294
+  upgrade CHANGED proxy A -> B                 confirmed nonce 53 0x63bb48ab6f… block 66408301
+plan (0 unfinished steps):
+  total worst 0 USDC · expected 0 USDC
+NOT READY (1):
+  - /private/tmp/claude-501/-Users-ouyangduning-Documents-project-interesting-dorahacks-microgrants/87d205e9-cdb3-437f-9201-de53cf6758b0/scratchpad/r3/deploy-rehearsal/deployments-testnet.json exists and the journal is complete: nothing to deploy

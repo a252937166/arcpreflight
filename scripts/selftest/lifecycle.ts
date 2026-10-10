@@ -21,7 +21,9 @@ import { IntentCore, PolicyCore, intentDigest, policyDigest } from "@arcprefligh
 import { DEMO_MERCHANT_ABI, PAY_SELECTOR } from "@arcpreflight/policy";
 import { signTransferAuthorization, type ArcNet } from "@arcpreflight/client";
 import { PIN_LAG } from "@arcpreflight/observer";
-import { OutflowMeter, SpendGuard, SpendRefused, parseUsdc18, usdc18 } from "@arcpreflight/client";
+import { OutflowMeter, SpendRefused, parseUsdc18, usdc18, pinCaps, checkStep, beginMeasured, updateMeasured, noteOpen, endStep } from "@arcpreflight/client";
+import { openGuard } from "../lib/spend-ledger.js";
+import { openPlan } from "../lib/plan-ledger.js";
 
 // Gate D (2026-10-09): `--preflight` is read-only (no session, no order, no signature): the gate state, the balances, the plan and the caps.
 // Execution enforces two limits: the visitor key's own spend (the fee authorization + its business transaction, gas included) through a
@@ -79,25 +81,45 @@ const worstOf = { wallet: ORDER_GAS_CEIL + feeNative + RELAY_GAS_CEIL + walletAm
 const walletAddress = (() => { const f = process.env.WALLET_KEY_FILE; if (!f || !scenarios.includes("wallet")) return null; const t = readFileSync(f, "utf8").trim(); if (t.startsWith("{")) { const j = JSON.parse(t); if (j.address) return j.address as string; return privateKeyToAccount(j.privateKey as Hex).address; } return privateKeyToAccount(t as Hex).address; })();
 const projectAddresses = Array.from(new Set([walletAddress, network.accounts?.demoRunner, network.accounts?.orderCreator, network.accounts?.merchantPayTo].filter((a): a is string => !!a).map((a) => a.toLowerCase())));
 const sumBalances = async () => (await Promise.all(projectAddresses.map((a) => client.getBalance({ address: a as Hex })))).reduce((x, y) => x + y, 0n);
-const meter = new OutflowMeter("lifecycle project outflow", projectCap, await sumBalances());
-const walletGuard = new SpendGuard(walletLimits);
+// the plan ledger (review 2026-10-10, P1): the approved project cap is pinned (the environment may lower it, never raise it); the measured
+// outflow is carried across restarts from the FIRST invocation's balance baseline; a scenario that was started counts at its worst case
+// until it settles. The visitor key's own guard is persisted too (evidence/spend/<net>-lifecycle-wallet.json) so its cap holds across re-runs.
+const ROOT_DIR = process.env.ARCPREFLIGHT_ROOT ?? process.cwd();
+const book = openPlan(ROOT_DIR, net, { write: !PREFLIGHT });
+if (book) pinCaps(book.plan, "lifecycle", { totalNativeAtomic: projectCap });
+const startTotal = await sumBalances();
+if (book && !PREFLIGHT) book.apply((p) => beginMeasured(p, "lifecycle", projectAddresses, startTotal));
+const baseline = book?.plan.steps.lifecycle.baselineTotalNativeAtomic ?? startTotal;
+const meter = new OutflowMeter("lifecycle project outflow", projectCap, baseline);
+const syncMeasured = async () => { const t = await sumBalances(); if (book && !PREFLIGHT) book.apply((p) => updateMeasured(p, "lifecycle", t)); return t; };
+const walletLedger = openGuard(ROOT_DIR, walletLimits, { write: !PREFLIGHT });
+const walletGuard = walletLedger.guard; const saveWallet = walletLedger.save;
 {
   const fees = await client.estimateFeesPerGas().catch(() => null);
   const rows = scenarios.map((sc) => `  ${sc.padEnd(10)} worst ${usdc18(worstOf[sc] ?? 0n)} USDC`);
   const totalWorst = scenarios.reduce((a, sc) => a + (worstOf[sc] ?? 0n), 0n);
   const problems: string[] = [];
   if (totalWorst > projectCap) problems.push(`the scenarios' worst case ${usdc18(totalWorst)} USDC exceeds LIFECYCLE_PROJECT_CAP_USDC ${usdc18(projectCap)}`);
+  if (book) { const c = checkStep(book.plan, "lifecycle", totalWorst, projectCap); if (!c.ok) problems.push(c.reason!); }
+  if (walletLedger.priorEntries) log(`visitor key ledger: ${walletLedger.priorEntries} prior entr${walletLedger.priorEntries === 1 ? "y" : "ies"}, ${usdc18(walletGuard.committed())} USDC committed of ${usdc18(walletLimits.totalNativeAtomic)} (carried across runs)`);
   if (scenarios.includes("wallet")) { const need = walletAmount + feeNative + PAY_GAS_CEIL; if (feeNative + walletAmount + PAY_GAS_CEIL > walletLimits.totalNativeAtomic) problems.push(`the wallet scenario needs up to ${usdc18(need)} USDC, above WALLET_SPEND_CAP_USDC ${usdc18(walletLimits.totalNativeAtomic)}`); if (walletAddress) { const b = await client.getBalance({ address: walletAddress as Hex }); if (b < need && !network.faucet?.enabled) problems.push(`the visitor key ${walletAddress} holds ${usdc18(b)} USDC, below the ${usdc18(need)} USDC the wallet scenario needs`); } else problems.push("WALLET_KEY_FILE is required for the wallet scenario"); }
   if (net === "mainnet" && !process.env.ADMIN_TOKEN) problems.push("ADMIN_TOKEN is required on mainnet (the gate stays closed during acceptance)");
   if (fees?.maxFeePerGas && fees.maxFeePerGas > walletLimits.maxFeePerGasCeiling) problems.push(`network max fee ${fees.maxFeePerGas / GWEI} gwei is above the ${walletLimits.maxFeePerGasCeiling / GWEI} gwei ceiling`);
   log(`${PREFLIGHT ? "PREFLIGHT (read-only: no session, no order, no signature)" : "limits"} · ${network.caip2} release ${network.release} · gate: publicExecution ${network.access?.publicExecution} · operatorAcceptance ${network.access?.operatorAcceptance ?? "?"} · executionReady ${network.access?.executionReady ?? "?"} · admin token ${process.env.ADMIN_TOKEN ? "supplied" : "absent"}`);
-  log(`caps: visitor key ${usdc18(walletLimits.perTxNativeAtomic)} per transaction / ${usdc18(walletLimits.totalNativeAtomic)} total (fee authorization + business tx + gas) · project outflow ${usdc18(projectCap)} (measured over ${projectAddresses.length} keys, now ${usdc18(meter.startTotal)} USDC)`);
+  log(`caps: visitor key ${usdc18(walletLimits.perTxNativeAtomic)} per transaction / ${usdc18(walletLimits.totalNativeAtomic)} total (fee authorization + business tx + gas) · project outflow ${usdc18(projectCap)} (measured over ${projectAddresses.length} keys, baseline ${usdc18(meter.startTotal)} USDC${baseline !== startTotal ? ` carried from the first invocation; now ${usdc18(startTotal)}, outflow so far ${usdc18(meter.outflow(startTotal))}` : ""})`);
+  if (book) for (const l of book.lines()) log(l);
   for (const r of rows) log(r); log(`  total worst ${usdc18(totalWorst)} USDC`);
   for (const pr of problems) log(`PROBLEM: ${pr}`);
   if (PREFLIGHT) { log(problems.length ? `PREFLIGHT: NOT READY (${problems.length})` : "PREFLIGHT OK: nothing was created, signed or sent."); process.exit(problems.length ? 2 : 0); }
   if (problems.length) throw new SpendRefused(problems.join("; "));
 }
-const beforeScenario = async (sc: string) => { const h = meter.headroomFor(await sumBalances(), worstOf[sc] ?? 0n); if (!h.ok) throw new SpendRefused(h.reason!); log(`${sc}: measured project outflow so far ${usdc18(h.outflow)} USDC; worst case of this scenario ${usdc18(worstOf[sc] ?? 0n)} USDC; cap ${usdc18(projectCap)} USDC`); };
+const scenarioId = (sc: string) => `${sc}-${stamp}`;
+const beforeScenario = async (sc: string) => {
+  const h = meter.headroomFor(await syncMeasured(), worstOf[sc] ?? 0n); if (!h.ok) throw new SpendRefused(h.reason!);
+  if (book) { const c = checkStep(book.plan, "lifecycle", worstOf[sc] ?? 0n, projectCap); if (!c.ok) throw new SpendRefused(c.reason!); book.apply((p) => noteOpen(p, "lifecycle", scenarioId(sc), true, worstOf[sc] ?? 0n)); }
+  log(`${sc}: measured project outflow so far ${usdc18(h.outflow)} USDC; worst case of this scenario ${usdc18(worstOf[sc] ?? 0n)} USDC; cap ${usdc18(projectCap)} USDC`);
+};
+const afterScenario = async (sc: string) => { if (book) book.apply((p) => noteOpen(p, "lifecycle", scenarioId(sc), false, worstOf[sc] ?? 0n)); await syncMeasured(); };
 
 if (scenarios.includes("wallet")) {
   await beforeScenario("wallet");
@@ -138,13 +160,13 @@ if (scenarios.includes("wallet")) {
   for (let i = 0; i < 5 && quoted.status === 402 && BigInt(quoted.body.pinnedBlock ?? 0) < BigInt(order.body.block); i++) { log("quote pinned before the order; re-requesting under a new clientRequestId (nothing paid)"); await sleep(1500); intent = makeIntent(); quoted = await post("/v1/preflight", { intent }, token); }
   assert.equal(quoted.status, 402, JSON.stringify(quoted.body)); assert(BigInt(quoted.body.pinnedBlock) >= BigInt(order.body.block));
   // 3. ONE fee authorization signed by the wallet; the report is delivered once the fee settles
-  const feeIdx = walletGuard.reserve({ purpose: "check fee authorization", to: quoted.body.quote.payTo, tokenNativeEquivalent: BigInt(quoted.body.quote.amountTokenAtomic) * 10n ** 12n, gasLimit: 0n, maxFeePerGas: 0n, authorization: true });
+  const feeIdx = walletGuard.reserve({ purpose: "check fee authorization", to: quoted.body.quote.payTo, tokenNativeEquivalent: BigInt(quoted.body.quote.amountTokenAtomic) * 10n ** 12n, gasLimit: 0n, maxFeePerGas: 0n, authorization: true }); saveWallet();
   const { signature, authorization } = await signTransferAuthorization(wallet, net, { payTo: quoted.body.quote.payTo, valueTokenAtomic: BigInt(quoted.body.quote.amountTokenAtomic) });
   let delivered = await post("/v1/preflight", { intent, payment: { signature, authorization } }, token);
   for (let i = 0; i < 20 && delivered.status === 202; i++) { await sleep(1500); delivered = await get(`/v1/requests/${quoted.body.requestId}`, token); }
   assert.equal(delivered.status, 200, JSON.stringify(delivered.body).slice(0, 300)); assert.equal(delivered.body.delivery, "DELIVERED");
   log(`report delivered; fee settled in ${delivered.body.payment.transaction}; baselineResult ${delivered.body.report.baselineResult}`);
-  walletGuard.settle(feeIdx, BigInt(quoted.body.quote.amountTokenAtomic) * 10n ** 12n);
+  walletGuard.settle(feeIdx, BigInt(quoted.body.quote.amountTokenAtomic) * 10n ** 12n); saveWallet();
   // 4. the wallet attempt: VALIDATED with its plan before any signature exists
   const attempt = await post("/v1/wallet/attempts", { requestId: quoted.body.requestId, orderId: order.body.orderId, policy }, token);
   assert.equal(attempt.status, 201, JSON.stringify(attempt.body).slice(0, 400));
@@ -168,11 +190,11 @@ if (scenarios.includes("wallet")) {
   log(`prompt claim probe: granted once (200), second claim ${claimProbe.secondClaim}, stranger's hand-back ${claimProbe.strangerHandBack}, holder's hand-back 200 → plain VALIDATED again`);
   // 5. the "wallet" signs EXACTLY the plan and broadcasts it itself (the service never sees the bytes), then reports the hash —
   //    within the visitor key's caps (value + gasLimit × maxFee per transaction, and the step total with the fee authorization)
-  const payIdx = walletGuard.reserve({ purpose: "business payment", to: plan.to, valueNativeAtomic: BigInt(plan.valueNativeAtomic), gasLimit: BigInt(plan.gasLimit), maxFeePerGas: BigInt(plan.maxFeePerGasNativeAtomic) });
+  const payIdx = walletGuard.reserve({ purpose: "business payment", to: plan.to, valueNativeAtomic: BigInt(plan.valueNativeAtomic), gasLimit: BigInt(plan.gasLimit), maxFeePerGas: BigInt(plan.maxFeePerGasNativeAtomic) }); saveWallet();
   const raw = await wallet.signTransaction({ chainId: plan.chainId, type: "eip1559", to: plan.to as Hex, data: plan.data as Hex, value: BigInt(plan.valueNativeAtomic), nonce: Number(plan.nonce), gas: BigInt(plan.gasLimit), maxFeePerGas: BigInt(plan.maxFeePerGasNativeAtomic), maxPriorityFeePerGas: BigInt(plan.maxPriorityFeePerGasNativeAtomic), accessList: [] });
   const parsed = parseTransaction(raw); assert.equal(parsed.to?.toLowerCase(), plan.to.toLowerCase()); assert.equal(parsed.data?.toLowerCase(), plan.data.toLowerCase());
   const txHash = keccak256(raw);
-  walletGuard.sent(payIdx, txHash);
+  walletGuard.sent(payIdx, txHash); saveWallet();
   await client.sendRawTransaction({ serializedTransaction: raw });
   log(`wallet broadcast ${txHash}`);
   const sent = await post(`/v1/wallet/attempts/${attemptId}/sent`, { txHash }, token);
@@ -184,7 +206,7 @@ if (scenarios.includes("wallet")) {
   assert.deepEqual(a.body.deviations?.mismatch ?? [], [], "the wallet sent exactly the plan");
   assert.equal(a.body.recovery.interrupted, false); assert.equal(a.body.recovery.counters.businessSignatures, 0);
   log(`attempt CONFIRMED: order paid in block ${a.body.block}; cost statement buyer total ${a.body.costStatement?.buyer?.totalUsdc} USDC`);
-  { const rc = await client.getTransactionReceipt({ hash: txHash }); walletGuard.settle(payIdx, BigInt(plan.valueNativeAtomic) + rc.gasUsed * rc.effectiveGasPrice); log(`visitor key spend: ${walletGuard.summary().committedUsdc} USDC of the ${usdc18(walletLimits.totalNativeAtomic)} USDC cap`); }
+  { const rc = await client.getTransactionReceipt({ hash: txHash }); walletGuard.settle(payIdx, BigInt(plan.valueNativeAtomic) + rc.gasUsed * rc.effectiveGasPrice); saveWallet(); log(`visitor key spend: ${walletGuard.summary().committedUsdc} USDC of the ${usdc18(walletLimits.totalNativeAtomic)} USDC cap`); }
   const shownOrder = await get(`/v1/demo/orders/${order.body.orderId}`, token); assert.equal(shownOrder.body.paid, true); assert(shownOrder.body.attempts.some((x: any) => x.attemptId === attemptId));
   // 6. passport + independent verification in a clean process
   const passport = await get(`/v1/wallet/attempts/${attemptId}/passport`, token); assert.equal(passport.status, 200);
@@ -193,6 +215,7 @@ if (scenarios.includes("wallet")) {
   log(`verifier: exit ${v.exit}, pass ${v.counts.pass}, fail ${v.counts.fail}, unverified ${v.counts.unverified ?? 0}; TRANSACTION_PLAN_AGREEMENT=${v.findings.TRANSACTION_PLAN_AGREEMENT} ORDER_OUTCOME=${v.findings.ORDER_OUTCOME} COST_STATEMENT=${v.findings.COST_STATEMENT}`);
   assert.equal(v.counts.fail, 0, JSON.stringify(v.findings));
   const manifest = JSON.parse(passport.body.files["manifest.json"]); assert.equal(manifest.subject.kind, "wallet-run"); assert.equal(manifest.subject.executionMode, "wallet");
+  await afterScenario("wallet");
   evidence.scenarios.wallet = { payer: wallet.address, claimProbe, order: { orderId: order.body.orderId, tx: order.body.tx, block: order.body.block, amountNativeAtomic: amount.toString(), reference }, requestId: quoted.body.requestId, feeTx: delivered.body.payment.transaction, attemptId, plan, txHash, outcome: { state: a.body.state, businessStatus: a.body.businessStatus, block: a.body.block, deviations: a.body.deviations }, costStatement: a.body.costStatement, passport: passportPath, verifier: v };
 }
 
@@ -225,10 +248,12 @@ if (scenarios.includes("interrupt")) {
   const v = verifyInCleanProcess(passportPath, { baselineDigests: [fixture.baselineDigest], policyDigests: [run.result.policyDigest] });
   log(`verifier: exit ${v.exit}, pass ${v.counts.pass}, fail ${v.counts.fail}; ORDER_OUTCOME=${v.findings.ORDER_OUTCOME} TRANSACTION_PLAN_AGREEMENT=${v.findings.TRANSACTION_PLAN_AGREEMENT} COST_STATEMENT=${v.findings.COST_STATEMENT}`);
   assert.equal(v.counts.fail, 0, JSON.stringify(v.findings));
+  await afterScenario("interrupt");
   evidence.scenarios.interrupt = { runId, clientRunRequestId, stateAtStop: interruptedState, outcomeAtStop, steps: stepNames, businessExecution: run.businessExecution, recovery: run.recovery, reconciliation: run.result.reconciliation, costStatement: run.result.costStatement, passport: passportPath, verifier: v };
 }
 
-evidence.spend = { visitorKey: walletGuard.summary(), projectOutflow: { capUsdc: usdc18(projectCap), measuredUsdc: usdc18(meter.outflow(await sumBalances())), addresses: projectAddresses } };
+evidence.spend = { visitorKey: walletGuard.summary(), projectOutflow: { capUsdc: usdc18(projectCap), measuredUsdc: usdc18(meter.outflow(await syncMeasured())), baselineUsdc: usdc18(baseline), carriedBaseline: baseline !== startTotal, addresses: projectAddresses }, plan: book ? book.lines() : null };
+if (book) book.apply((p) => endStep(p, "lifecycle", "done"));
 log(`measured project outflow: ${evidence.spend.projectOutflow.measuredUsdc} USDC of the ${usdc18(projectCap)} USDC cap`);
 const outPath = resolve(outDir, `${net}-lifecycle-${stamp}.json`);
 writeFileSync(outPath, JSON.stringify(evidence, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2));

@@ -79,10 +79,11 @@ export default function Developer() {
   const [approved, setApproved] = useState(false);
   const [unitMistake, setUnitMistake] = useState(false);
   const [check, setCheck] = useState<Check | null>(null);
-  /** the referenced approval as last read for `digest`: `loading` until the first answer, `loaded`, `missing` (the API has no such baseline: a
-   *  definitive answer), or `error` (the read failed; `record` keeps the last successful read of the same digest, if any). The decision is
-   *  never made from a read that has not finished (presentation review 2026-10-09, finding 1). */
-  const [baselineRead, setBaselineRead] = useState<{ digest: string | null; record: BaselineRecord | null; status: "none" | "loading" | "loaded" | "missing" | "error"; error: Described | null }>({ digest: null, record: null, status: "none", error: null });
+  /** the referenced approval as last read for `digest`. `outcome` is the last COMPLETED result — `loading` until the first answer, `loaded`
+   *  (with `record`), or `missing` (the API has no such baseline: a definitive answer) — and `error` is the latest request's failure, kept
+   *  apart from it: a transient error after a completed result never turns the result back into loading (review 2026-10-10, P3). The
+   *  decision is never made from a read that has not finished (presentation review 2026-10-09, finding 1). */
+  const [baselineRead, setBaselineRead] = useState<{ digest: string | null; record: BaselineRecord | null; outcome: "none" | "loading" | "loaded" | "missing"; error: Described | null }>({ digest: null, record: null, outcome: "none", error: null });
   const [now, setNow] = useState(Date.now);
   const [attempt, setAttempt] = useState<AttemptView | null>(null);
   const [exec, setExec] = useState<Exec>(IDLE);
@@ -126,13 +127,14 @@ export default function Developer() {
   const baseline = baselineRead.digest === orderMeta.baselineDigest ? baselineRead.record : null;
   // no decision before the first read of the referenced approval has finished (or the API answered that there is none); a failed re-read
   // keeps the last successful read, a failed first read keeps waiting (the effect retries) — a network error is not "no approval"
-  const baselinePending = !!orderMeta.baselineDigest && (baselineRead.digest !== orderMeta.baselineDigest || baselineRead.status === "loading" || baselineRead.status === "none" || (baselineRead.status === "error" && !baselineRead.record));
+  const baselinePending = !!orderMeta.baselineDigest && (baselineRead.digest !== orderMeta.baselineDigest || baselineRead.outcome === "loading" || baselineRead.outcome === "none");
   const decision = useMemo(() => (intent && policy && pDigest && delivered && !baselinePending
     ? decide({ intent, policy, policyDigest: pDigest, baseline: baseline?.baseline ?? null, baselineDigest: (baseline?.baselineDigest as HexT | undefined) ?? null, baselineRevoked: baseline?.revoked ?? false, report: delivered.report as any, reportDigest: delivered.digest as HexT, now: new Date(now), simulation: delivered.simulation })
     : null), [intent, policy, pDigest, delivered, baseline, baselinePending, now]);
   /** a report is delivered and the referenced approval is still being read: the check stage is in progress, nothing is decided, stopped or opened */
   const deciding = !!delivered && !attempt && baselinePending;
-  const baselineRereadFailed = !!delivered && !deciding && baselineRead.status === "error" && !!baselineRead.record;
+  /** a completed result stands (loaded or missing) and the latest re-read failed: the decision stays, the failure is said */
+  const baselineRereadFailed = !!delivered && !deciding && baselineRead.error !== null && (baselineRead.outcome === "loaded" || baselineRead.outcome === "missing");
   const reconciling = (exec.phase === "unknown-submission" || exec.phase === "uncertain") && busy === "execute";
   /** §10 item 1: the attempt carries a prompt marker (server view, or this browser's memory of having opened the prompt) and this page is not mid-execution
    *  with it — the transaction may have been submitted: never "Continue in wallet", never "Abandon (nothing sent)" */
@@ -261,16 +263,16 @@ export default function Developer() {
   // the referenced approval, re-read every 5 s while a report is on screen (a revocation flips the decision)
   useEffect(() => {
     const digest = orderMeta.baselineDigest;
-    if (!digest) { setBaselineRead({ digest: null, record: null, status: "none", error: null }); return; }
+    if (!digest) { setBaselineRead({ digest: null, record: null, outcome: "none", error: null }); return; }
     // a new digest starts a fresh read (nothing stands in for it meanwhile); the same digest keeps its record while it is re-read — the
     // re-read that follows a purchase used to clear it, and the page decided "review required" from the gap (2026-10-09)
-    setBaselineRead((b) => (b.digest === digest ? b : { digest, record: null, status: "loading", error: null }));
+    setBaselineRead((b) => (b.digest === digest ? b : { digest, record: null, outcome: "loading", error: null }));
     let alive = true; let request = 0;
     const refresh = () => { const current = ++request; return withSession((t) => approvedBaseline(digest, t))
-      .then((b) => { if (alive && current === request) setBaselineRead({ digest, record: b, status: "loaded", error: null }); })
+      .then((b) => { if (alive && current === request) setBaselineRead({ digest, record: b, outcome: "loaded", error: null }); })
       .catch((e) => { if (!alive || current !== request) return;
-        if (e instanceof ApiError && e.status === 404) setBaselineRead({ digest, record: null, status: "missing", error: null }); // a definitive answer: no approved baseline
-        else setBaselineRead((prev) => ({ digest, record: prev.digest === digest ? prev.record : null, status: "error", error: describeError(e) })); }); };
+        if (e instanceof ApiError && e.status === 404) setBaselineRead({ digest, record: null, outcome: "missing", error: null }); // a definitive answer: no approved baseline
+        else setBaselineRead((prev) => (prev.digest === digest ? { ...prev, error: describeError(e) } : { digest, record: null, outcome: "loading", error: describeError(e) })); }); }; // the completed result stands; only the error is new
     refresh();
     const timer = delivered ? setInterval(refresh, 5000) : null;
     return () => { alive = false; if (timer) clearInterval(timer); };
@@ -499,8 +501,8 @@ export default function Developer() {
               {check?.quote && <div className="small muted">quote {usdcToken(check.quote.response.quote.amountTokenAtomic)} → payTo <Hex value={check.quote.response.quote.payTo} n={5} /> · report pinned at #{check.quote.response.pinnedBlock} · expires {utc(check.quote.response.quote.expiresAt)} · request <code>{check.requestId}</code>{delivered ? " · purchased" : !quoteOk && " · expired; request a new quote"}</div>}
               {delivered && (<>
                 <div className="small muted">fee settled by the project's relayer: {delivered.serviceFeeTx ? <Hex value={delivered.serviceFeeTx} link={explorerTx(net, delivered.serviceFeeTx)} /> : "—"} · digest recomputed here, bound to your intent ✓ · pinned #{delivered.report.observation.blockNumber}{freshLeft !== null && <> · <Chip tone={freshLeft > 60 ? "info" : "warn"}>{freshLeft > 0 ? `usable for ${Math.floor(freshLeft / 60)}:${String(freshLeft % 60).padStart(2, "0")}` : "report expired — get a new quote and buy again"}</Chip></>}</div>
-                {deciding && <div className="row small muted" role="status" data-testid="decision-pending" style={{ gap: 8, alignItems: "center" }}><Spinner /> reading the referenced approval before deciding — the decision and the next step appear together once it is read{baselineRead.status === "error" && baselineRead.error ? <> · the read failed ({baselineRead.error.text}); retrying every 5 s</> : null}</div>}
-                {baselineRereadFailed && <div className="tiny" style={{ color: "var(--amber)" }} role="status" data-testid="baseline-reread-failed">the referenced approval could not be re-read ({baselineRead.error?.text}); the decision below is from the last successful read · retrying every 5 s</div>}
+                {deciding && <div className="row small muted" role="status" data-testid="decision-pending" style={{ gap: 8, alignItems: "center" }}><Spinner /> reading the referenced approval before deciding — the decision and the next step appear together once it is read{baselineRead.error ? <> · the read failed ({baselineRead.error.text}); retrying every 5 s</> : null}</div>}
+                {baselineRereadFailed && <div className="tiny" style={{ color: "var(--amber)" }} role="status" data-testid="baseline-reread-failed">the referenced approval could not be re-read ({baselineRead.error?.text}); the decision below is from the last completed read{baselineRead.outcome === "missing" ? " (no approved baseline)" : ""} · retrying every 5 s</div>}
                 {decision && !attempt && (
                   <div className="two" style={{ gap: 20 }}>
                     <div className="stack" style={{ gap: 8 }}>

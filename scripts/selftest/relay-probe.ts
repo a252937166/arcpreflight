@@ -11,6 +11,8 @@ import { keccak256, type Hex } from "viem";
 import { ARC, FIAT_TOKEN_EIP3009_ABI, signTransferAuthorization, verifyTransferAuthorization, encodeTransferWithAuthorization, findSettlementInLogs, waitForReceiptPatiently, sendIdentical } from "@arcpreflight/client";
 import { net, chain, publicClient, account, feeParams, evidenceDir, ROOT } from "../demo/common.js";
 import { limitsFrom, openGuard } from "../lib/spend-ledger.js";
+import { openPlan } from "../lib/plan-ledger.js";
+import { pinCaps, checkStep, recordGuard, beginStep, endStep } from "@arcpreflight/client";
 
 const EXECUTE = process.argv.includes("--execute");
 const E18 = 10n ** 18n;
@@ -53,6 +55,10 @@ const fees = await feeParams();
 // the probe's spend limits: the 0.01 USDC fee (moves between two project keys) + the relay gas, per transaction and for the step
 const limits = limitsFrom({ label: "relay-probe", network: net, perTxUsdc: "0.016", totalUsdc: "0.02", maxFeeGwei: 40, envPrefix: "PROBE", maxPerTxUsdc: "0.03", maxTotalUsdc: "0.05" });
 const { guard, save } = openGuard(ROOT, limits, { write: EXECUTE });
+// the plan ledger (review 2026-10-10, P1): pinned caps, the budget carried across steps and restarts (the fee is counted as outflow, conservatively)
+const book = openPlan(ROOT, net, { write: EXECUTE });
+if (book) pinCaps(book.plan, "probe", { totalNativeAtomic: limits.totalNativeAtomic, perTxNativeAtomic: limits.perTxNativeAtomic });
+const syncPlan = () => { if (book) book.apply((p) => recordGuard(p, "probe", guard.entries)); };
 const gasLimit = (gas * 12n) / 10n, costCeiling = gasLimit * fees.maxFeePerGas;
 const problems: string[] = [];
 if (!unused) problems.push("fresh nonce already reports authorizationState=true (should be impossible)");
@@ -60,6 +66,7 @@ if (runnerErc20 < FEE_ATOMIC6) problems.push(`demo-runner holds ${runnerErc20} (
 if (costCeiling > MAX_GAS_COST) problems.push(`gas cost ceiling ${usdc(costCeiling)} USDC exceeds the cap ${usdc(MAX_GAS_COST)}`);
 if (merchantNative - costCeiling < RELAYER_FLOOR) problems.push(`merchant-payto would drop below the relayer floor ${usdc(RELAYER_FLOOR)} USDC`);
 try { guard.check({ purpose: "relay probe", tokenNativeEquivalent: FEE_ATOMIC6 * 10n ** 12n, gasLimit, maxFeePerGas: fees.maxFeePerGas }); } catch (e: any) { problems.push(e.message); }
+if (book) { const c = checkStep(book.plan, "probe", FEE_ATOMIC6 * 10n ** 12n + costCeiling, limits.totalNativeAtomic); if (!c.ok) problems.push(c.reason!); }
 
 console.log(`network=${net} chainId=${chain.id} mode=${EXECUTE ? "EXECUTE" : "DRY RUN (nothing will be sent)"}`);
 console.log(`plan: ONE transferWithAuthorization on USDC ${token}`);
@@ -67,6 +74,7 @@ console.log(`  payer   demo-runner    ${runner.address}  native ${usdc(runnerNat
 console.log(`  relayer merchant-payto ${merchant.address}  native ${usdc(merchantNative)} USDC  → receives 0.01 USDC, pays gas`);
 console.log(`  gas ${signNow ? "estimate" : "bound (measured on testnet; nothing signed on mainnet in a dry run)"} ${gas} (limit ${gasLimit}) at ${Number(fees.maxFeePerGas) / 1e9} gwei max → cost ceiling ${usdc(costCeiling)} USDC (cap ${usdc(MAX_GAS_COST)})`);
 console.log(`  spend guard: ${usdc(limits.perTxNativeAtomic)} USDC per transaction (fee + gas), ${usdc(limits.totalNativeAtomic)} USDC for the step, ${usdc(guard.committed())} already committed`);
+if (book) for (const l of book.lines()) console.log(l);
 if (authorization) console.log(`  authorization nonce ${authorization.nonce.slice(0, 12)}… validBefore ${authorization.validBefore} (unused on-chain: ${unused})`);
 for (const p of problems) console.log(`  PROBLEM: ${p}`);
 if (!EXECUTE) { console.log(problems.length ? "DRY RUN: NOT READY." : "DRY RUN OK: nothing sent. Re-run with --execute to relay this one authorization."); process.exit(problems.length ? 2 : 0); }
@@ -75,7 +83,8 @@ if (problems.length) { console.error("REFUSED: " + problems.join("; ")); process
 // execute: sign → record the hash BEFORE broadcasting → broadcast → prove by logs → read balances back
 if (!authorization || !signature || !data) { console.error("REFUSED: no authorization was signed"); process.exit(1); }
 const nonce = await publicClient.getTransactionCount({ address: merchant.address, blockTag: "pending" });
-const spendIdx = guard.reserve({ purpose: "relay probe", to: token, tokenNativeEquivalent: FEE_ATOMIC6 * 10n ** 12n, gasLimit, maxFeePerGas: fees.maxFeePerGas }); save();
+if (book) book.apply((p) => beginStep(p, "probe"));
+const spendIdx = guard.reserve({ purpose: "relay probe", to: token, tokenNativeEquivalent: FEE_ATOMIC6 * 10n ** 12n, gasLimit, maxFeePerGas: fees.maxFeePerGas }); save(); syncPlan();
 const raw = await merchant.signTransaction({ chainId: chain.id, type: "eip1559", to: token, data, value: 0n, nonce, gas: gasLimit, maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas });
 const hash = keccak256(raw);
 mkdirSync(resolve(evidenceDir, "selftest"), { recursive: true });
@@ -84,10 +93,10 @@ const record: Record<string, unknown> = { kind: "SELF_RELAYED_FEE_PROBE", networ
   authorization: { ...authorization }, relayTx: { hash, nonce, gasLimit: gasLimit.toString(), maxFeePerGas: fees.maxFeePerGas.toString() }, stage: "signed", signedAtUTC: new Date().toISOString() };
 writeFileSync(file, JSON.stringify(record, null, 2)); // the signature itself is never written
 console.log(`signed relay tx ${hash} (nonce ${nonce}); recorded before broadcast → ${file}`);
-guard.sent(spendIdx, hash); save();
+guard.sent(spendIdx, hash); save(); syncPlan();
 { const sent = await sendIdentical(publicClient, raw, () => true, 3, 1500); if (!sent.accepted && !(await publicClient.getTransaction({ hash }).catch(() => null))) { console.error(`STOP: the node did not accept ${hash} after ${sent.attempts} attempt(s) (${sent.sendError}); the authorization stays unused until it expires; the spend ledger keeps the worst case`); process.exit(1); } }
 const rc = await waitForReceiptPatiently(publicClient, hash, 90_000);
-guard.settle(spendIdx, FEE_ATOMIC6 * 10n ** 12n + rc.gasUsed * rc.effectiveGasPrice); save();
+guard.settle(spendIdx, FEE_ATOMIC6 * 10n ** 12n + rc.gasUsed * rc.effectiveGasPrice); save(); syncPlan();
 const evidence = findSettlementInLogs(rc.logs, { usdc: token, from: runner.address, to: merchant.address, value: FEE_ATOMIC6, nonce: authorization.nonce }, rc.transactionHash);
 const [runnerAfter, merchantAfter, usedAfter] = await Promise.all([
   publicClient.getBalance({ address: runner.address }), publicClient.getBalance({ address: merchant.address }),
@@ -103,4 +112,5 @@ console.log(`balances: payer ${usdc(runnerNative)} → ${usdc(runnerAfter)} (−
 assert.equal(rc.status, "success"); assert.ok(evidence, "settlement logs missing"); assert.equal(usedAfter, true);
 assert.equal(runnerNative - runnerAfter, FEE_ATOMIC6 * 10n ** 12n, "payer did not lose exactly 0.01 USDC");
 assert.equal(merchantAfter - merchantNative, FEE_ATOMIC6 * 10n ** 12n - gasPaid, "relayer balance change is not +0.01 USDC minus gas");
+if (book) book.apply((p) => endStep(p, "probe", "done"));
 console.log(`PASS: one check fee self-relayed on ${net}. Evidence: ${file}`);
