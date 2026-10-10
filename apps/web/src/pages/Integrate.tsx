@@ -38,7 +38,7 @@ const hue = (w: Way): CSSProperties => ({ "--way": w.hue } as CSSProperties);
 function InstanceCard({ net, apiBase, counts }: { net: NetworkInfo | null; apiBase: string; counts: Counts }) {
   const execution = !net?.access ? null : net.access.publicExecution === false ? { text: "gated until the mainnet acceptance", tone: "warn" } : net.access.walletExecution === false ? { text: "demo runs only; wallet execution closed", tone: "warn" } : { text: "open: demo runs and wallet execution", tone: "ok" };
   const facts: [string, string | number | null | undefined, string?][] = [
-    ["API base", apiBase],
+    ["API base", apiBase.replace(/^https?:\/\//, "")], // the host fits the card on one line; every command below carries the full origin
     ["Network", net ? `${netName(net.network)} · chain ${net.chainId}` : null],
     ["Head", net?.head ? `#${net.head}` : null],
     ["Check price", net ? usdcToken(net.priceTokenAtomic) : null],
