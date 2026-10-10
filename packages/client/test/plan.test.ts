@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SpendRefused, parseUsdc18, type SpendEntry } from "../src/spend.js";
-import { beginMeasured, checkStep, createPlan, endStep, noteOpen, parsePlan, pinCaps, planCommitted, planRemaining, recordGuard, resolvePlanId, sameCaps, serializePlan, summarizePlan, updateMeasured } from "../src/plan.js";
+import { beginMeasured, checkStep, createPlan, endStep, noteOpen, openIdTags, parsePlan, relabelOpen, pinCaps, planCommitted, planRemaining, recordGuard, resolvePlanId, sameCaps, serializePlan, summarizePlan, updateMeasured } from "../src/plan.js";
 
 // Gate D review 2026-10-10, P1: the cumulative cap must hold across process restarts — one record per plan id carries settled outflow,
 // pending commitments and the first invocation's balance baseline; the approved caps are pinned and cannot be raised by the environment.
@@ -59,6 +59,27 @@ describe("plan ledger", () => {
     expect(() => updateMeasured(plan(), "lifecycle", U("1"))).toThrow(/no baseline/);
     expect(endStep(settled, "acceptance", "done").steps.acceptance.status).toBe("done");
     expect(summarizePlan(settled)[0]).toContain("budget cap 0.69"); expect(summarizePlan(settled).find((l) => l.includes("acceptance"))).toContain("baseline 10");
+  });
+});
+
+describe("lifecycle rehearsal on 40c5858 (2026-10-10): an open scenario carries the identities a restart recovers from", () => {
+  it("relabelOpen renames an open run and keeps its pending worst case; openIdTags reads the identities back; unknown ids are no-ops", () => {
+    let p = beginMeasured(plan(), "lifecycle", ["0xA711", "0xC618"], U("10.0"), "2026-10-10T07:35:00.000Z");
+    p = noteOpen(p, "lifecycle", "interrupt-2026-10-10T07-35-28-806Z", true, U("0.073"));
+    p = relabelOpen(p, "lifecycle", "interrupt-2026-10-10T07-35-28-806Z", "interrupt-2026-10-10T07-35-28-806Z:key:lc-abc-123");
+    expect(p.steps.lifecycle).toMatchObject({ openRuns: ["interrupt-2026-10-10T07-35-28-806Z:key:lc-abc-123"], pendingNativeAtomic: U("0.073") });
+    expect(openIdTags(p.steps.lifecycle.openRuns[0])).toEqual({ base: "interrupt-2026-10-10T07-35-28-806Z", tags: { key: "lc-abc-123" } });
+    let w = noteOpen(p, "lifecycle", "wallet-2026-10-10T07-35-28-806Z", true, U("0.028"));
+    w = relabelOpen(w, "lifecycle", "wallet-2026-10-10T07-35-28-806Z", "wallet-2026-10-10T07-35-28-806Z:order:0x6bbf:attempt:07b7");
+    w = relabelOpen(w, "lifecycle", "wallet-2026-10-10T07-35-28-806Z:order:0x6bbf:attempt:07b7", "wallet-2026-10-10T07-35-28-806Z:order:0x6bbf:attempt:07b7:tx:0xfa61");
+    expect(w.steps.lifecycle.pendingNativeAtomic).toBe(U("0.101"));
+    expect(openIdTags(w.steps.lifecycle.openRuns[1]).tags).toEqual({ order: "0x6bbf", attempt: "07b7", tx: "0xfa61" });
+    expect(relabelOpen(w, "lifecycle", "never-open", "x")).toBe(w); // not open: nothing changes
+    expect(relabelOpen(w, "lifecycle", w.steps.lifecycle.openRuns[1], w.steps.lifecycle.openRuns[1])).toBe(w);
+    const restarted = parsePlan(serializePlan(w)); // the restart reads the identities back and settles the scenario under its final id
+    const settled = noteOpen(restarted, "lifecycle", restarted.steps.lifecycle.openRuns[1], false, U("0.028"));
+    expect(settled.steps.lifecycle).toMatchObject({ pendingNativeAtomic: U("0.073"), openRuns: ["interrupt-2026-10-10T07-35-28-806Z:key:lc-abc-123"] });
+    expect(openIdTags("interrupt-2026-10-10T07-35-28-806Z")).toEqual({ base: "interrupt-2026-10-10T07-35-28-806Z", tags: {} }); // a record written before this version: no identity
   });
 });
 

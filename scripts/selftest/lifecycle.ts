@@ -21,7 +21,7 @@ import { IntentCore, PolicyCore, intentDigest, policyDigest } from "@arcprefligh
 import { DEMO_MERCHANT_ABI, PAY_SELECTOR } from "@arcpreflight/policy";
 import { signTransferAuthorization, type ArcNet } from "@arcpreflight/client";
 import { PIN_LAG } from "@arcpreflight/observer";
-import { OutflowMeter, SpendRefused, parseUsdc18, usdc18, pinCaps, checkStep, beginMeasured, updateMeasured, noteOpen, endStep } from "@arcpreflight/client";
+import { OutflowMeter, SpendRefused, parseUsdc18, usdc18, pinCaps, checkStep, beginMeasured, updateMeasured, noteOpen, relabelOpen, openIdTags, endStep } from "@arcpreflight/client";
 import { openGuard } from "../lib/spend-ledger.js";
 import { openPlan } from "../lib/plan-ledger.js";
 
@@ -78,7 +78,7 @@ const projectCap = capFrom("LIFECYCLE_PROJECT_CAP_USDC", "0.12", "0.30");
 // server-sent gas ceilings (enforced server-side per transaction): createOrder 150k × 40 gwei, relay 0.005 USDC, the business pay ≤ policy.maxGasCostNativeAtomic 0.002
 const ORDER_GAS_CEIL = 150_000n * 40n * GWEI, RELAY_GAS_CEIL = 5_000_000_000_000_000n, PAY_GAS_CEIL = 2_000_000_000_000_000n;
 const worstOf = { wallet: ORDER_GAS_CEIL + feeNative + RELAY_GAS_CEIL + walletAmount + PAY_GAS_CEIL, interrupt: ORDER_GAS_CEIL + feeNative + RELAY_GAS_CEIL + BigInt(network.budget?.amountNativeAtomic ?? "50000000000000000") + PAY_GAS_CEIL } as Record<string, bigint>;
-const walletAddress = (() => { const f = process.env.WALLET_KEY_FILE; if (!f || !scenarios.includes("wallet")) return null; const t = readFileSync(f, "utf8").trim(); if (t.startsWith("{")) { const j = JSON.parse(t); if (j.address) return j.address as string; return privateKeyToAccount(j.privateKey as Hex).address; } return privateKeyToAccount(t as Hex).address; })();
+const walletAddress = (() => { const f = process.env.WALLET_KEY_FILE; if (!f) return null; /* the measured key set belongs to the plan, not to this invocation's scenarios: the visitor key is measured whenever it is configured */ const t = readFileSync(f, "utf8").trim(); if (t.startsWith("{")) { const j = JSON.parse(t); if (j.address) return j.address as string; return privateKeyToAccount(j.privateKey as Hex).address; } return privateKeyToAccount(t as Hex).address; })();
 const projectAddresses = Array.from(new Set([walletAddress, network.accounts?.demoRunner, network.accounts?.orderCreator, network.accounts?.merchantPayTo].filter((a): a is string => !!a).map((a) => a.toLowerCase())));
 const sumBalances = async () => (await Promise.all(projectAddresses.map((a) => client.getBalance({ address: a as Hex })))).reduce((x, y) => x + y, 0n);
 // the plan ledger (review 2026-10-10, P1): the approved project cap is pinned (the environment may lower it, never raise it); the measured
@@ -88,22 +88,113 @@ const ROOT_DIR = process.env.ARCPREFLIGHT_ROOT ?? process.cwd();
 const book = openPlan(ROOT_DIR, net, { write: !PREFLIGHT });
 if (net === "mainnet" && !book) throw new SpendRefused("mainnet lifecycle needs the plan ledger (PLAN_ID must name the approved plan)"); // audit 2026-10-10 (OP-02)
 if (book) pinCaps(book.plan, "lifecycle", { totalNativeAtomic: projectCap, maxFeePerGasCeiling: walletLimits.maxFeePerGasCeiling }); // OP-04: MAX_FEE_GWEI may lower the pinned 40 gwei ceiling, never raise it
+const previous = book ? { updatedAt: book.plan.steps.lifecycle.updatedAt, invocations: book.plan.steps.lifecycle.invocations, openRuns: [...book.plan.steps.lifecycle.openRuns] } : null;
 const startTotal = await sumBalances();
 if (book && !PREFLIGHT) book.apply((p) => beginMeasured(p, "lifecycle", projectAddresses, startTotal));
 const baseline = book?.plan.steps.lifecycle.baselineTotalNativeAtomic ?? startTotal;
 const meter = new OutflowMeter("lifecycle project outflow", projectCap, baseline);
 const syncMeasured = async () => { const t = await sumBalances(); if (book && !PREFLIGHT) book.apply((p) => updateMeasured(p, "lifecycle", t)); return t; };
+/** one durable update: the open scenario's pending worst case released and the measured outflow recorded together, after the balance read */
+const settleOpen = async (openId: string, worst: bigint) => { const t = await sumBalances(); if (book && !PREFLIGHT) book.apply((p) => updateMeasured(noteOpen(p, "lifecycle", openId, false, worst), "lifecycle", t)); return t; };
+// rehearsal hook (testnet only): stop right after a checkpoint's durable write, the way an interrupted process would
+const STOP_AFTER = process.env.LIFECYCLE_STOP_AFTER ?? null;
+if (STOP_AFTER && net === "mainnet") throw new SpendRefused("LIFECYCLE_STOP_AFTER is a testnet rehearsal hook; refused on mainnet");
+const stopAfter = (mark: string) => { if (STOP_AFTER === mark) { log(`LIFECYCLE_STOP_AFTER=${mark}: stopping here like an interrupted process; the plan record keeps the open scenario`); process.exit(3); } };
+
+/** follows a labelled-interruption run to its outcome, exports and verifies its passport (a fresh start and a recovery share this) */
+async function followInterruptRun(runId: string, clientRunRequestId: string, recovered: boolean) {
+  let run: any = null;
+  for (let i = 0; i < 120; i++) { run = (await get(`/v1/demo/runs/${runId}`)).body; if (run?.state && run.state !== "RUNNING") break; await sleep(2000); }
+  assert(run?.steps, `run ${runId} could not be read`);
+  const stepNames = run.steps.map((s: any) => s.step);
+  assert(stepNames.includes("orderPlanned"), "the order identity is recorded before its creation is sent");
+  assert(stepNames.includes("broadcastAttempted") && stepNames.includes("interruptedAfterBroadcast"), `expected the interruption steps, got ${stepNames.join(",")}`);
+  const interruptedState = run.state; const outcomeAtStop = run.outcome;
+  log(`run ${recovered ? "found" : "stopped"}: state ${interruptedState}, outcome ${outcomeAtStop?.kind} (${outcomeAtStop?.source}), store ${run.businessExecution?.state}`);
+  if (interruptedState === "RECONCILE_REQUIRED") assert.equal(outcomeAtStop.kind, "BROADCAST_UNRESOLVED"); // AP33-06: the headline follows the store, never "nothing sent"
+  for (let i = 0; i < 60 && run.state === "RECONCILE_REQUIRED"; i++) { await sleep(3000); run = (await get(`/v1/demo/runs/${runId}`)).body; }
+  assert.equal(run.state, "DONE", `run did not reconcile: ${run.state} ${run.businessExecution?.note ?? ""}`);
+  assert.equal(run.outcome.kind, "PAID"); assert.equal(run.businessExecution.state, "CONFIRMED");
+  assert.equal(run.recovery.addedByRecovery.ordersCreated, 0); assert.equal(run.recovery.addedByRecovery.businessSignatures, 0);
+  log(`reconciled: ${run.businessExecution.txHash} CONFIRMED/${run.businessExecution.businessStatus}; recovery added orders=${run.recovery.addedByRecovery.ordersCreated} signatures=${run.recovery.addedByRecovery.businessSignatures}`);
+  const passport = await get(`/v1/demo/runs/${runId}/passport`); assert.equal(passport.status, 200);
+  const passportPath = resolve(outDir, "passports", `${net}-interrupt-${stamp}.passport.json`); writeFileSync(passportPath, JSON.stringify(passport.body, null, 2));
+  const fixture = network.fixtures.find((f: any) => f.id === "APPROVED_PAYMENT");
+  const v = verifyInCleanProcess(passportPath, { baselineDigests: [fixture.baselineDigest], policyDigests: [run.result.policyDigest] });
+  log(`verifier: exit ${v.exit}, pass ${v.counts.pass}, fail ${v.counts.fail}; ORDER_OUTCOME=${v.findings.ORDER_OUTCOME} TRANSACTION_PLAN_AGREEMENT=${v.findings.TRANSACTION_PLAN_AGREEMENT} COST_STATEMENT=${v.findings.COST_STATEMENT}`);
+  assert.equal(v.counts.fail, 0, JSON.stringify(v.findings));
+  return { runId, clientRunRequestId, recoveredFromPreviousInvocation: recovered, stateAtStop: interruptedState, outcomeAtStop, steps: stepNames, businessExecution: run.businessExecution, recovery: run.recovery, reconciliation: run.result.reconciliation, costStatement: run.result.costStatement, passport: passportPath, verifier: v };
+}
+
+// Lifecycle rehearsal on 40c5858 (2026-10-10): the script died on a dropped connection right after it had started the interruption
+// scenario, and the plan record kept that scenario open at its worst case with no way to settle it. Now every open scenario carries
+// its durable identity in its id (the admission key is written BEFORE the POST; the wallet scenario adds its order, attempt and hash
+// as it learns them) and a restart settles the open scenarios of previous invocations FIRST, before anything new is started:
+//   interrupt  the same admission key is re-sent — the server returns the original run (or admits the same operation now); it is
+//              followed to its outcome, its passport verified, and the scenario counts as complete under this plan
+//   wallet     a broadcast hash → its receipt is awaited, nothing of the project's is left in flight; an attempt → the project's order
+//              creation and fee relay were already mined; earlier stops → settled from the balances once the server's receipt deadlines
+//              are past (10 minutes), refused before that
+//   anything else (a record written before this version) → refused unless LIFECYCLE_SETTLE_OPEN names it after a manual check
+const completed = new Set<string>(); evidence.recovered = [];
+const GRACE_MS = 10 * 60_000; const settleExplicit = process.env.LIFECYCLE_SETTLE_OPEN ?? null;
+type OpenDecision = { action: "explicit" | "replay" | "receipt" | "settle" | "wait" | "refuse"; completes: boolean; note: string };
+/** what this invocation does with a scenario a previous invocation left open — the same decision in the read-only preflight and the run */
+const decideOpen = (open: string, sc: string, tags: Record<string, string>, ageMs: number): OpenDecision => {
+  if (settleExplicit === open) return { action: "explicit", completes: false, note: "settled by the operator (LIFECYCLE_SETTLE_OPEN) after a manual check of the server's state" };
+  if (sc === "interrupt" && tags.key) return { action: "replay", completes: true, note: `the same admission key ${tags.key.slice(0, 14)}… is re-sent: the server returns the original run, which is followed to its outcome and verified` };
+  if (sc === "wallet") {
+    if (tags.tx) return { action: "receipt", completes: true, note: `the wallet's transaction ${tags.tx} is awaited; once it is mined nothing of the project's is left in flight` };
+    if (tags.attempt) return { action: "settle", completes: false, note: `attempt ${tags.attempt} existed: the project's order creation and fee relay were already mined, the wallet had not broadcast` };
+    if (ageMs >= GRACE_MS) return { action: "settle", completes: false, note: `stopped before its attempt ${Math.round(ageMs / 60_000)} min ago, past the server's receipt deadlines: settled from the balances` };
+    return { action: "wait", completes: false, note: `stopped before its attempt only ${Math.round(ageMs / 1000)} s ago: the project's order creation or fee relay may still be in flight — retry after ${GRACE_MS / 60_000} minutes` };
+  }
+  return { action: "refuse", completes: false, note: `no durable identity to recover from (a record written before this version, or an unknown scenario): check the server's state (GET /v1/demo/runs newest first, the attempt) and re-run with LIFECYCLE_SETTLE_OPEN=${open} to settle it from the balances` };
+};
+if (book && previous && previous.openRuns.length) for (const open of previous.openRuns) {
+  const { base, tags } = openIdTags(open); const sc = base.split("-")[0]; const worst = worstOf[sc] ?? 0n;
+  const ageMs = Date.now() - new Date(previous.updatedAt ?? 0).getTime();
+  const d = decideOpen(open, sc, tags, ageMs);
+  if (PREFLIGHT) { // read-only: say what a run would do and show the record as it would stand after that (in memory only; nothing is written)
+    if (d.action === "wait" || d.action === "refuse") { log(`open from invocation ${previous.invocations}: ${open} — a run would stop: ${d.note}`); continue; }
+    log(`open from invocation ${previous.invocations}: ${open} — a run settles it first (${d.action}): ${d.note}`);
+    book.apply((p) => noteOpen(p, "lifecycle", open, false, worst)); if (d.completes) completed.add(sc); continue;
+  }
+  log(`resuming: ${open} was started by invocation ${previous.invocations} and is still open in the plan record — settling it before starting anything (${d.action})`);
+  if (d.action === "wait" || d.action === "refuse") throw new SpendRefused(`${open}: ${d.note}`);
+  const extra: Record<string, unknown> = {};
+  if (d.action === "replay") {
+    const body = { fixture: "APPROVED_PAYMENT", clientRunRequestId: tags.key, interruptAfterBroadcast: true };
+    let r = await post("/v1/demo/run", body);
+    if (r.status === 429 && r.body?.error === "DEMO_COOLDOWN") { const wait = (Number(network.budget?.clientCooldownSeconds ?? 45) + 2) * 1000; log(`cooldown: waiting ${wait / 1000}s`); await sleep(wait); r = await post("/v1/demo/run", body); }
+    assert([200, 202].includes(r.status) && r.body?.runId, `re-sending admission ${tags.key.slice(0, 14)}… answered ${r.status} ${JSON.stringify(r.body)?.slice(0, 200)}`);
+    log(`  admission ${r.body.admission}: run ${r.body.runId}`);
+    evidence.scenarios.interrupt = await followInterruptRun(r.body.runId as string, tags.key, true);
+    extra.runId = r.body.runId; extra.admission = r.body.admission;
+  }
+  if (d.action === "receipt") {
+    const rc = await client.waitForTransactionReceipt({ hash: tags.tx as Hex, timeout: 120_000 }).catch(() => null);
+    assert(rc, `${open}: no receipt for the wallet's transaction ${tags.tx} within 2 minutes — if it was never broadcast the visitor's nonce is still free; check and re-run with LIFECYCLE_SETTLE_OPEN=${open}`);
+    extra.txHash = tags.tx; extra.block = rc.blockNumber.toString();
+  }
+  const t = await settleOpen(open, worst); const measured = usdc18(meter.outflow(t));
+  if (d.completes) completed.add(sc);
+  evidence.recovered.push({ open, scenario: sc, action: d.action, how: d.note, ...extra, measuredProjectOutflowUsdc: measured });
+  log(`  settled: ${d.note}; measured project outflow ${measured} USDC`);
+}
+const toRun = scenarios.filter((sc) => !completed.has(sc));
+for (const sc of scenarios) if (completed.has(sc)) log(`${sc}: completed by the recovered scenario of a previous invocation; not started again under this plan`);
 const walletLedger = openGuard(ROOT_DIR, walletLimits, { write: !PREFLIGHT });
 const walletGuard = walletLedger.guard; const saveWallet = walletLedger.save;
 {
   const fees = await client.estimateFeesPerGas().catch(() => null);
-  const rows = scenarios.map((sc) => `  ${sc.padEnd(10)} worst ${usdc18(worstOf[sc] ?? 0n)} USDC`);
-  const totalWorst = scenarios.reduce((a, sc) => a + (worstOf[sc] ?? 0n), 0n);
+  const rows = toRun.map((sc) => `  ${sc.padEnd(10)} worst ${usdc18(worstOf[sc] ?? 0n)} USDC`);
+  const totalWorst = toRun.reduce((a, sc) => a + (worstOf[sc] ?? 0n), 0n);
   const problems: string[] = [];
   if (totalWorst > projectCap) problems.push(`the scenarios' worst case ${usdc18(totalWorst)} USDC exceeds LIFECYCLE_PROJECT_CAP_USDC ${usdc18(projectCap)}`);
   if (book) { const c = checkStep(book.plan, "lifecycle", totalWorst, projectCap); if (!c.ok) problems.push(c.reason!); }
   if (walletLedger.priorEntries) log(`visitor key ledger: ${walletLedger.priorEntries} prior entr${walletLedger.priorEntries === 1 ? "y" : "ies"}, ${usdc18(walletGuard.committed())} USDC committed of ${usdc18(walletLimits.totalNativeAtomic)} (carried across runs)`);
-  if (scenarios.includes("wallet")) { const need = walletAmount + feeNative + PAY_GAS_CEIL; if (feeNative + walletAmount + PAY_GAS_CEIL > walletLimits.totalNativeAtomic) problems.push(`the wallet scenario needs up to ${usdc18(need)} USDC, above WALLET_SPEND_CAP_USDC ${usdc18(walletLimits.totalNativeAtomic)}`); if (walletAddress) { const b = await client.getBalance({ address: walletAddress as Hex }); if (b < need && !network.faucet?.enabled) problems.push(`the visitor key ${walletAddress} holds ${usdc18(b)} USDC, below the ${usdc18(need)} USDC the wallet scenario needs`); } else problems.push("WALLET_KEY_FILE is required for the wallet scenario"); }
+  if (toRun.includes("wallet")) { const need = walletAmount + feeNative + PAY_GAS_CEIL; if (feeNative + walletAmount + PAY_GAS_CEIL > walletLimits.totalNativeAtomic) problems.push(`the wallet scenario needs up to ${usdc18(need)} USDC, above WALLET_SPEND_CAP_USDC ${usdc18(walletLimits.totalNativeAtomic)}`); if (walletAddress) { const b = await client.getBalance({ address: walletAddress as Hex }); if (b < need && !network.faucet?.enabled) problems.push(`the visitor key ${walletAddress} holds ${usdc18(b)} USDC, below the ${usdc18(need)} USDC the wallet scenario needs`); } else problems.push("WALLET_KEY_FILE is required for the wallet scenario"); }
   if (net === "mainnet" && !process.env.ADMIN_TOKEN) problems.push("ADMIN_TOKEN is required on mainnet (the gate stays closed during acceptance)");
   if (fees?.maxFeePerGas && fees.maxFeePerGas > walletLimits.maxFeePerGasCeiling) problems.push(`network max fee ${fees.maxFeePerGas / GWEI} gwei is above the ${walletLimits.maxFeePerGasCeiling / GWEI} gwei ceiling`);
   log(`${PREFLIGHT ? "PREFLIGHT (read-only: no session, no order, no signature)" : "limits"} · ${network.caip2} release ${network.release} · gate: publicExecution ${network.access?.publicExecution} · operatorAcceptance ${network.access?.operatorAcceptance ?? "?"} · executionReady ${network.access?.executionReady ?? "?"} · admin token ${process.env.ADMIN_TOKEN ? "supplied" : "absent"}`);
@@ -115,17 +206,20 @@ const walletGuard = walletLedger.guard; const saveWallet = walletLedger.save;
   if (problems.length) throw new SpendRefused(problems.join("; "));
 }
 const scenarioId = (sc: string) => `${sc}-${stamp}`;
-const beforeScenario = async (sc: string) => {
+const beforeScenario = async (sc: string, openId: string) => { // the open id is the scenario's durable identity, written before anything is sent
   const h = meter.headroomFor(await syncMeasured(), worstOf[sc] ?? 0n); if (!h.ok) throw new SpendRefused(h.reason!);
-  if (book) { const c = checkStep(book.plan, "lifecycle", worstOf[sc] ?? 0n, projectCap); if (!c.ok) throw new SpendRefused(c.reason!); book.apply((p) => noteOpen(p, "lifecycle", scenarioId(sc), true, worstOf[sc] ?? 0n)); }
+  if (book) { const c = checkStep(book.plan, "lifecycle", worstOf[sc] ?? 0n, projectCap); if (!c.ok) throw new SpendRefused(c.reason!); book.apply((p) => noteOpen(p, "lifecycle", openId, true, worstOf[sc] ?? 0n)); }
   log(`${sc}: measured project outflow so far ${usdc18(h.outflow)} USDC; worst case of this scenario ${usdc18(worstOf[sc] ?? 0n)} USDC; cap ${usdc18(projectCap)} USDC`);
 };
 // audit 2026-10-10 (OP-03): the pending commitment is released and the measured outflow recorded in ONE durable update, after the balance read
 // succeeded; a failed read keeps the commitment pending
-const afterScenario = async (sc: string) => { const t = await sumBalances(); if (book && !PREFLIGHT) book.apply((p) => updateMeasured(noteOpen(p, "lifecycle", scenarioId(sc), false, worstOf[sc] ?? 0n), "lifecycle", t)); };
+const afterScenario = async (sc: string, openId: string) => { const t = await sumBalances(); if (book && !PREFLIGHT) book.apply((p) => updateMeasured(noteOpen(p, "lifecycle", openId, false, worstOf[sc] ?? 0n), "lifecycle", t)); };
 
-if (scenarios.includes("wallet")) {
-  await beforeScenario("wallet");
+/** the open scenario learned an identity (order, attempt, hash): the plan record carries it from here on */
+const relabel = (from: string, to: string) => { if (book && !PREFLIGHT) book.apply((p) => relabelOpen(p, "lifecycle", from, to)); return to; };
+
+if (toRun.includes("wallet")) {
+  let walletOpen = scenarioId("wallet"); await beforeScenario("wallet", walletOpen);
   const keyFile = process.env.WALLET_KEY_FILE; assert(keyFile, "WALLET_KEY_FILE (path to the scripted wallet's key) is required for the wallet scenario");
   const keyText = readFileSync(keyFile, "utf8").trim(); // a raw hex key, or a keys/*.json file with a privateKey field; never printed
   const wallet = privateKeyToAccount((keyText.startsWith("{") ? JSON.parse(keyText).privateKey : keyText) as Hex);
@@ -150,6 +244,7 @@ if (scenarios.includes("wallet")) {
   }
   assert.equal(order.status, 201, JSON.stringify(order.body)); assert.equal(order.body.state, "CONFIRMED"); assert.equal(order.body.reference, reference);
   log(`order ${order.body.orderId.slice(0, 12)}… created in ${order.body.tx} (block ${order.body.block}) on ${order.body.merchant}`);
+  walletOpen = relabel(walletOpen, `${walletOpen}:order:${order.body.orderId}`); stopAfter("wallet-order");
   const listed = await get("/v1/demo/orders", token); assert.equal(listed.status, 200); assert(listed.body.orders.some((o: any) => o.orderId === order.body.orderId.toLowerCase()), "the owner's order list must contain the new order");
   assert.equal((await get("/v1/demo/orders", `vs_${"0".repeat(48)}`)).status, 401);
   // 2. policy + intent as the Developer page builds them (human-paced validation window)
@@ -176,6 +271,7 @@ if (scenarios.includes("wallet")) {
   assert.equal(attempt.body.state, "VALIDATED"); assert.equal(attempt.body.decision, "NO_POLICY_VIOLATION"); assert(attempt.body.plan?.nonce !== undefined);
   const plan = attempt.body.plan; const attemptId = attempt.body.attemptId as string;
   log(`attempt ${attemptId} VALIDATED until ${attempt.body.validUntil}; plan nonce ${plan.nonce} gas ${plan.gasLimit} maxFee ${Number(plan.maxFeePerGasNativeAtomic) / 1e9} gwei`);
+  walletOpen = relabel(walletOpen, `${walletOpen}:attempt:${attemptId}`); stopAfter("wallet-attempt");
   assert.equal((await get(`/v1/wallet/attempts/${attemptId}/passport`, token)).status, 409, "an open attempt is not exported");
   const second = await post("/v1/wallet/attempts", { requestId: quoted.body.requestId, orderId: order.body.orderId, policy }, token);
   assert.equal(second.status, 409); assert.equal(second.body.error, "ATTEMPT_OPEN");
@@ -198,8 +294,9 @@ if (scenarios.includes("wallet")) {
   const parsed = parseTransaction(raw); assert.equal(parsed.to?.toLowerCase(), plan.to.toLowerCase()); assert.equal(parsed.data?.toLowerCase(), plan.data.toLowerCase());
   const txHash = keccak256(raw);
   walletGuard.sent(payIdx, txHash); saveWallet();
+  walletOpen = relabel(walletOpen, `${walletOpen}:tx:${txHash}`); // the hash is in the plan record before the broadcast
   await client.sendRawTransaction({ serializedTransaction: raw });
-  log(`wallet broadcast ${txHash}`);
+  log(`wallet broadcast ${txHash}`); stopAfter("wallet-sent");
   const sent = await post(`/v1/wallet/attempts/${attemptId}/sent`, { txHash }, token);
   assert.equal(sent.status, 200, JSON.stringify(sent.body).slice(0, 300)); assert(["BROADCAST_ATTEMPTED", "CONFIRMED"].includes(sent.body.state), sent.body.state);
   let a = sent;
@@ -218,41 +315,23 @@ if (scenarios.includes("wallet")) {
   log(`verifier: exit ${v.exit}, pass ${v.counts.pass}, fail ${v.counts.fail}, unverified ${v.counts.unverified ?? 0}; TRANSACTION_PLAN_AGREEMENT=${v.findings.TRANSACTION_PLAN_AGREEMENT} ORDER_OUTCOME=${v.findings.ORDER_OUTCOME} COST_STATEMENT=${v.findings.COST_STATEMENT}`);
   assert.equal(v.counts.fail, 0, JSON.stringify(v.findings));
   const manifest = JSON.parse(passport.body.files["manifest.json"]); assert.equal(manifest.subject.kind, "wallet-run"); assert.equal(manifest.subject.executionMode, "wallet");
-  await afterScenario("wallet");
+  await afterScenario("wallet", walletOpen);
   evidence.scenarios.wallet = { payer: wallet.address, claimProbe, order: { orderId: order.body.orderId, tx: order.body.tx, block: order.body.block, amountNativeAtomic: amount.toString(), reference }, requestId: quoted.body.requestId, feeTx: delivered.body.payment.transaction, attemptId, plan, txHash, outcome: { state: a.body.state, businessStatus: a.body.businessStatus, block: a.body.block, deviations: a.body.deviations }, costStatement: a.body.costStatement, passport: passportPath, verifier: v };
 }
 
-if (scenarios.includes("interrupt")) {
-  await beforeScenario("interrupt");
-  const clientRunRequestId = `lc-${crypto.randomUUID()}`;
+if (toRun.includes("interrupt")) {
+  const clientRunRequestId = `lc-${crypto.randomUUID()}`; const openId = `${scenarioId("interrupt")}:key:${clientRunRequestId}`; // the admission key is the durable identity, in the plan record before the POST
+  await beforeScenario("interrupt", openId);
   let started = await post("/v1/demo/run", { fixture: "APPROVED_PAYMENT", clientRunRequestId, interruptAfterBroadcast: true });
   if (started.status === 429 && started.body?.error === "DEMO_COOLDOWN") { // the public instance's per-client cooldown: wait it out
     const wait = (Number(network.budget?.clientCooldownSeconds ?? 45) + 2) * 1000; log(`cooldown: waiting ${wait / 1000}s`); await sleep(wait);
     started = await post("/v1/demo/run", { fixture: "APPROVED_PAYMENT", clientRunRequestId, interruptAfterBroadcast: true });
   }
   assert.equal(started.status, 202, JSON.stringify(started.body)); const runId = started.body.runId as string;
-  log(`live demo run ${runId} started with a labelled interruption after the broadcast`);
-  let run: any;
-  for (let i = 0; i < 120; i++) { await sleep(2000); run = (await get(`/v1/demo/runs/${runId}`)).body; if (run.state !== "RUNNING") break; }
-  const stepNames = run.steps.map((s: any) => s.step);
-  assert(stepNames.includes("orderPlanned"), "the order identity is recorded before its creation is sent");
-  assert(stepNames.includes("broadcastAttempted") && stepNames.includes("interruptedAfterBroadcast"), `expected the interruption steps, got ${stepNames.join(",")}`);
-  const interruptedState = run.state; const outcomeAtStop = run.outcome;
-  log(`run stopped: state ${interruptedState}, outcome ${outcomeAtStop?.kind} (${outcomeAtStop?.source}), store ${run.businessExecution?.state}`);
-  if (interruptedState === "RECONCILE_REQUIRED") assert.equal(outcomeAtStop.kind, "BROADCAST_UNRESOLVED"); // AP33-06: the headline follows the store, never "nothing sent"
-  for (let i = 0; i < 60 && run.state === "RECONCILE_REQUIRED"; i++) { await sleep(3000); run = (await get(`/v1/demo/runs/${runId}`)).body; }
-  assert.equal(run.state, "DONE", `run did not reconcile: ${run.state} ${run.businessExecution?.note ?? ""}`);
-  assert.equal(run.outcome.kind, "PAID"); assert.equal(run.businessExecution.state, "CONFIRMED");
-  assert.equal(run.recovery.addedByRecovery.ordersCreated, 0); assert.equal(run.recovery.addedByRecovery.businessSignatures, 0);
-  log(`reconciled: ${run.businessExecution.txHash} CONFIRMED/${run.businessExecution.businessStatus}; recovery added orders=${run.recovery.addedByRecovery.ordersCreated} signatures=${run.recovery.addedByRecovery.businessSignatures}`);
-  const passport = await get(`/v1/demo/runs/${runId}/passport`); assert.equal(passport.status, 200);
-  const passportPath = resolve(outDir, "passports", `${net}-interrupt-${stamp}.passport.json`); writeFileSync(passportPath, JSON.stringify(passport.body, null, 2));
-  const fixture = network.fixtures.find((f: any) => f.id === "APPROVED_PAYMENT");
-  const v = verifyInCleanProcess(passportPath, { baselineDigests: [fixture.baselineDigest], policyDigests: [run.result.policyDigest] });
-  log(`verifier: exit ${v.exit}, pass ${v.counts.pass}, fail ${v.counts.fail}; ORDER_OUTCOME=${v.findings.ORDER_OUTCOME} TRANSACTION_PLAN_AGREEMENT=${v.findings.TRANSACTION_PLAN_AGREEMENT} COST_STATEMENT=${v.findings.COST_STATEMENT}`);
-  assert.equal(v.counts.fail, 0, JSON.stringify(v.findings));
-  await afterScenario("interrupt");
-  evidence.scenarios.interrupt = { runId, clientRunRequestId, stateAtStop: interruptedState, outcomeAtStop, steps: stepNames, businessExecution: run.businessExecution, recovery: run.recovery, reconciliation: run.result.reconciliation, costStatement: run.result.costStatement, passport: passportPath, verifier: v };
+  log(`live demo run ${runId} started with a labelled interruption after the broadcast`); stopAfter("interrupt-start");
+  const rec = await followInterruptRun(runId, clientRunRequestId, false);
+  await afterScenario("interrupt", openId);
+  evidence.scenarios.interrupt = rec;
 }
 
 evidence.spend = { visitorKey: walletGuard.summary(), projectOutflow: { capUsdc: usdc18(projectCap), measuredUsdc: usdc18(meter.outflow(await syncMeasured())), baselineUsdc: usdc18(baseline), carriedBaseline: baseline !== startTotal, addresses: projectAddresses }, plan: book ? book.lines() : null };

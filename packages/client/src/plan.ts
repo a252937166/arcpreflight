@@ -102,6 +102,18 @@ export function noteOpen(p: PlanLedger, step: PlanStepId, id: string, open: bool
   const pending = open ? s.pendingNativeAtomic + (s.openRuns.includes(id) ? 0n : worstNativeAtomic) : (s.openRuns.includes(id) ? (s.pendingNativeAtomic > worstNativeAtomic ? s.pendingNativeAtomic - worstNativeAtomic : 0n) : s.pendingNativeAtomic);
   return put(p, step, { openRuns: runs, pendingNativeAtomic: pending }, now);
 }
+/** Open run ids may carry the identities a scenario learns as it goes, as `:tag:value` suffixes (the lifecycle script writes
+ *  `interrupt-<stamp>:key:<admission key>` and `wallet-<stamp>:order:<id>:attempt:<id>:tx:<hash>`); a restart recovers from them. */
+export function openIdTags(id: string): { base: string; tags: Record<string, string> } {
+  const parts = id.split(":"); const tags: Record<string, string> = {};
+  for (let i = 1; i + 1 < parts.length; i += 2) tags[parts[i]] = parts[i + 1];
+  return { base: parts[0], tags };
+}
+/** an open run learned a new identity: its id changes, its pending worst case does not (no-op when `from` is not open) */
+export function relabelOpen(p: PlanLedger, step: PlanStepId, from: string, to: string, now?: string): PlanLedger {
+  const s = p.steps[step]; if (from === to || !s.openRuns.includes(from)) return p;
+  return put(p, step, { openRuns: Array.from(new Set(s.openRuns.map((r) => (r === from ? to : r)))) }, now);
+}
 /** The plan a run belongs to (audit 2026-10-10, OP-02): mainnet ALWAYS has one — the default Gate D plan unless PLAN_ID names another; a
  *  blank or whitespace PLAN_ID on mainnet is refused, never "no plan". Testnet runs are unbudgeted unless PLAN_ID names a rehearsal plan. */
 export function resolvePlanId(network: string, envValue: string | undefined, mainnetDefault: string): string | null {
