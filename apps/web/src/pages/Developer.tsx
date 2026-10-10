@@ -5,23 +5,24 @@
 // where the same account was; a different connected account starts at step 1 and sees the other account's items read-only under
 // "other wallets in this browser". Before a paid step the page checks the wallet's budget (fee + order + gas) and names the shortfall.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import type { Hex as HexT } from "viem";
 import { intentDigest, policyDigest, type IntentCore } from "@arcpreflight/schema";
 import { decide } from "@arcpreflight/policy";
 import { useNet } from "../App";
-import { apiPath, ApiError, explorerAddr, explorerTx, type AttemptView, type BaselineRecord, type CheckRow, type OrderView, type PassportBundle } from "../lib/api";
+import { ApiError, explorerAddr, explorerTx, type AttemptView, type BaselineRecord, type CheckRow, type OrderView, type PassportBundle } from "../lib/api";
 import { approvedBaseline, developerIntent, developerPolicy, prepareOrderQuote, quoteReady, WALLET_VALIDATION_WINDOW_SECONDS, type PreparedQuote, WALLET_REPORT_AGE_SECONDS } from "../lib/preflight";
 import { useWallet } from "../lib/wallet";
 import { purchaseReport, signFeeAuthorization, type Delivered } from "../lib/walletRun";
 import { describeBody, describeError, describedError, purchaseUncertainText, type Described } from "../lib/errors";
-import { sessionFor, storedSession, withSession, type Session } from "../lib/session";
+import { sessionFor, storedSession, withSession, type Session, type SessionFn } from "../lib/session";
 import { getApiBase } from "../lib/api";
 import { ShowMore } from "../components/ShowMore";
 import { limited, LIST_PAGE } from "../lib/evidenceFiles";
 import { rememberedChecks } from "../lib/checks";
 import { saveJson } from "../lib/download";
 import { baselineDigestFor, creationStopped, creationUnconfirmed, fixtureForProxy, nativeAtomicToUsdcText, orderLimits, orderViewFromCreated, paymentLabel, toDeveloperOrder, ORDER_GATED_TEXT, type OrderBody, type Proxy } from "../lib/orders";
-import { executeAttempt, executionInFlight, insideWindow, isOpen, isTerminal, isUncertain, reconcileUncertainAttempt, rememberedAttempts, sendValidatedAttempt, stateTone, type ExecutePhase, type Refusal } from "../lib/attempts";
+import { executeAttempt, executionInFlight, insideWindow, isOpen, isTerminal, isUncertain, reconcileUncertainAttempt, rememberedAttempt, rememberedAttempts, sendValidatedAttempt, stateTone, type ExecutePhase, type Refusal } from "../lib/attempts";
 import { clearWorkflow, loadWorkflow, loadWorkflows, saveWorkflow } from "../lib/workflow";
 import { LIFECYCLE_LABELS, type LifecycleId, type LifecycleStage, type StageStatus } from "../lib/outcome";
 import { budgetCheck, budgetComponents } from "../lib/faucet";
@@ -61,7 +62,7 @@ const ORDER_POLL_MS = 3_000; const ORDER_POLL_LIMIT_MS = 20 * 60_000;
 const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
 export default function Developer() {
-  const { net, testWallet, select, instances = [] } = useNet();
+  const { net, testWallet, select, instances = [], link = (to: string) => to } = useNet();
   const w = useWallet();
   const account = w.account;
   const onArc = !!net && !!account && w.chainId === net.chainId;
@@ -190,36 +191,38 @@ export default function Developer() {
   ];
 
   // ---- loaders
-  const loadMine = useCallback(async () => {
-    const current = storedSession(); setSession(current);
+  /** `session`: the operation whose outcome is listed hands over its own bound session (review of c3afab7, P2) — a purchase or an execution that
+   *  finishes after the visitor selected another instance refreshes the lists of the instance it ran on, and reaches no other */
+  const loadMine = useCallback(async (session: SessionFn = sessionFor()) => {
+    const current = storedSession(session.base); setSession(current);
     if (!current) { setMine((m) => ({ ...m, loaded: true, busy: false })); return; }
     setMine((m) => ({ ...m, busy: true, err: null }));
     const key = hydrated.current; // the (instance, payer) these lists are for — a response that lands after either changed is dropped (review of bf0c800, P2)
-    const session = sessionFor(); // both reads on the instance the listing began on
     try {
       const [o, a] = await Promise.all([session((t, c) => c.orders(t)), session((t, c) => c.attempts(t))]);
       if (hydrated.current !== key) return;
-      setSession(storedSession());
+      setSession(storedSession(session.base));
       setMine((m) => ({ ...m, orders: o?.orders ?? [], attempts: a?.attempts ?? [], loaded: true, busy: false, err: null }));
     } catch (e) { if (hydrated.current === key) setMine((m) => ({ ...m, loaded: true, busy: false, err: describeError(e) })); }
   }, []);
-  const loadChecks = useCallback(async () => {
-    const remembered = (known: Set<string>): CheckRow[] => rememberedChecks().filter((x) => !known.has(x.requestId)).map((x) => ({ requestId: x.requestId, clientRequestId: "", state: "NOT_UNDER_THIS_SESSION", createdAt: x.createdAt, updatedAt: x.createdAt, intentDigest: "", subject: x.subject ?? "", orderId: null, valueNativeAtomic: x.valueNativeAtomic ?? "0", reportDigest: null, payment: null, passportAvailable: false }));
-    const current = storedSession(); setSession(current);
+  const loadChecks = useCallback(async (session: SessionFn = sessionFor()) => {
+    const remembered = (known: Set<string>): CheckRow[] => rememberedChecks(session.base).filter((x) => !known.has(x.requestId)).map((x) => ({ requestId: x.requestId, clientRequestId: "", state: "NOT_UNDER_THIS_SESSION", createdAt: x.createdAt, updatedAt: x.createdAt, intentDigest: "", subject: x.subject ?? "", orderId: null, valueNativeAtomic: x.valueNativeAtomic ?? "0", reportDigest: null, payment: null, passportAvailable: false }));
+    const current = storedSession(session.base); setSession(current);
     if (!current) { setChecks((c) => ({ ...c, rows: remembered(new Set()), busy: false, loaded: true, err: null })); return; }
     setChecks((c) => ({ ...c, busy: true, err: null }));
     const key = hydrated.current;
     try {
-      const r = await withSession((t, c) => c.requests(t));
+      const r = await session((t, c) => c.requests(t));
       if (hydrated.current !== key) return;
-      setSession(storedSession());
+      setSession(storedSession(session.base));
       setChecks((c) => ({ ...c, rows: [...r.requests, ...remembered(new Set(r.requests.map((x) => x.requestId)))], busy: false, err: null, loaded: true }));
     } catch (e) { if (hydrated.current === key) setChecks((c) => ({ ...c, busy: false, err: describeError(e), loaded: true })); }
   }, []);
-  const refreshOrder = useCallback(async (id?: string) => {
+  /** `session`: an operation that re-reads its order when it ends hands over its own bound session (review of c3afab7, P2) */
+  const refreshOrder = useCallback(async (id?: string, session: SessionFn = sessionFor()) => {
     const oid = id ?? order?.orderId; if (!oid) return;
     const g = wf.current;
-    try { const o = await withSession((t, c) => c.order(oid, t)); if (!current(g)) return; setOrder((cur) => (cur && cur.orderId.toLowerCase() === o.orderId.toLowerCase() ? o : cur)); } catch { /* keep what we have; the card says what was read */ }
+    try { const o = await session((t, c) => c.order(oid, t)); if (!current(g)) return; setOrder((cur) => (cur && cur.orderId.toLowerCase() === o.orderId.toLowerCase() ? o : cur)); } catch { /* keep what we have; the card says what was read */ }
   }, [order?.orderId]); // eslint-disable-line react-hooks/exhaustive-deps
   /** everything that belongs to one payer's workflow leaves the screen (the server records stay; My workflow lists them) */
   const resetVisible = () => { setOrder(null); setOrderMeta({ baselineDigest: null, proxy: null }); setApproved(false); setUnitMistake(false); setCheck(null); setAttempt(null); setExec(IDLE); setPassport(null); setVerification(null); setOpenSteps({}); setErr(null); };
@@ -236,29 +239,30 @@ export default function Developer() {
     if (!saved) { owner.current = account.toLowerCase(); void loadMine(); void loadChecks(); return; }
     hydrating.current = key;
     let alive = true;
+    const session = sessionFor(); // the read-back is one operation on one instance; its memory of the attempt is read there too (review of c3afab7, P2)
     (async () => {
       try {
-        const o = await withSession((t, c) => c.order(saved.orderId, t));
+        const o = await session((t, c) => c.order(saved.orderId, t));
         if (!alive) return;
         if (!same(o.payer, account)) return; // never show another payer's order as this account's
         setOrder(o); setOrderMeta({ baselineDigest: saved.baselineDigest ?? baselineDigestFor(netRef.current, o.proxy), proxy: o.proxy }); setApproved(saved.approved);
         if (saved.requestId && saved.intent) {
-          const r = await withSession((t, c) => c.request(saved.requestId!, t)).catch(() => null);
+          const r = await session((t, c) => c.request(saved.requestId!, t)).catch(() => null);
           if (!alive) return;
           const d: Delivered | null = r?.delivery === "DELIVERED" && r.report ? { report: r.report, digest: r.reportDigest, simulation: r.simulation, serviceFeeTx: r.payment?.transaction ?? null, requestId: saved.requestId } : null;
           setCheck({ intent: saved.intent, requestId: saved.requestId, quote: null, delivered: d });
         }
         if (saved.attemptId) {
-          const a = await withSession((t, c) => c.attempt(saved.attemptId!, t)).catch(() => null);
+          const a = await session((t, c) => c.attempt(saved.attemptId!, t)).catch(() => null);
           if (alive && a && same(a.payer, account)) {
-            const restoredUncertain = isUncertain(a);
+            const restoredUncertain = isUncertain(a, rememberedAttempt(a.attemptId, session.base));
             setAttempt(a); setExec({ ...IDLE, phase: isTerminal(a.state) ? "done" : restoredUncertain ? "uncertain" : "idle", txHash: a.txHash });
             // §10 item 1: a refresh restores the uncertainty, not an idle attempt — recover once, then observe; nothing is offered to the wallet
             if (restoredUncertain) void reconcileUncertain(a);
           }
         }
       } catch (e) { if (alive) setErr(describeError(e)); }
-      finally { if (hydrating.current === key) hydrating.current = null; if (alive) { owner.current = account.toLowerCase(); void loadMine(); void loadChecks(); } }
+      finally { if (hydrating.current === key) hydrating.current = null; if (alive) { owner.current = account.toLowerCase(); void loadMine(session); void loadChecks(session); } }
     })();
     return () => { alive = false; };
   }, [net?.chainId, account, loadMine, loadChecks]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -336,18 +340,20 @@ export default function Developer() {
     if (check.delivered) throw new Error("This quote was already purchased; request a new quote for a fresh report.");
     if (!onArc || !quoteReady(check.quote, devOrder.block)) throw new Error("Quote is stale or expired; request a new quote before signing.");
     if (budgetBuy.enough === false) throw new Error(`Not enough USDC in your wallet: ${budgetBuy.sentence}.`);
+    // review of c3afab7 (P2): the instance (the quote's), the workflow and the request are fixed BEFORE the wallet is asked to sign — the signature
+    // prompt may outlive a switch of the selected instance, and the authorization then still goes where the quote came from, or nowhere
+    const g = wf.current; const session = sessionFor(); const requestId = check.requestId;
     // the same helpers the Live Demo's wallet check uses (lib/walletRun.ts): one EIP-3009 authorization for exactly the quote, then the purchase
     const payment = await signFeeAuthorization(w.provider, account, net, check.quote);
     if (!quoteReady(check.quote, devOrder.block)) throw new Error("The quote expired during signing; request a new quote.");
-    const g = wf.current; const requestId = check.requestId;
     let d: Delivered;
     // W05: from here the authorization may reach the service; a lost answer is an uncertain purchase, never "nothing was sent"
-    try { d = await withSession((t, c) => purchaseReport(check.quote!, t, payment, { client: c })); }
+    try { d = await session((t, c) => purchaseReport(check.quote!, t, payment, { client: c })); }
     catch (e) { const why = describeError(e); if (why.code === "NETWORK" || why.code === null) throw describedError(purchaseUncertainText(requestId, why.text), "PURCHASE_UNCERTAIN", e); throw e; }
-    finally { void loadChecks(); }
+    finally { void loadChecks(session); } // the checks of the instance that was charged
     if (!current(g)) return; // W03: the workflow moved on (another account, start over); the server record stands, this view is not touched
     setCheck((c) => (c && c.requestId === d.requestId ? { ...c, delivered: d } : c));
-    void refreshOrder();
+    void refreshOrder(undefined, session);
   });
   /** W03: events of an execution started under workflow generation `g` touch the UI only while that workflow is still on screen */
   const onExecEventFor = (g: number) => (e: { phase: ExecutePhase; attempt: AttemptView | null; txHash?: string | null; refusal?: Refusal | null; error?: Described | null }) => {
@@ -364,9 +370,9 @@ export default function Developer() {
       const g = wf.current; const session = sessionFor(); // review of 0d1088e (P1): validate, prompt, report the hash, poll and recover on ONE instance
       setExec({ phase: "validating", txHash: null, refusal: null, err: null }); setPassport(null); setVerification(null);
       const ev = await executeAttempt({ provider: w.provider, account, requestId: check.requestId, orderId: order.orderId, policy, withToken: session, onEvent: onExecEventFor(g) });
-      if (!current(g) || !same(ev.attempt?.payer ?? account, accountRef.current)) { void loadMine(); return; } // the account changed or the workflow was reset meanwhile: the attempt is listed under its own payer, never shown here
+      if (!current(g) || !same(ev.attempt?.payer ?? account, accountRef.current)) { void loadMine(session); return; } // the account changed or the workflow was reset meanwhile: the attempt is listed under its own payer, never shown here
       if (ev.attempt) setAttempt(ev.attempt);
-      void refreshOrder(); void loadMine();
+      void refreshOrder(undefined, session); void loadMine(session);
     });
   };
   const resume = (a: AttemptView) => {
@@ -376,9 +382,9 @@ export default function Developer() {
       const g = wf.current; const session = sessionFor(); // review of bf0c800 (P2): a resume that finishes after the payer or the workflow changed reconciles its own record only; one instance for the whole resume (0d1088e, P1)
       setAttempt(a); setExec({ phase: "prompting", txHash: null, refusal: null, err: null });
       const ev = await sendValidatedAttempt({ provider: w.provider, account, attempt: a, withToken: session, onEvent: onExecEventFor(g) });
-      if (!current(g) || !same(ev.attempt?.payer ?? a.payer, accountRef.current)) { void loadMine(); return; }
+      if (!current(g) || !same(ev.attempt?.payer ?? a.payer, accountRef.current)) { void loadMine(session); return; }
       if (ev.attempt) setAttempt(ev.attempt);
-      void refreshOrder(); void loadMine();
+      void refreshOrder(undefined, session); void loadMine(session);
     });
   };
   /** §10 item 1: a restored VALIDATED attempt with a prompt marker — recover once, then observe (the server reads the chain for such attempts); never a prompt */
@@ -388,9 +394,9 @@ export default function Developer() {
       const g = wf.current; const session = sessionFor();
       setAttempt(a); setExec({ phase: "uncertain", txHash: a.txHash, refusal: null, err: null });
       const ev = await reconcileUncertainAttempt({ attempt: a, withToken: session, onEvent: onExecEventFor(g) });
-      if (!current(g) || !same(ev.attempt?.payer ?? a.payer, accountRef.current)) { void loadMine(); return; }
+      if (!current(g) || !same(ev.attempt?.payer ?? a.payer, accountRef.current)) { void loadMine(session); return; }
       if (ev.attempt) setAttempt(ev.attempt);
-      void refreshOrder(a.orderId); void loadMine();
+      void refreshOrder(a.orderId, session); void loadMine(session);
     });
   };
   const adopt = (a: AttemptView, s: ReturnType<typeof stamp>) => {
@@ -412,7 +418,7 @@ export default function Developer() {
     const full = await session((t, c) => c.attempt(id, t));
     if (!current(g)) return; // the workflow moved on while the attempt was read (review of bf0c800, P2)
     if (!same(full.payer, accountRef.current)) throw new Error(`This attempt belongs to wallet ${short(full.payer, 4)}; connect that wallet to continue it. It stays listed under "other wallets in this browser".`);
-    const pickedUncertain = isUncertain(full);
+    const pickedUncertain = isUncertain(full, rememberedAttempt(full.attemptId, session.base));
     setAttempt(full); setExec({ phase: isTerminal(full.state) ? "done" : pickedUncertain ? "uncertain" : "idle", txHash: full.txHash, refusal: null, err: null }); setPassport(null); setVerification(null); setOpenSteps({});
     if (!order || order.orderId.toLowerCase() !== full.orderId.toLowerCase()) {
       const o = await session((t, c) => c.order(full.orderId, t));
@@ -736,20 +742,10 @@ export default function Developer() {
 
         {dialog && <OrderDialog payer={account} net={net} limits={limits} create={createOrder} onCreated={onCreated} onClose={() => setDialog(false)} unconfirmed={unconfirmedLatest} onLost={() => void loadMine()} />}
 
-        <details>
-          <summary className="small">Integrate (curl) — the same lifecycle over HTTP</summary>
-          <pre className="json" style={{ marginTop: 8 }}>{`# 0. session (open self-service: no registration) — keep the token, it owns your orders, checks and attempts
-TOKEN=$(curl -s -X POST ${location.origin}${apiPath("/v1/session")} | jq -r .token)
-# 1. order (payer = your wallet; amount in 18-dec native units 1e15–1e18, step 1e12; reference ≤ 64 chars)
-curl -s -X POST ${location.origin}${apiPath("/v1/demo/orders")} -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"payer":"0x…","proxy":"MAIN","amountNativeAtomic":"50000000000000000","reference":"invoice #42"}'
-# 2. quote (free, report prepared & pinned) → 402 {quote, pinnedBlock, paymentRequirements}
-curl -s -X POST ${location.origin}${apiPath("/v1/preflight")} -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"intent": …}'
-# 3. sign EIP-3009 TransferWithAuthorization(from=you, to=quote.payTo, value=quote.amountTokenAtomic) with USDC domain {name:"USDC",version:"2",chainId:${net?.chainId ?? 5042},verifyingContract:"0x3600…0000"}; pay → report (or 202 + GET /v1/requests/{id} until settled)
-curl -s -X POST ${location.origin}${apiPath("/v1/preflight")} -H "authorization: Bearer $TOKEN" -d '{"intent": …, "payment": {"signature": "0x…", "authorization": {…}}}'
-# 4. decide locally: import { decide } from "@arcpreflight/policy"
-# 5. execute with your wallet: POST ${apiPath("/v1/wallet/attempts")} {requestId, orderId, policy} → 201 VALIDATED {plan}; eth_sendTransaction(plan) → POST …/{id}/sent {txHash}; GET …/{id} observes; POST …/{id}/abandon on a rejected prompt; POST …/{id}/recover reconciles (also right after an ambiguous wallet error)
-# 6. passports: GET ${apiPath("/v1/wallet/attempts/{id}/passport")} · GET ${apiPath("/v1/requests/{id}/passport")} → verify: pnpm exec tsx packages/verifier/src/cli.ts passport.json --rpc ${net?.rpc ?? "https://rpc.testnet.arc.io"} --anchors anchors.json`}</pre>
-        </details>
+        <div className="integration-workbench-link row between">
+          <div className="stack" style={{ gap: 4 }}><h3>Use this workflow in your app.</h3><p className="small muted">Follow the HTTP lifecycle, API examples and repository CLI commands in the integration guide.</p></div>
+          <Link to={link("/integrate")} className="btn">API & CLI guide →</Link>
+        </div>
       </div>
     </section>
   );

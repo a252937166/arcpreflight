@@ -56,8 +56,10 @@ export function withSession<T>(fn: (token: string, client: ApiClient) => Promise
 /** The session-bound call of ONE operation (review of 0d1088e, P1): an operation that makes several session calls — validate, prompt, report
  *  the hash, poll, recover — captures `sessionFor()` once at its start, so every one of those calls, their renewals and their retries go to the
  *  instance the operation began on; `withSession` alone binds each call to the instance selected at THAT call. */
-export type SessionFn = <T>(fn: (token: string, client: ApiClient) => Promise<T>) => Promise<T>;
-export function sessionFor(base: string = getApiBase()): SessionFn { return (fn) => withSessionOn(base, fn); }
+/** The bound session says which instance it is bound to (`base`): the operation's browser records — its workflow, its remembered checks and
+ *  attempts — are stored under THAT instance, never under the one selected when a delayed step finally writes (review of c3afab7, P2). */
+export type SessionFn = (<T>(fn: (token: string, client: ApiClient) => Promise<T>) => Promise<T>) & { readonly base: string };
+export function sessionFor(base: string = getApiBase()): SessionFn { return Object.assign(<T,>(fn: (token: string, client: ApiClient) => Promise<T>) => withSessionOn(base, fn), { base }); }
 export async function withSessionOn<T>(base: string, fn: (token: string, client: ApiClient) => Promise<T>): Promise<T> {
   const client = apiFor(base);
   const s = await getSession({ base, client });

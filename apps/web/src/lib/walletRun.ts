@@ -40,7 +40,7 @@ export type Delivered = { report: Report; digest: string; simulation: any; servi
  *  The request id is remembered before anything leaves, so "My checks" can find it even if the response is lost. */
 export async function purchaseReport(quote: PreparedQuote, token: string, payment: FeePayment, opts: { wait?: () => Promise<void>; maxPolls?: number; client?: ApiClient } = {}): Promise<Delivered> {
   const quotedIntent = quote.intent; const requestId = quote.response.requestId; const c = opts.client ?? api; // the purchase and its polls stay on one instance
-  rememberCheck({ requestId, createdAt: new Date().toISOString(), subject: quotedIntent.to, valueNativeAtomic: quotedIntent.valueNativeAtomic });
+  rememberCheck({ requestId, createdAt: new Date().toISOString(), subject: quotedIntent.to, valueNativeAtomic: quotedIntent.valueNativeAtomic }, c.base); // remembered under the instance that is charged (review of c3afab7, P2)
   let r = await c.preflight(quotedIntent, token, payment);
   let tries = 0; const max = opts.maxPolls ?? 20;
   while (r.__status === 202 && tries++ < max) { await (opts.wait?.() ?? new Promise((s) => setTimeout(s, 1500))); r = await c.request(requestId, token); }
@@ -79,6 +79,7 @@ export function useWalletRun(net: NetworkInfo | null, wallet: WalletLike) {
     const push = (step: string, facts: Record<string, unknown>) => { if (alive()) setRun((r) => ({ ...r, steps: [...r.steps, { step, atMs: Date.now() - t0, ...facts }] })); };
     setRun({ ...EMPTY_WALLET_RUN, phase: "running", fixture: fixture.id, startedAt: t0 });
     const withSession = sessionFor(); // review of 0d1088e (P1): the order, the quote, the purchase and the approval read all go to the instance this check began on
+    const base = withSession.base; // … and the hand-over is saved under that instance's workflow, never under one selected meanwhile (review of c3afab7, P2)
     try {
       let answer;
       try { answer = await withSession((t, c) => c.createOrder({ payer: account, proxy: fixture.proxy }, t)); }
@@ -115,7 +116,7 @@ export function useWalletRun(net: NetworkInfo | null, wallet: WalletLike) {
         catch (e) {
           if (!alive()) return;
           if (!(e instanceof ApiError && e.status === 404)) {
-            saveWorkflow({ payer: account, orderId: order.orderId, proxy: order.proxy, baselineDigest: order.baselineDigest, approved: true, requestId: delivered.requestId, intent: quote.intent, attemptId: null, handoff: "demo" });
+            saveWorkflow({ payer: account, orderId: order.orderId, proxy: order.proxy, baselineDigest: order.baselineDigest, approved: true, requestId: delivered.requestId, intent: quote.intent, attemptId: null, handoff: "demo" }, base);
             patch({ approvalReadFailed: describeError(e) });
             throw describedError(`The referenced approval could not be read (${describeError(e).text}) — no decision was made. Your paid report (request ${delivered.requestId.slice(0, 8)}…) is kept under My workflow on the Developer page; the decision is retried there from the same report, with no new fee.`, "APPROVAL_UNREAD", e);
           }
@@ -128,7 +129,7 @@ export function useWalletRun(net: NetworkInfo | null, wallet: WalletLike) {
       push("decision", { who: "your browser (@arcpreflight/policy)", why: "deterministic: hard violations block, unapproved change or unknowns require review, otherwise no configured check fired", decision: decision.decision, reasons: decision.reasons });
       if (decision.decision === "NO_POLICY_VIOLATION") {
         // the Developer workflow picks this up (same browser, same instance, same anonymous session): order + exact quoted intent + delivered request
-        saveWorkflow({ payer: account, orderId: order.orderId, proxy: order.proxy, baselineDigest: order.baselineDigest, approved: true, requestId: delivered.requestId, intent: quote.intent, attemptId: null, handoff: "demo" });
+        saveWorkflow({ payer: account, orderId: order.orderId, proxy: order.proxy, baselineDigest: order.baselineDigest, approved: true, requestId: delivered.requestId, intent: quote.intent, attemptId: null, handoff: "demo" }, base);
         patch({ handoff: true });
         push("readyToExecute", { who: "your browser", why: checkDecidedLine(decision.decision), orderId: order.orderId, requestId: delivered.requestId });
       } else {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, setApiBase, type AttemptView, api, type ApiClient } from "../src/lib/api";
+import { ApiError, apiFor, setApiBase, type AttemptView, api, type ApiClient } from "../src/lib/api";
+import { resetSessions, sessionFor } from "../src/lib/session";
 import { AMBIGUOUS_OPEN_TEXT, AMBIGUOUS_TEXT, UNCERTAIN_OPEN_TEXT, UNCERTAIN_TEXT, attemptMessage, deviationRows, executeAttempt, executionInFlight, findOpenAttempt, insideWindow, isOpen, isTerminal, isUncertain, isUserRejection, pollAttempt, preSendCheck, reconcileUncertainAttempt, rememberAttempt, rememberedAttempt, rememberedAttempts, resetExecutionGuard, sendValidatedAttempt, txRequestFromPlan, windowCheck } from "../src/lib/attempts";
 import { ACCOUNT, D, MERCHANT, NOW, REQUEST, response } from "./fixtures";
 
@@ -471,5 +472,69 @@ describe("review of 0c0d406 — the exclusive prompt claim and the re-check afte
     expect(r.phase).toBe("uncertain"); expect(r.error?.code).toBe("CHAIN_CHANGED"); expect(r.error?.text).toMatch(/could not be handed back/);
     expect(paths(calls).slice(0, 3)).toEqual([PROMPT_PATH, PROMPT_PATH, `POST /v1/wallet/attempts/${ATTEMPT}/recover`]); // claim, failed hand-back, then reconcile first
     expect(isUncertain(r.attempt)).toBe(true); expect(r.attempt?.prompt?.state).toBe("UNKNOWN_SUBMISSION");
+  });
+});
+
+describe("review of c3afab7 (P2) · an operation's browser memory lands under the instance the operation is bound to", () => {
+  // The remembered attempts (the id written before the prompt, the marker, the states the polls bring back) used to be stored under the instance
+  // selected at the moment of each write: an execution bound to /testnet whose wallet prompt outlived a switch to root wrote its attempt into
+  // ROOT's memory — and a VALIDATED attempt restored on /testnet was read against root's memory, so its prompt marker went unseen.
+  const stored = (scope: string) => JSON.parse(storage.get(`arcpreflight.attempts:${scope}`) ?? "{}");
+  const ROOT_ATTEMPT = { attemptId: "root-att", orderId: ORDER, requestId: REQUEST, createdAt: NOW.toISOString(), state: "VALIDATED" };
+  const CONFIRMED = () => response(view({ state: "CONFIRMED", txHash: D, businessTxHash: D, businessStatus: "SUCCESS", block: "200", deviations: { mismatch: [], deviations: {} } }));
+  /** the fake API moved under /testnet: a request that reaches the root instance is answered 403 and recorded */
+  function underTestnet(): string[] {
+    const inner = globalThis.fetch as any; const wrong: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => { if (!path.startsWith("/testnet/")) { wrong.push(path); return response({ error: "WRONG_INSTANCE" }, 403); } return inner(path.slice("/testnet".length), init); }));
+    return wrong;
+  }
+  const onTestnet = () => { setApiBase("/testnet"); resetSessions(); storage.set("arcpreflight.session:/testnet", JSON.stringify({ principal: "visitor:1", token: "tok" })); storage.set("arcpreflight.attempts:root", JSON.stringify({ "root-att": ROOT_ATTEMPT })); };
+  const flush = () => vi.advanceTimersByTimeAsync(0);
+  it("reproduction: an execution bound to /testnet whose wallet prompt outlives a switch to root remembers its attempt under /testnet, and root's memory keeps only its own attempt", async () => {
+    onTestnet(); fakeApi({ observe: (n) => (n === 0 ? response(view({ state: "BROADCAST_ATTEMPTED", txHash: D })) : CONFIRMED()) }); const wrong = underTestnet();
+    let release: ((h: string) => void) | null = null;
+    const provider = wallet(() => new Promise<string>((r) => { release = r; }));
+    const pending = executeAttempt({ provider, account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken: sessionFor("/testnet"), poll: { wait: async () => {}, intervalMs: 0 } });
+    for (let i = 0; i < 100 && !release; i++) await flush(); if (!release) throw new Error("the wallet was never asked");
+    expect(stored("/testnet")[ATTEMPT]).toMatchObject({ state: "VALIDATED", promptState: "PROMPTED" }); // remembered before the prompt, under the operation's instance
+    setApiBase(""); // the root instance is selected while the wallet is open
+    release!(D); const ev = await pending;
+    expect(ev.phase).toBe("done"); expect(wrong).toEqual([]); // the hash report and the polls stayed on /testnet …
+    expect(stored("/testnet")[ATTEMPT].state).toBe("CONFIRMED"); // … and so did their memory
+    expect(stored("root")).toEqual({ "root-att": ROOT_ATTEMPT }); // root's memory is untouched (the hash report and the polls used to write the testnet attempt here)
+  });
+  it("control: without a switch the same execution remembers its attempt under /testnet and leaves root's memory alone", async () => {
+    onTestnet(); fakeApi({ observe: () => CONFIRMED() }); const wrong = underTestnet();
+    const ev = await executeAttempt({ provider: wallet(() => D), account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken: sessionFor("/testnet"), poll: { wait: async () => {}, intervalMs: 0 } });
+    expect(ev.phase).toBe("done"); expect(wrong).toEqual([]);
+    expect(stored("/testnet")[ATTEMPT].state).toBe("CONFIRMED"); expect(stored("root")).toEqual({ "root-att": ROOT_ATTEMPT });
+    expect(rememberedAttempts("/testnet").map((a) => a.attemptId)).toEqual([ATTEMPT]); expect(rememberedAttempt(ATTEMPT, "")).toBeNull(); // the reads take the instance too
+  });
+  it("concurrent variant: while the /testnet prompt is open the root page remembers a root attempt — afterwards each instance's memory holds exactly its own; an unbound caller's memory follows the instance selected when ITS operation began", async () => {
+    onTestnet(); fakeApi({ observe: () => CONFIRMED() }); const wrong = underTestnet();
+    let release: ((h: string) => void) | null = null;
+    const pending = executeAttempt({ provider: wallet(() => new Promise<string>((r) => { release = r; })), account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken: sessionFor("/testnet"), poll: { wait: async () => {}, intervalMs: 0 } });
+    for (let i = 0; i < 100 && !release; i++) await flush(); if (!release) throw new Error("the wallet was never asked");
+    setApiBase(""); rememberAttempt({ attemptId: "root-2", orderId: ORDER, requestId: REQUEST, createdAt: NOW.toISOString(), state: "VALIDATED", promptState: "PROMPTED" }, ""); // the root page, meanwhile
+    release!(D); const ev = await pending;
+    expect(ev.phase).toBe("done"); expect(wrong).toEqual([]);
+    expect(Object.keys(stored("root")).sort()).toEqual(["root-2", "root-att"]); expect(Object.keys(stored("/testnet"))).toEqual([ATTEMPT]);
+    // an unbound withToken (no `base`): the instance selected when the operation starts is fixed then — a switch during the prompt changes nothing
+    resetExecutionGuard(); setApiBase("/testnet"); storage.delete("arcpreflight.attempts:/testnet");
+    let release2: ((h: string) => void) | null = null; const unbound = async <T,>(fn: (t: string, c: ApiClient) => Promise<T>) => fn("tok", apiFor("/testnet"));
+    const pending2 = sendValidatedAttempt({ provider: wallet(() => new Promise<string>((r) => { release2 = r; })), account: ACCOUNT, attempt: view(), withToken: unbound, poll: { wait: async () => {}, intervalMs: 0 } });
+    for (let i = 0; i < 100 && !release2; i++) await flush(); if (!release2) throw new Error("the wallet was never asked");
+    setApiBase(""); release2!(D); expect((await pending2).phase).toBe("done");
+    expect(stored("/testnet")[ATTEMPT].state).toBe("CONFIRMED"); expect(Object.keys(stored("root")).sort()).toEqual(["root-2", "root-att"]);
+  });
+  it("reproduction (the read side): a VALIDATED attempt whose prompt marker lives only in /testnet's memory is reconciled through its /testnet-bound session while root is selected — not taken for idle", async () => {
+    onTestnet(); storage.set("arcpreflight.attempts:/testnet", JSON.stringify({ [ATTEMPT]: { attemptId: ATTEMPT, orderId: ORDER, requestId: REQUEST, createdAt: NOW.toISOString(), state: "VALIDATED", promptState: "PROMPTED" } }));
+    const calls = fakeApi({ observe: () => CONFIRMED(), recover: () => CONFIRMED() }); const wrong = underTestnet();
+    setApiBase(""); // root selected; the restored attempt belongs to /testnet
+    const events: string[] = [];
+    const ev = await reconcileUncertainAttempt({ attempt: view() /* the server view carries no marker; only the browser's memory does */, withToken: sessionFor("/testnet"), onEvent: (e) => events.push(e.phase), poll: { wait: async () => {}, intervalMs: 0 } });
+    expect(events[0]).toBe("uncertain"); expect(ev.phase).toBe("done"); expect(wrong).toEqual([]); // reconciled (recover once) and closed — root's empty memory used to make it "idle"
+    expect(paths(calls)).toContain(`POST /v1/wallet/attempts/${ATTEMPT}/recover`);
+    expect(stored("/testnet")[ATTEMPT].state).toBe("CONFIRMED"); expect(stored("root")).toEqual({ "root-att": ROOT_ATTEMPT });
   });
 });

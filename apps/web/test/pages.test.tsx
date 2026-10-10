@@ -1557,13 +1557,13 @@ describe("review of bf0c800 · operations bound to their instance and payer", ()
   });
 });
 
+/** the Developer API stub, served under the /testnet prefix: a request that reaches the root instance answers 403 WRONG_INSTANCE */
+function testnetApi() {
+  const api = developerApi(); const paths: string[] = []; const orig = api.fetch.getMockImplementation()!;
+  api.fetch.mockImplementation(async (path: string, init?: RequestInit) => { paths.push(path); if (!path.startsWith("/testnet/")) return response({ error: "WRONG_INSTANCE", reason: `reached the root instance: ${path}` }, 403); return orig(path.slice("/testnet".length), init); });
+  return { api, paths };
+}
 describe("review of 0d1088e · one instance per wallet operation (P1); late answers never restore a retired workflow (P2)", () => {
-  /** the Developer API stub, served under the /testnet prefix: a request that reaches the root instance answers 403 WRONG_INSTANCE */
-  function testnetApi() {
-    const api = developerApi(); const paths: string[] = []; const orig = api.fetch.getMockImplementation()!;
-    api.fetch.mockImplementation(async (path: string, init?: RequestInit) => { paths.push(path); if (!path.startsWith("/testnet/")) return response({ error: "WRONG_INSTANCE", reason: `reached the root instance: ${path}` }, 403); return orig(path.slice("/testnet".length), init); });
-    return { api, paths };
-  }
   it("P1: an execution started on /testnet reports its hash and polls on /testnet although the visitor selected the root instance while the wallet prompt was open", async () => {
     setApiBase("/testnet"); const { paths } = testnetApi(); memStorage();
     let release!: (h: string) => void;
@@ -1676,5 +1676,100 @@ describe("long lists (review of 2026-10-10) — folders, pages of eight, one fil
     const footer = moreOf(tree, "more:my-orders"); expect(footer.props).toMatchObject({ shown: 8, total: 20 });
     footer.props.onMore(); tree = render(Developer); expect(rows()).toHaveLength(16);
     moreOf(tree, "more:my-orders").props.onMore(); tree = render(Developer); expect(rows()).toHaveLength(20);
+  });
+});
+
+describe("review of c3afab7 · P2: the purchase is bound before the wallet signs; an operation's browser records land under its own instance", () => {
+  const ROOT_ORDER = `0x${"0d".repeat(32)}`;
+  const rootWorkflow = () => JSON.stringify({ [ACCOUNT.toLowerCase()]: { payer: ACCOUNT, orderId: ROOT_ORDER, proxy: "MAIN", baselineDigest: null, approved: true, requestId: null, intent: null, attemptId: null, updatedAt: "2026-10-10T00:00:00.000Z" } });
+  const stored = (store: Map<string, string>, key: string) => JSON.parse(store.get(key) ?? "null");
+  const purchases = (paths: string[]) => paths.filter((p) => p.endsWith("/v1/preflight") || p.endsWith("/v1/requests")); // the quote, the purchase and the "my checks" refresh that follows it
+  /** step 3 on the selected instance with the wallet's signature HELD: the purchase is pending while the wallet shows its prompt */
+  async function quoteAndHoldSignature() {
+    let resolve: ((s: string) => void) | null = null; let reject: ((e: unknown) => void) | null = null;
+    h.sign.mockImplementation(() => new Promise<string>((res, rej) => { resolve = res; reject = rej; }));
+    let tree = await createDeveloperOrder(); await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    const buying: Promise<void> = button(tree, "Sign TransferWithAuthorization").props.onClick();
+    for (let i = 0; i < 100 && !resolve; i++) await flush(); if (!resolve) throw new Error("the wallet was never asked");
+    return { buying, release: (s: string) => resolve!(s), reject: (e: unknown) => reject!(e) };
+  }
+  it("reproduction: the authorization signed for a /testnet quote is sent to /testnet although the root instance was selected while the wallet showed the signature prompt; the check is remembered under /testnet", async () => {
+    setApiBase("/testnet"); const { paths } = testnetApi(); const store = memStorage();
+    const { buying, release } = await quoteAndHoldSignature();
+    expect(purchases(paths)).toEqual(["/testnet/v1/preflight"]); // the quote; nothing is bought while the wallet is open
+    setApiBase(""); // the root instance is selected while the wallet is open
+    release(`0x${"01".repeat(65)}`); await buying; render(Developer); await flush(); const tree = render(Developer);
+    expect(purchases(paths)).toEqual(["/testnet/v1/preflight", "/testnet/v1/preflight", "/testnet/v1/requests"]); // the purchase went where the quote came from, and so did the refresh of "my checks" (both used to go to root)
+    expect(badge(tree).props.decision).toBe("NO_POLICY_VIOLATION"); // delivered: the report is on screen
+    expect(Object.keys(stored(store, "arcpreflight.checks:/testnet") ?? {})).toEqual([REQUEST]); expect(store.has("arcpreflight.checks:root")).toBe(false); // remembered under the instance that was charged
+  });
+  it("control: with no switch the purchase and its refresh go to /testnet and the check is remembered there", async () => {
+    setApiBase("/testnet"); const { paths } = testnetApi(); const store = memStorage();
+    const { buying, release } = await quoteAndHoldSignature();
+    release(`0x${"01".repeat(65)}`); await buying; render(Developer); await flush(); const tree = render(Developer);
+    expect(purchases(paths)).toEqual(["/testnet/v1/preflight", "/testnet/v1/preflight", "/testnet/v1/requests"]); expect(badge(tree).props.decision).toBe("NO_POLICY_VIOLATION");
+    expect(Object.keys(stored(store, "arcpreflight.checks:/testnet") ?? {})).toEqual([REQUEST]); expect(store.has("arcpreflight.checks:root")).toBe(false);
+  });
+  it("interrupted variant: the wallet rejects the signature after the switch — nothing is bought anywhere, no check is remembered, the refusal is said", async () => {
+    setApiBase("/testnet"); const { paths } = testnetApi(); const store = memStorage();
+    const { buying, reject } = await quoteAndHoldSignature();
+    setApiBase(""); reject({ code: 4001, message: "User rejected the request" }); await buying; render(Developer); await flush(); const tree = render(Developer);
+    expect(purchases(paths)).toEqual(["/testnet/v1/preflight"]); // the quote only: no purchase and no refresh reached either instance
+    expect(store.has("arcpreflight.checks:/testnet")).toBe(false); expect(store.has("arcpreflight.checks:root")).toBe(false);
+    expect(fnNode(tree, "ErrorBanner").props.err?.text).toMatch(/rejected/i); expect(badge(tree)).toBeUndefined();
+  });
+  it("interrupted variant: the purchase's answer is lost after the switch — the uncertainty names the request, which is remembered under /testnet (where it can be recovered), never under root", async () => {
+    setApiBase("/testnet"); const { api, paths } = testnetApi(); const store = memStorage();
+    const prefixed = api.fetch.getMockImplementation()!;
+    api.fetch.mockImplementation(async (path: string, init?: RequestInit) => { if (path === "/testnet/v1/preflight" && JSON.parse(init!.body as string).payment) { paths.push(path); throw new TypeError("network dropped after the authorization left"); } return prefixed(path, init); });
+    const { buying, release } = await quoteAndHoldSignature();
+    setApiBase(""); release(`0x${"01".repeat(65)}`); await buying; render(Developer); await flush(); const tree = render(Developer);
+    expect(purchases(paths)).toEqual(["/testnet/v1/preflight", "/testnet/v1/preflight", "/testnet/v1/requests"]); // the authorization left for /testnet; the refresh looked there
+    const err = fnNode(tree, "ErrorBanner").props.err; expect(err?.code).toBe("PURCHASE_UNCERTAIN"); expect(err?.text).toContain(REQUEST.slice(0, 8));
+    expect(Object.keys(stored(store, "arcpreflight.checks:/testnet") ?? {})).toEqual([REQUEST]); expect(store.has("arcpreflight.checks:root")).toBe(false);
+  });
+  it("reproduction: the Demo wallet check's hand-over is saved under the instance it ran on — root's workflow of the same payer is never overwritten by a check that finished after a switch", async () => {
+    const { useWalletRun } = await import("../src/lib/walletRun");
+    setApiBase("/testnet"); const { paths } = testnetApi(); const store = memStorage({ "arcpreflight.workflow:root": rootWorkflow() });
+    let resolve: ((s: string) => void) | null = null; h.sign.mockImplementation(() => new Promise<string>((res) => { resolve = res; }));
+    let hook = render(() => useWalletRun(h.net, h.wallet));
+    const started = hook.start({ id: "APPROVED_PAYMENT", proxy: "MAIN", merchant: MERCHANT } as any);
+    for (let i = 0; i < 100 && !resolve; i++) await flush(); if (!resolve) throw new Error("the wallet was never asked");
+    setApiBase(""); resolve!(`0x${"01".repeat(65)}`); await started; hook = render(() => useWalletRun(h.net, h.wallet));
+    expect(hook.run.phase).toBe("done"); expect(hook.run.handoff).toBe(true); expect(paths.filter((p) => !p.startsWith("/testnet/"))).toEqual([]);
+    expect(stored(store, "arcpreflight.workflow:root")[ACCOUNT.toLowerCase()].orderId).toBe(ROOT_ORDER); // untouched (the hand-over used to land here and replace it)
+    expect(stored(store, "arcpreflight.workflow:/testnet")[ACCOUNT.toLowerCase()]).toMatchObject({ orderId: order.orderId, requestId: REQUEST, handoff: "demo" }); // the Developer page on /testnet picks it up
+    expect(Object.keys(stored(store, "arcpreflight.checks:/testnet") ?? {})).toEqual([REQUEST]); expect(store.has("arcpreflight.checks:root")).toBe(false);
+  });
+  it("control and concurrent variant: with no switch the hand-over is saved under /testnet; a root workflow of the same payer saved while the testnet signature is pending survives the testnet check's completion", async () => {
+    const { useWalletRun } = await import("../src/lib/walletRun");
+    const { saveWorkflow } = await import("../src/lib/workflow");
+    setApiBase("/testnet"); testnetApi(); const store = memStorage();
+    let resolve: ((s: string) => void) | null = null; h.sign.mockImplementation(() => new Promise<string>((res) => { resolve = res; }));
+    let hook = render(() => useWalletRun(h.net, h.wallet));
+    const started = hook.start({ id: "APPROVED_PAYMENT", proxy: "MAIN", merchant: MERCHANT } as any);
+    for (let i = 0; i < 100 && !resolve; i++) await flush(); if (!resolve) throw new Error("the wallet was never asked");
+    saveWorkflow({ payer: ACCOUNT, orderId: ROOT_ORDER, proxy: "MAIN", baselineDigest: null, approved: true, requestId: null, intent: null, attemptId: null, handoff: null }, ""); // the root page, meanwhile, for the same payer
+    resolve!(`0x${"01".repeat(65)}`); await started; hook = render(() => useWalletRun(h.net, h.wallet));
+    expect(hook.run.handoff).toBe(true);
+    expect(stored(store, "arcpreflight.workflow:root")[ACCOUNT.toLowerCase()].orderId).toBe(ROOT_ORDER);
+    expect(stored(store, "arcpreflight.workflow:/testnet")[ACCOUNT.toLowerCase()]).toMatchObject({ orderId: order.orderId, handoff: "demo" });
+  });
+  it("reproduction (Developer execution): the attempt of an execution started on /testnet is remembered under /testnet after the mid-prompt switch to root, and the listing refresh that follows reads /testnet", async () => {
+    setApiBase("/testnet"); const { paths } = testnetApi(); const store = memStorage();
+    let release: ((h: string) => void) | null = null;
+    h.wallet.provider.request.mockImplementation(async ({ method }: { method: string }) => (method === "eth_sendTransaction" ? new Promise((r) => { release = r; }) : method === "eth_accounts" ? [ACCOUNT] : method === "eth_chainId" ? "0x4cef52" : "0x1"));
+    let tree = await createDeveloperOrder(); await button(tree, "Get quote").props.onClick(); tree = render(Developer);
+    await button(tree, "Sign TransferWithAuthorization").props.onClick(); render(Developer); await flush(); tree = render(Developer);
+    const pending = button(tree, "Execute with your wallet").props.onClick();
+    for (let i = 0; i < 100 && !release; i++) await flush(); if (!release) throw new Error("the wallet was never asked");
+    expect(stored(store, "arcpreflight.attempts:/testnet")[ATTEMPT_ID]).toMatchObject({ state: "VALIDATED", promptState: "PROMPTED" }); // remembered before the prompt, under /testnet
+    const before = paths.length;
+    setApiBase(""); release!(D); await pending; render(Developer); await flush(); tree = render(Developer);
+    expect(fnNode(tree, "AttemptPanel").props.attempt.state).toBe("CONFIRMED");
+    expect(stored(store, "arcpreflight.attempts:/testnet")[ATTEMPT_ID].state).toBe("CONFIRMED"); expect(store.has("arcpreflight.attempts:root")).toBe(false); // the states the polls brought back landed under /testnet (they used to land under root)
+    const after = paths.slice(before);
+    expect(after).toEqual(expect.arrayContaining([`/testnet/v1/wallet/attempts/${ATTEMPT_ID}/sent`, `/testnet/v1/demo/orders`, `/testnet/v1/wallet/attempts`, `/testnet/v1/demo/orders/${order.orderId}`])); // the hash report, the polls, the listing refresh and the order re-read …
+    expect(after.filter((p) => !p.startsWith("/testnet/"))).toEqual([]); // … all on the instance the execution began on
   });
 });
