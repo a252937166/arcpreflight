@@ -1,0 +1,94 @@
+{
+  "network": "mainnet",
+  "chainId": 5042,
+  "at": "2026-10-10T00:52:09.710Z",
+  "deployer": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
+  "balanceNativeAtomic": "4499159999957958000",
+  "nonce": 2,
+  "baseFeeGwei": 20,
+  "maxFeeGwei": 24.000002456,
+  "caps": {
+    "label": "deploy",
+    "network": "mainnet",
+    "perTxCapUsdc": "0.05",
+    "totalCapUsdc": "0.15",
+    "maxFeeCeilingGwei": "40",
+    "committedUsdc": "0",
+    "remainingUsdc": "0.15",
+    "entries": []
+  },
+  "steps": [
+    {
+      "key": "implA",
+      "label": "deploy implementation A (DemoMerchantV1)",
+      "gas": "1076707",
+      "source": "live estimate",
+      "gasLimit": "1292049",
+      "worstUsdc": "0.031009179173272344",
+      "expectedUsdc": "0.021534142644392392"
+    },
+    {
+      "key": "implB",
+      "label": "deploy implementation B (DemoMerchantV2)",
+      "gas": "1105057",
+      "source": "live estimate",
+      "gasLimit": "1326069",
+      "worstUsdc": "0.031825659256825464",
+      "expectedUsdc": "0.022101142714019992"
+    },
+    {
+      "key": "proxyMAIN",
+      "label": "deploy MAIN proxy on A",
+      "gas": "178416",
+      "source": "measured on testnet",
+      "gasLimit": "214100",
+      "worstUsdc": "0.0051384005258296",
+      "expectedUsdc": "0.003568320438189696"
+    },
+    {
+      "key": "proxyCHANGED",
+      "label": "deploy CHANGED proxy on A",
+      "gas": "178416",
+      "source": "measured on testnet",
+      "gasLimit": "214100",
+      "worstUsdc": "0.0051384005258296",
+      "expectedUsdc": "0.003568320438189696"
+    },
+    {
+      "key": "creatorMAIN",
+      "label": "setOrderCreator on MAIN",
+      "gas": "52167",
+      "source": "measured on testnet",
+      "gasLimit": "62601",
+      "worstUsdc": "0.001502424153748056",
+      "expectedUsdc": "0.001043340128122152"
+    },
+    {
+      "key": "creatorCHANGED",
+      "label": "setOrderCreator on CHANGED",
+      "gas": "52167",
+      "source": "measured on testnet",
+      "gasLimit": "62601",
+      "worstUsdc": "0.001502424153748056",
+      "expectedUsdc": "0.001043340128122152"
+    },
+    {
+      "key": "upgrade",
+      "label": "upgrade CHANGED proxy A -> B",
+      "gas": "37633",
+      "source": "measured on testnet",
+      "gasLimit": "45160",
+      "worstUsdc": "0.00108384011091296",
+      "expectedUsdc": "0.000752660092426648"
+    }
+  ],
+  "totalWorstUsdc": "0.07720032790016608",
+  "totalExpectedUsdc": "0.053611266583462728",
+  "predicted": {
+    "implA": "0x00e393aCDCD8cfBef4Ab5D0F826bEBD87bf4Ae14",
+    "implB": "0x816Ca9Da6D3A316D9b4cFf414890b07cBC95B399",
+    "MAIN": "0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc",
+    "CHANGED": "0x3bc7340CfE664c3b09D4e64d1B7dE239F6748605"
+  },
+  "problems": []
+}

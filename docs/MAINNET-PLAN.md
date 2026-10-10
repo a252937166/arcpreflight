@@ -9,11 +9,11 @@ evidence is recorded; opening it and pushing to GitHub are separate approvals.
 
 | | |
 |---|---|
-| Release (code) | **`305882d`** — the last commit that changed what runs on the server (`apps`, `packages`, workspace files). Docs-only commits keep the label; `ops/deploy.sh` refuses uncommitted code or fixtures. |
-| Running now | the public **testnet** preview at `https://arcpreflight.axiqo.xyz` runs `305882d` (2026-10-09); before it `4345ed6`, `aac0454`, `78c8dc2` and `3749ae2`. Lifecycle on `305882d`: wallet attempt CONFIRMED, labelled interruption reconciled, verifier 10 PASS, measured project outflow 0.0664 of 0.12 USDC (`evidence/selftest/testnet-lifecycle-2026-10-09T16-00-57-215Z.json`). |
+| Release (code) | **`ed1d501`** — the last commit that changed what runs on the server (`apps`, `packages`, workspace files). Docs-only commits keep the label; `ops/deploy.sh` refuses uncommitted code or fixtures. |
+| Running now | the public **testnet** preview at `https://arcpreflight.axiqo.xyz` runs `ed1d501` (deployed 2026-10-10 00:45Z); before it `305882d` (the release of the real-wallet re-run), `4345ed6`, `aac0454`, `78c8dc2` and `3749ae2`. `ed1d501` changes the web presentation only (the decision waits for the approval read; one shared balance per wallet); the API, runner and scripts are those of `305882d`. Lifecycle on `ed1d501`: wallet attempt `b98475b9…` CONFIRMED (`0xfc359887…`, block 66,394,336), labelled interruption `fed57253…` reconciled CONFIRMED with 0 orders and 0 signatures added, verifier 10 PASS, measured project outflow 0.0669 of 0.12 USDC (`evidence/selftest/testnet-lifecycle-2026-10-10T00-49-12-665Z.json`). |
 | Found in the testnet rehearsals | the public Arc testnet RPC sometimes routes `eth_sendRawTransaction` to a node that answers "method does not exist / is not available" (seen for a runner payment, an order creation and a fee relay on 2026-10-09). From `78c8dc2` the runner, and from `aac0454` order creation, the fee relay and the faucet, sign locally, record the hash before the broadcast and re-send only the identical signed bytes; an order whose creation is not confirmed answers 202 with its identity and is reconciled, never replaced. A node that has a transaction but not yet its receipt made viem give up about a second after the send; from `4345ed6` every receipt is waited for until its deadline. From `305882d` the deploy, fund and relay-probe scripts also sign locally, write the hash into the spend ledger before the broadcast and re-send only identical bytes. |
-| Tests on `305882d` | `pnpm -r test` exit 0: web 202, API 168, runner 61, client 22, verifier 43, passport 24, schema 11, policy 16, observer 2; typecheck incl. scripts; public build without the test wallet. |
-| Read-only preflight | `ops/mainnet-cutover.sh preflight` on release `305882d`, 2026-10-09 ≈16:07Z: release clean; fund, deploy and probe preflights **OK**, nothing signed (`evidence/preflight/cutover-preflight-mainnet-2026-10-09T16-07Z.txt`, `evidence/preflight/deploy-mainnet-2026-10-09T16-07-13-429Z.json`); identical to the runs on `3749ae2`, `78c8dc2` and `aac0454`. |
+| Tests on `ed1d501` | `pnpm -r test` exit 0: web 212, API 168, runner 61, client 22, verifier 43, passport 24, schema 11, policy 16, observer 2; typecheck incl. scripts; public build without the test wallet. |
+| Read-only preflight | `ops/mainnet-cutover.sh preflight` on release `ed1d501`, 2026-10-10 00:52Z: release clean; fund, deploy and probe preflights **OK**, nothing signed (`evidence/preflight/cutover-preflight-mainnet-2026-10-10T00-52Z.txt`, `evidence/preflight/deploy-mainnet-2026-10-10T00-52-09-710Z.json`); balances, nonces, worst cases and predicted addresses identical to the runs on `3749ae2`, `78c8dc2`, `aac0454` and `305882d`. |
 
 ## Accounts (Arc mainnet, read 2026-10-09)
 
@@ -36,7 +36,7 @@ signs is capped at a 40 gwei max fee; above it nothing is sent.
 | 1 | `deploy` | deployer-admin | implementation A, implementation B, MAIN proxy on A, CHANGED proxy on A, `setOrderCreator` ×2, upgrade CHANGED A→B. Predicted addresses (nonce 2–5): implA `0x00e393aCDCD8cfBef4Ab5D0F826bEBD87bf4Ae14`, implB `0x816Ca9Da6D3A316D9b4cFf414890b07cBC95B399`, MAIN `0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc`, CHANGED `0x3bc7340CfE664c3b09D4e64d1B7dE239F6748605` | gas 0.0536 | 0.05 per transaction, 0.15 total (worst case 0.0772) |
 | 2 | `fund` | deployer-admin | +0.10 USDC to order-creator, +0.05 to visitor-rehearsal (allow-listed project keys; balances read back) | 0.15 moved inside the project + gas 0.0008 | 0.20 per transfer, 0.20 total incl. value (worst 0.1512) |
 | 3 | `probe` | demo-runner, merchant-payto | ONE 0.01 USDC check fee (EIP-3009) relayed by merchant-payto, proven by its logs — before `server`, so no API relays with that key on mainnet yet | fee 0.01 inside the project + gas ≈ 0.0018 | 0.016 per transaction, 0.02 total; relay gas ≤ 0.005 |
-| 4 | commit | — | `fixtures/deployments-mainnet.json` and the deploy / fund / probe evidence (the release bundle ships `fixtures/`; the label stays `305882d`) | — | — |
+| 4 | commit | — | `fixtures/deployments-mainnet.json` and the deploy / fund / probe evidence (the release bundle ships `fixtures/`; the label stays `ed1d501`) | — | — |
 | 5 | `server` | — (no chain spend) | root → Arc mainnet with `PUBLIC_EXECUTION=0` written explicitly, daily caps sized for acceptance (14 runs; business 0.25, fees 0.15, gas 0.15 USDC), no faucet; testnet moves to `/testnet` and keeps the current public database; order-creator key on, deployer-admin key off. Then verified: network, release, order signer, deployer key absent, gate probes 503 — **any failure stops the mainnet service** | — | — |
 | 6 | `baselines` | — (admin API) | approve MAIN (live A) and CHANGED (pinned to A) at a pinned mainnet block | — | — |
 | 7 | `gatecheck` | — | `publicExecution=false`; run / order / attempt probes from a visitor answer 503 | — | — |
@@ -74,7 +74,7 @@ Any of these stops the plan; nothing further is sent, the evidence (including `-
 5. The gate is not closed before acceptance or the lifecycle (`publicExecution` true or any probe other than 503).
 6. A run with an unexpected decision or outcome, an unverified fee or business transaction, a passport with a FAIL finding, or measured outflow that would pass a cap.
 7. A business transaction left `BROADCAST_ATTEMPTED` for more than 10 minutes: reconcile first, no new run.
-8. The RPC reports a chain other than 5042, or the running release is not `305882d` (or an approved successor).
+8. The RPC reports a chain other than 5042, or the running release is not `ed1d501` (or an approved successor).
 
 ## Approvals needed
 
