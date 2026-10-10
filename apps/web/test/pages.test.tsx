@@ -28,6 +28,7 @@ import Verify from "../src/pages/Verify";
 import Home from "../src/pages/Home";
 import Evidence from "../src/pages/Evidence";
 import Integrate from "../src/pages/Integrate";
+import Reference from "../src/pages/Reference";
 import { AMBIGUOUS_TEXT, UNCERTAIN_OPEN_TEXT, UNCERTAIN_TEXT, resetExecutionGuard } from "../src/lib/attempts";
 import { RunPanel, RecoveryDesk, messageOf, headlineOf, orderResultOf } from "../src/components/RunPanel";
 import { WalletChip } from "../src/components/WalletChip";
@@ -1863,5 +1864,35 @@ describe("how to use (usage guide, 2026-10-10) · three ways in, one lifecycle",
     const home = render(Home);
     expect(WAYS_.map((w) => fnNode(home, "WayTiles").props.hrefFor(w))).toEqual(["/integrate#api", "/integrate#cli", "/integrate#browser"]);
     const ht = content(home); expect(ht).toContain("Three ways in."); expect(ht).toContain("Watch a project-funded demo"); expect(ht).toContain("Try with my wallet"); expect(ht).toContain("How to use it");
+  });
+});
+
+describe("API reference page (2026-10-10) · the instance's document, grouped and readable", () => {
+  const DOC = { openapi: "3.0.3", info: { title: "ArcPreflight API", version: "abc1234", description: "profile=SUBMISSION_RESTRICTED; network=eip155:5042002. A note." },
+    paths: { "/v1/network": { get: { summary: "the instance", responses: { 200: { description: "now" } } } },
+      "/v1/demo/orders": { post: { summary: "create an order", security: [{ bearer: [] }], requestBody: { content: { "application/json": { schema: { type: "object", properties: { payer: { type: "string", format: "0x address" }, proxy: { type: "string", enum: ["MAIN", "CHANGED"] } }, required: ["payer"] } } } }, responses: { 201: { description: "created" }, 401: { description: "no token" } } } } },
+    components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } } } };
+  /** a card, expanded one level, plus the shapes it renders (Shape is a hook-free child component, so it is called like the card itself) */
+  const cards = (tree: any) => nodes(tree).filter((n) => typeof n.type === "function" && n.type.name === "OperationCard").map((n) => { const card = n.type(n.props); const shapes = nodes(card).filter((x) => typeof x.type === "function" && x.type.name === "Shape").map((x) => content(x.type(x.props))); return { props: n.props, rendered: [content(card), ...shapes].join(" ") }; });
+  it("reads GET /openapi.json of the selected instance, lists the groups in the index and renders one card per operation with method, path, access, body skeleton and responses", async () => {
+    const paths: string[] = []; vi.stubGlobal("fetch", vi.fn(async (path: string) => { paths.push(path); if (path.endsWith("/openapi.json")) return response(DOC); throw new Error(`unexpected ${path}`); }));
+    render(Reference); await flush(); const tree = render(Reference);
+    expect(paths).toEqual(["/openapi.json"]);
+    expect(content(tree)).toContain("2 operations, release abc1234");
+    expect(nodes(tree).filter((n) => n.type === "a" && String(n.props.href).startsWith("#op-")).map((n) => n.props.href)).toEqual(["#op-get-v1-network", "#op-post-v1-demo-orders"]); // the index
+    expect(nodes(tree).filter((n) => n.type === "h2").map(content)).toEqual([expect.stringContaining("Network and public reads"), expect.stringContaining("Orders")]);
+    const [network, order] = cards(tree);
+    expect(network.props.op.method).toBe("GET"); expect(network.rendered).toContain("open"); expect(network.rendered).toContain("the instance");
+    expect(order.props.op.secured).toBe(true); expect(order.rendered).toContain("bearer"); expect(order.rendered).toContain('\\"payer\\": string (0x address)'); expect(order.rendered).toContain('\\"proxy?\\": \\"MAIN\\" | \\"CHANGED\\"'); // the harness serializes the rendered text, so its quotes read escaped expect(order.rendered).toContain("201"); expect(order.rendered).toContain("no token");
+    expect(order.rendered).toContain("http://offline.invalid/v1/demo/orders"); // the full URL on this instance
+  });
+  it("on the /testnet instance the document is read there and the URLs carry the base; a failed read is said, not hidden", async () => {
+    h.ctx = { base: "/testnet", link: (to: string) => `${to}?net=testnet` }; setApiBase("/testnet");
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => (path === "/testnet/openapi.json" ? response(DOC) : response({ error: "NOT_FOUND" }, 404))));
+    render(Reference); await flush(); let tree = render(Reference);
+    expect(cards(tree)[0].rendered).toContain("http://offline.invalid/testnet/v1/network");
+    freshHooks(); h.ctx = {}; setApiBase(""); vi.stubGlobal("fetch", vi.fn(async () => response({ error: "UNAVAILABLE", reason: "down" }, 503)));
+    render(Reference); await flush(); tree = render(Reference);
+    expect(content(nodes(tree).find((n) => n.props?.role === "alert"))).toContain("could not be read");
   });
 });

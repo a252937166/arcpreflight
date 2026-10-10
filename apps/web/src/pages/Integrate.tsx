@@ -162,9 +162,9 @@ ARC_NET=testnet $A passport <attemptId> --out ./passport`;
             <div className="stack" style={{ gap: 20 }}>
               <p className="kicker">How to use ArcPreflight · {netName(net?.network)}</p>
               <h1>Three ways in.<br />One lifecycle.</h1>
-              <p className="lead">An order is created, approved, checked, paid, recovered if its result went missing, exported as a Payment Passport and verified by anyone. Drive those seven stages from your own code over the HTTP API, from the command line in your own process, or in this browser with your wallet.</p>
+              <p className="lead">Create an order, approve it, check it, pay it, recover it if needed, export its Payment Passport, verify it anywhere. Seven stages, driven from your code, your terminal or this browser.</p>
               <WayTiles hrefFor={(w) => w.anchor} />
-              <p className="mcp-line">MCP: this release has no MCP server. An MCP-capable agent uses the HTTP API through its own fetch tool; the routes below are enough.</p>
+              <p className="mcp-line">MCP: this release has no MCP server. An MCP-capable agent uses the HTTP API.</p>
             </div>
             <InstanceCard net={net} apiBase={apiBase} counts={counts} />
           </div>
@@ -175,7 +175,7 @@ ARC_NET=testnet $A passport <attemptId> --out ./passport`;
         <div className="container">
           <div className="ways-head">
             <h2 id="matrix-title">What each way does, stage by stage.</h2>
-            <p className="muted small" style={{ maxWidth: 760 }}>The seven stages are the ones the wallet workflow walks through. Every route, command and step here is the real one on this instance.</p>
+            <p className="muted" style={{ maxWidth: 760 }}>Real routes, real commands, the real steps on this instance.</p>
           </div>
           <div className="matrix-wrap">
             <table className="matrix">
@@ -200,23 +200,23 @@ ARC_NET=testnet $A passport <attemptId> --out ./passport`;
 
       <section id="api" className="way" style={hue(api_)} tabIndex={-1} aria-labelledby="way-api">
         <div className="container">
-          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-api">HTTP API</h2><p className="muted">Your app or agent calls <code>{apiBase}/v1</code> with JSON. Two things get signed, each by your own wallet or key: one EIP-3009 authorization for the {price} check fee, relayed by the service and settled on Arc, and the payment transaction itself, which you send and pay the gas for. The service never holds your keys.</p></div></div>
+          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-api">HTTP API</h2><p className="muted">Your app calls <code>{apiBase}/v1</code> with JSON. Your own wallet or key signs two things: the {price} fee authorization and the payment transaction. The service never holds your keys.</p></div></div>
           <div className="way-body">
             <div className="stack" style={{ gap: 14 }}>
               <h3>What it does</h3>
               <dl className="fn-list">
-                <div><dt><code>GET /v1/network</code></dt><dd>Chain, head, price, fixtures, budget and execution availability. No token.</dd></div>
-                <div><dt><code>POST /v1/session</code></dt><dd>An anonymous bearer token for this agent or browser. It owns what you create next.</dd></div>
-                <div><dt><code>POST /v1/demo/orders</code></dt><dd>An order payable only by your wallet on the MAIN or CHANGED proxy; read it back until confirmed.</dd></div>
-                <div><dt><code>GET /v1/baselines/{"{digest}"}</code></dt><dd>The approved baseline an order references, with its revocation state.</dd></div>
-                <div><dt><code>POST /v1/preflight</code></dt><dd>The x402 check: a 402 quote, then the pinned report once your fee authorization settles.</dd></div>
-                <div><dt><code>GET /v1/requests/{"{id}"}</code></dt><dd>The paid check as recorded: payment state, report, passport availability. Recovery sits next to it.</dd></div>
-                <div><dt><code>POST /v1/wallet/attempts</code></dt><dd>Validation of the exact plan at a fresh block, recorded before your wallet is asked.</dd></div>
-                <div><dt><code>…/{"{id}"}/prompt · /sent · /recover · /abandon</code></dt><dd>The exclusive prompt claim, the hash report, reconciliation from the chain, and the explicit "nothing was sent".</dd></div>
-                <div><dt><code>GET …/{"{id}"}/passport</code></dt><dd>The Payment Passport of an attempt, a paid check or a public demo run.</dd></div>
-                <div><dt><code>GET /v1/public-reports · /v1/subjects/{"{address}"} · /v1/demo/runs · /v1/evidence</code></dt><dd>Public reads: sample reports, curated object observation, every demo run, every published evidence file.</dd></div>
+                <div><dt><code>GET /v1/network</code></dt><dd>Chain, head, price, fixtures, execution availability. No token.</dd></div>
+                <div><dt><code>POST /v1/session</code></dt><dd>A bearer token that owns what you create.</dd></div>
+                <div><dt><code>POST /v1/demo/orders</code></dt><dd>An order payable only by your wallet.</dd></div>
+                <div><dt><code>GET /v1/baselines/{"{digest}"}</code></dt><dd>The approved baseline and its revocation state.</dd></div>
+                <div><dt><code>POST /v1/preflight</code></dt><dd>The x402 check: a quote, then the pinned report.</dd></div>
+                <div><dt><code>GET /v1/requests/{"{id}"}</code></dt><dd>The paid check as recorded, with recovery next to it.</dd></div>
+                <div><dt><code>POST /v1/wallet/attempts</code></dt><dd>The exact plan, validated and recorded before any prompt.</dd></div>
+                <div><dt><code>…/{"{id}"}/prompt · /sent · /recover · /abandon</code></dt><dd>Claim, hash, reconciliation, explicit rejection.</dd></div>
+                <div><dt><code>GET …/{"{id}"}/passport</code></dt><dd>The Payment Passport of an attempt, a check or a run.</dd></div>
+                <div><dt><code>GET /v1/public-reports · /v1/subjects/{"{address}"} · /v1/demo/runs · /v1/evidence</code></dt><dd>Sample reports, observed contracts, runs, evidence files.</dd></div>
               </dl>
-              <p className="small muted">The complete request and response shapes are in the <a href={apiPath("/openapi.json")} target="_blank" rel="noreferrer">OpenAPI document</a> this instance serves; the intent and policy types are in the <a href={requestContractsDownload} download="arcpreflight-schema.ts">request schema</a>.</p>
+              <p className="muted">Every request and response shape is in the <Link to={link("/api")}>API reference</Link>.</p>
             </div>
             <div className="stack" style={{ gap: 14 }}>
               <Snippet label="Read this instance" code={readInstance} />
@@ -232,18 +232,18 @@ ARC_NET=testnet $A passport <attemptId> --out ./passport`;
 
       <section id="cli" className="way" style={hue(cli)} tabIndex={-1} aria-labelledby="way-cli">
         <div className="container">
-          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-cli">Command line</h2><p className="muted">Two programs in the repository. The verifier needs nothing from this service: a passport file, an Arc RPC and the anchors you trust. The reference agent runs the whole lifecycle from a durable store against an API you configure, and restarts into recovery instead of paying again. The packages are workspace libraries, not on npm, and the public repository currently holds an earlier release.</p></div></div>
+          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-cli">Command line</h2><p className="muted">Two programs in the repository. The verifier needs only a passport, an Arc RPC and anchors you trust. The reference agent runs the lifecycle from a durable store and restarts into recovery. Not on npm; the public repository holds an earlier release.</p></div></div>
           <div className="way-body">
             <div className="stack" style={{ gap: 14 }}>
               <h3>What it does</h3>
               <dl className="fn-list">
-                <div><dt><code>arcpreflight-verify &lt;passport&gt; --rpc --anchors</code></dt><dd>Re-hashes every record, checks disclosure, re-reads the fee, the transaction and the order on Arc, recomputes the cost statement, checks the approval against your anchors. Exit 0, or 2 on a FAIL.</dd></div>
-                <div><dt><code>merchant-agent run &lt;FIXTURE&gt;</code></dt><dd>Creates the order, buys the pinned report, decides, re-validates, signs exactly the plan, broadcasts, reads the outcome, writes every receipt to its store.</dd></div>
-                <div><dt><code>merchant-agent run … --crash-after-broadcast</code></dt><dd>Stops right after the send, like a crashed process: the hash is on disk, nothing is re-signed.</dd></div>
-                <div><dt><code>merchant-agent reconcile</code></dt><dd>Resolves every open attempt from the store and the chain; the only way a crashed run continues.</dd></div>
-                <div><dt><code>merchant-agent list · passport &lt;id&gt;</code></dt><dd>Lists the stored runs; exports one as a passport directory, public or private disclosure.</dd></div>
+                <div><dt><code>arcpreflight-verify &lt;passport&gt; --rpc --anchors</code></dt><dd>Re-hashes, re-reads the chain, checks the anchors. Exit 0, or 2 on a FAIL.</dd></div>
+                <div><dt><code>merchant-agent run &lt;FIXTURE&gt;</code></dt><dd>Order, report, decision, validation, signature, broadcast, outcome, receipts.</dd></div>
+                <div><dt><code>merchant-agent run … --crash-after-broadcast</code></dt><dd>Stops right after the send, like a crash.</dd></div>
+                <div><dt><code>merchant-agent reconcile</code></dt><dd>Resolves open attempts; the only way a crashed run continues.</dd></div>
+                <div><dt><code>merchant-agent list · passport &lt;id&gt;</code></dt><dd>Lists stored runs; exports one as a passport.</dd></div>
               </dl>
-              <p className="small muted">Fixtures: <code>APPROVED_PAYMENT</code>, <code>CHANGED_IMPLEMENTATION</code>, <code>AMOUNT_UNIT_MISMATCH</code>. A run spends the runner key's testnet funds: the {price} fee, the order amount and gas.</p>
+              <p className="muted">Fixtures: <code>APPROVED_PAYMENT</code>, <code>CHANGED_IMPLEMENTATION</code>, <code>AMOUNT_UNIT_MISMATCH</code>. A run spends the runner key's testnet funds.</p>
             </div>
             <div className="stack" style={{ gap: 14 }}>
               <Snippet label="Get the checkout" code={setupCheckout} />
@@ -257,29 +257,25 @@ ARC_NET=testnet $A passport <attemptId> --out ./passport`;
 
       <section id="browser" className="way" style={hue(browser)} tabIndex={-1} aria-labelledby="way-browser">
         <div className="container">
-          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-browser">Browser</h2><p className="muted">Nothing to install. The live demo spends project funds on real testnet orders, interruption included. The wallet workflow walks the same seven stages with your own wallet, which signs the fee and the payment; the testnet faucet funds it. Both end in a passport you can verify here or in a clean process.</p></div></div>
+          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-browser">Browser</h2><p className="muted">Nothing to install. The live demo spends project funds on real testnet orders. The wallet workflow runs the same seven stages with your wallet. Both end in a passport.</p></div></div>
           <div className="way-body">
             <div className="stack" style={{ gap: 14 }}>
               <h3>What it does</h3>
               <dl className="fn-list">
-                <div><dt><Link className="plain" to={link("/demo")}>Live demo</Link></dt><dd>Three fixed scenarios paid by the project's runner: an approved payment, an unapproved implementation change, a wrong-units amount. Watch the receipts arrive; rehearse an interruption; use the recovery desk.</dd></div>
-                <div><dt><Link className="plain" to={link("/developer")}>Wallet workflow</Link></dt><dd>Create an order, approve, buy the check, execute with your wallet, recover, export your passport, verify it. Your records persist in this browser per network.</dd></div>
-                <div><dt><Link className="plain" to={link("/verify")}>Verify</Link></dt><dd>Drop a passport here: the same findings as the command line, labelled as not independent of this site.</dd></div>
-                <div><dt><Link className="plain" to={link("/inspect")}>Inspect</Link></dt><dd>Raw observation of the sample contracts at a pinned block: code hash, proxy slots, implementation.</dd></div>
-                <div><dt><Link className="plain" to={link("/evidence")}>Evidence</Link></dt><dd>Every published file, every demo run, every sample report of this instance.</dd></div>
+                <div><dt><Link className="plain" to={link("/demo")}>Live demo</Link></dt><dd>Three scenarios paid by the project's runner, interruption and recovery desk included.</dd></div>
+                <div><dt><Link className="plain" to={link("/developer")}>Wallet workflow</Link></dt><dd>Order, approve, check, execute, recover, export, verify. Your wallet, your passport.</dd></div>
+                <div><dt><Link className="plain" to={link("/verify")}>Verify</Link></dt><dd>Drop a passport here: the same findings as the command line.</dd></div>
+                <div><dt><Link className="plain" to={link("/inspect")}>Inspect</Link></dt><dd>The sample contracts observed at a pinned block.</dd></div>
+                <div><dt><Link className="plain" to={link("/evidence")}>Evidence</Link></dt><dd>Every published file, run and sample report.</dd></div>
               </dl>
             </div>
             <div className="stack" style={{ gap: 14 }}>
               <div className="panel soft stack" style={{ gap: 12 }}>
                 <h3 style={{ color: "var(--ink)" }}>Start here</h3>
-                <p className="small muted">The demo needs no wallet. The wallet workflow needs a wallet on {netName(net?.network)}{net?.faucet?.enabled ? `; the faucet sends ${(Number(BigInt(net.faucet.amountNativeAtomic)) / 1e18).toFixed(2)} testnet USDC per wallet and day` : ""}.</p>
+                <p className="muted">The demo needs no wallet. The wallet workflow needs a wallet on {netName(net?.network)}{net?.faucet?.enabled ? `; the faucet sends ${(Number(BigInt(net.faucet.amountNativeAtomic)) / 1e18).toFixed(2)} testnet USDC per wallet and day` : ""}.</p>
                 <div className="row"><Link to={link("/demo")} className="btn primary">Run the demo</Link><Link to={link("/developer")} className="btn">Try with my wallet</Link></div>
               </div>
-              <div className="panel soft stack" style={{ gap: 10 }}>
-                <h3 style={{ color: "var(--ink)" }}>Two signatures, two purposes</h3>
-                <p className="small muted"><b style={{ color: "var(--ink)" }}>The check fee.</b> One EIP-3009 authorization for exactly the quoted {price}. The service relays it and pays that gas in USDC; the report is delivered once it settles.</p>
-                <p className="small muted"><b style={{ color: "var(--ink)" }}>The payment.</b> Your wallet sends the validated transaction and pays its gas. The service records the hash and reads the outcome from Arc; it never sees the signed bytes before they leave.</p>
-              </div>
+              <p className="muted">Your wallet signs twice: one EIP-3009 authorization for the {price} fee, relayed by the service, and the payment transaction itself. The service records the hash and reads the outcome from Arc.</p>
             </div>
           </div>
         </div>
@@ -289,14 +285,14 @@ ARC_NET=testnet $A passport <attemptId> --out ./passport`;
         <div className="container">
           <div className="ref-strip">
             <span className="small muted">Reference:</span>
-            <a href={apiPath("/openapi.json")} target="_blank" rel="noreferrer" className="btn sm">OpenAPI document</a>
+            <Link to={link("/api")} className="btn sm">API reference</Link>
             <a href={lifecycleDownload} download="arcpreflight-lifecycle.md" className="btn sm">Lifecycle contract</a>
             <a href={requestContractsDownload} download="arcpreflight-schema.ts" className="btn sm">Request schemas</a>
             <a href={authorizationHelperDownload} download="arcpreflight-eip3009.ts" className="btn sm">EIP-3009 signing helper</a>
             <a href={REPOSITORY} target="_blank" rel="noreferrer" className="btn sm">Repository</a>
           </div>
           <div className="ways-close">
-            <div className="stack" style={{ gap: 4 }}><h3>Start with one complete run.</h3><p className="small muted">The check, the payment outcome, the recovery record and the exported passport, together.</p></div>
+            <div className="stack" style={{ gap: 4 }}><h3>Start with one complete run.</h3><p className="muted">The check, the outcome, the recovery record and the passport, together.</p></div>
             <div className="row"><Link to={link("/demo")} className="btn primary">Run the demo</Link><Link to={link("/developer")} className="btn">Try with my wallet</Link></div>
           </div>
         </div>
