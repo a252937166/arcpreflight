@@ -714,6 +714,7 @@ table.t.findings tr.fail td { background: rgba(251,113,133,0.06); }
 
 /* ---- API reference (2026-10-10): the instance's OpenAPI document as cards; hues mean methods (mint GET, sky POST) ---- */
 .ref-page .kicker { color: var(--ink-3); }
+.ref-page .lead code, .way-head code, .ways-page .lead code { overflow-wrap: anywhere; } /* a URL in prose wraps instead of widening a phone page */
 .ref-page h1 { font-size: clamp(2.3rem, 4.6vw, 3.4rem); }
 .ref-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 40px; align-items: start; }
 .ref-index { position: sticky; top: 84px; max-height: calc(100vh - 100px); overflow: auto; display: flex; flex-direction: column; gap: 16px; padding-right: 6px; }
