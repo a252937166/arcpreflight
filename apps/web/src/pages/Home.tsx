@@ -8,6 +8,7 @@ import { Pipeline } from "../components/Pipeline";
 import { Thread, type Anchor } from "../components/Thread";
 import { TwoFaces, PinnedBlocks, ReceiptChain, FacilitatorFlow, ProxySwap } from "../components/Illustrations";
 import { usdcToken } from "../lib/format";
+import { WayTiles } from "../components/WaysIn";
 
 export default function Home() {
   const { net, link = (to: string) => to } = useNet();
@@ -30,9 +31,9 @@ export default function Home() {
             <p className="arc-logo-note">built on <b>Arc</b> — Circle's chain where <b>USDC is the gas</b>, chain id {net?.chainId ?? 5042}, ~1 s blocks</p>
           </div>
           <div className="home-entry-bar">
-            <p className="home-format">HTTP API + browser workbench</p>
+            <p className="home-format">Three ways in: HTTP API, command line, browser</p>
             <div className="home-actions">
-              <Link to={link("/integrate")} className="btn primary">Integrate via API</Link>
+              <Link to={link("/integrate")} className="btn primary">How to use it</Link>
               <Link to={link("/demo")} className="btn" title="the project's runner pays from project funds; no wallet needed">Watch a project-funded demo</Link>
             </div>
           </div>
@@ -64,13 +65,12 @@ export default function Home() {
       <section className="section-tight">
         <div className="container">
           <div className="home-use" aria-label="how to use ArcPreflight">
-            <h2>Choose how to use ArcPreflight.</h2>
-            <div className="home-use-paths">
-              <div className="home-use-path"><h3>HTTP API</h3><p>Connect your app or agent to the hosted service for orders, checks, recorded attempts and recovery.</p><Link to={`${link("/integrate")}#http-api`} className="btn sm">Read the API guide</Link></div>
-              <div className="home-use-path"><h3>Browser workflow</h3><p>Try the payment lifecycle with your wallet. Use the project-funded demo first if you want to explore without connecting.</p><Link to={link("/developer")} className="btn sm">Try with my wallet</Link></div>
-              <div className="home-use-path"><h3>CLI examples</h3><p>Run the reference agent from the repository, or verify an exported Passport in a separate process.</p><Link to={`${link("/integrate")}#cli`} className="btn sm">See CLI commands</Link></div>
+            <div className="row between" style={{ alignItems: "baseline", gap: 12 }}>
+              <h2>Three ways in.</h2>
+              <Link to={link("/integrate")} className="small">What each one does, stage by stage</Link>
             </div>
-            <p className="home-availability">MCP is not available. The TypeScript libraries and CLI examples exist in the current checkout; publication of this release's source is pending.</p>
+            <WayTiles compact hrefFor={(w) => `${link("/integrate")}${w.anchor}`} />
+            <p className="mcp-line" style={{ marginTop: 14 }}>MCP: not in this release. An MCP-capable agent uses the HTTP API through its own fetch tool.</p>
             <p className="small muted home-quick-links"><Link to={link("/verify")}>Verify a passport</Link><Link to={link("/inspect")}>Inspect the sample contracts</Link><span>A check costs {net ? usdcToken(net.priceTokenAtomic) : "0.01 USDC"}; the current payment adapter supports DemoMerchant orders.</span></p>
           </div>
         </div>

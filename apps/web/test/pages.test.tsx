@@ -27,6 +27,7 @@ import Demo from "../src/pages/Demo";
 import Verify from "../src/pages/Verify";
 import Home from "../src/pages/Home";
 import Evidence from "../src/pages/Evidence";
+import Integrate from "../src/pages/Integrate";
 import { AMBIGUOUS_TEXT, UNCERTAIN_OPEN_TEXT, UNCERTAIN_TEXT, resetExecutionGuard } from "../src/lib/attempts";
 import { RunPanel, RecoveryDesk, messageOf, headlineOf, orderResultOf } from "../src/components/RunPanel";
 import { WalletChip } from "../src/components/WalletChip";
@@ -1812,5 +1813,55 @@ describe("presentation finding 2026-10-10 · the typed narration reserves its fi
     expect(lineBoxes(tree).map((p) => String(p.props.className))).toEqual(["type-line done", "type-line done"]);
     await vi.advanceTimersByTimeAsync(4100); tree = show(); // loop: the restart
     expect(lineBoxes(tree)).toHaveLength(2); expect(lineBoxes(tree).map(ghostOf)).toEqual(lines); expect(typedOf(lineBoxes(tree)[0])).toBe("");
+  });
+});
+
+describe("how to use (usage guide, 2026-10-10) · three ways in, one lifecycle", () => {
+  // The guide shows what each way — HTTP API, command line, browser — does at every stage of the lifecycle, with this instance's real routes,
+  // commands and live facts; the home page's tiles lead to its sections. (Child components render as props-only nodes in this harness.)
+  const guideApi = () => vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+    if (path.includes("/v1/demo/runs")) return response({ runs: [], total: 38 });
+    if (path.endsWith("/v1/evidence")) return response({ files: [{ path: "a.json", bytes: 1 }, { path: "b.json", bytes: 2 }, { path: "c.json", bytes: 3 }] });
+    throw new Error(`unexpected ${path}`);
+  }));
+  const cells = (tree: any) => nodes(tree).filter((n) => n.type === "td");
+  const rowHeads = (tree: any) => nodes(tree).filter((n) => n.type === "th" && n.props?.scope === "row");
+  const snippets = (tree: any) => nodes(tree).filter((n) => typeof n.type === "function" && n.type.name === "Snippet");
+  const WAYS_ = [{ id: "api", anchor: "#api" }, { id: "cli", anchor: "#cli" }, { id: "browser", anchor: "#browser" }] as any[];
+  it("the guide: three tiles leading to the sections, a 7×3 matrix of real routes, commands and steps, the instance's live facts, copyable commands built from this instance", async () => {
+    guideApi(); h.net = { ...h.net, access: { selfService: true, session: "/v1/session", publicExecution: true, walletExecution: true }, release: "964a61b", head: "66487710", fixtures: [{ id: "APPROVED_PAYMENT", merchant: MERCHANT, title: "approved", headline: "CONFIRMED", proxy: "MAIN" }] };
+    render(Integrate); await flush(); const tree = render(Integrate);
+    expect(content(nodes(tree).find((n) => n.type === "h1"))).toContain("Three ways in");
+    expect(WAYS_.map((w) => fnNode(tree, "WayTiles").props.hrefFor(w))).toEqual(["#api", "#cli", "#browser"]); // the tiles lead to the sections of this page
+    expect(rowHeads(tree).map((th) => content(th))).toEqual(expect.arrayContaining([expect.stringContaining("create order"), expect.stringContaining("verify independently")]));
+    expect(rowHeads(tree)).toHaveLength(7); expect(cells(tree)).toHaveLength(21); // seven stages × three ways
+    expect(new Set(cells(tree).map((c) => c.props["data-way"]))).toEqual(new Set(["HTTP API", "Command line", "Browser"]));
+    const text = content(tree);
+    expect(text).toContain("POST /v1/preflight"); expect(text).toContain("arcpreflight-verify"); expect(text).toContain("run.ts reconcile"); expect(text).toContain("No API call"); // a route, two commands, an honest cell
+    expect(nodes(tree).filter((n) => n.props?.className === "m-step").map((n) => n.props.to)).toEqual(["/developer", "/developer", "/developer", "/developer", "/developer", "/developer", "/verify"]); // the browser way links to the page that holds the step
+    const cardNode = fnNode(tree, "InstanceCard"); expect(cardNode.props.apiBase).toBe("http://offline.invalid"); expect(cardNode.props.counts).toEqual({ runs: 38, files: 3 }); // the live counts arrived
+    const facts = content(cardNode.type(cardNode.props)); // the card uses no hooks: call it to read what it renders
+    expect(facts).toContain("chain 5042002"); expect(facts).toContain("0.01 USDC"); expect(facts).toContain("open: demo runs and wallet execution"); expect(facts).toContain("964a61b"); expect(facts).toContain("0 of 10"); // the harness budget: 0 used of 10 expect(facts).toContain("\"38\""); expect(facts).toContain("\"3\"");
+    const snips = snippets(tree); expect(snips.length).toBeGreaterThanOrEqual(9);
+    expect(snips[0].props.code).toContain("http://offline.invalid/v1/network"); // the commands carry this instance's origin
+    expect(snips.find((n) => n.props.label.includes("printed"))?.props.output).toBe(true); // the captured verifier run is shown as output, not as a command
+    expect(text).toContain("MCP: this release has no MCP server"); // honest about what does not exist
+    expect(nodes(tree).filter((n) => n.props?.className === "way").map((n) => n.props.id)).toEqual(["api", "cli", "browser"]);
+  });
+  it("the guide on the /testnet instance builds its commands from that base and keeps the network in its links; the copy button reports what it did", async () => {
+    guideApi(); h.ctx = { base: "/testnet", link: (to: string) => `${to}?net=testnet` }; setApiBase("/testnet");
+    const writes: string[] = []; vi.stubGlobal("navigator", { clipboard: { writeText: async (t: string) => { writes.push(t); } } });
+    render(Integrate); await flush(); const tree = render(Integrate);
+    const first = snippets(tree)[0]; expect(first.props.code).toContain("http://offline.invalid/testnet/v1/network");
+    expect(nodes(tree).filter((n) => n.props?.className === "m-step")[0].props.to).toBe("/developer?net=testnet"); // the steps keep the selected network
+    const { Snippet } = await import("../src/components/WaysIn");
+    freshHooks(); let fig = render(() => Snippet(first.props)); await button(fig, "Copy").props.onClick(); fig = render(() => Snippet(first.props));
+    expect(writes[0]).toContain("/testnet/v1/network"); expect(content(fig)).toContain("Copied");
+  });
+  it("the home page's three tiles lead to the guide's sections and its two entry labels stay", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({ runs: [] })));
+    const home = render(Home);
+    expect(WAYS_.map((w) => fnNode(home, "WayTiles").props.hrefFor(w))).toEqual(["/integrate#api", "/integrate#cli", "/integrate#browser"]);
+    const ht = content(home); expect(ht).toContain("Three ways in."); expect(ht).toContain("Watch a project-funded demo"); expect(ht).toContain("Try with my wallet"); expect(ht).toContain("How to use it");
   });
 });

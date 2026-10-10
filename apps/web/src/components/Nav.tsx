@@ -5,7 +5,7 @@ import { availableNetworks, netName, toggleVisible, withNet, type Instance, type
 import { setTargetNetwork } from "../lib/wallet";
 import { WalletChip } from "./WalletChip";
 
-const LINKS = [["/", "Overview"], ["/integrate", "API & CLI"], ["/demo", "Live demo"], ["/developer", "Wallet workflow"], ["/inspect", "Inspect"], ["/verify", "Verify"], ["/evidence", "Evidence"]] as const;
+const LINKS = [["/", "Overview"], ["/integrate", "How to use"], ["/demo", "Live demo"], ["/developer", "Wallet workflow"], ["/inspect", "Inspect"], ["/verify", "Verify"], ["/evidence", "Evidence"]] as const;
 
 /** The network switch: one button per network that an instance REPORTS (never per path); shown only when two differ. */
 export function NetworkToggle({ instances, selected, onSelect }: { instances: readonly Instance[]; selected: Instance | null; onSelect: (c: NetChoice) => void }) {

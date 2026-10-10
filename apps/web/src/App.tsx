@@ -102,7 +102,7 @@ export default function App({ testWallet }: { testWallet: boolean }) {
       <footer className="footer">
         <div className="container row between">
           <span><span className="serif" style={{ fontSize: "1.05rem", color: "var(--ink-2)" }}>ArcPreflight</span> · release <code>{net?.release ?? "…"}</code> · <code>{net?.profile ?? "…"}</code> · {net?.caip2 ?? ""}{base ? <span className="tiny dim"> · served under <code>{base}</code></span> : null}</span>
-          <span className="row" style={{ gap: 14 }}><Link to={link("/integrate")}>API & CLI guide</Link><a href={apiPath("/openapi.json")} target="_blank" rel="noreferrer">OpenAPI</a><a href="https://github.com/a252937166/arcpreflight" target="_blank" rel="noreferrer">GitHub</a><a href="https://docs.arc.io" target="_blank" rel="noreferrer">Arc docs</a></span>
+          <span className="row" style={{ gap: 14 }}><Link to={link("/integrate")}>How to use</Link><a href={apiPath("/openapi.json")} target="_blank" rel="noreferrer">OpenAPI</a><a href="https://github.com/a252937166/arcpreflight" target="_blank" rel="noreferrer">GitHub</a><a href="https://docs.arc.io" target="_blank" rel="noreferrer">Arc docs</a></span>
         </div>
       </footer>
     </NetCtx.Provider>
