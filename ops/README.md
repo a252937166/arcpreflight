@@ -121,6 +121,23 @@ The plan, budget and stop conditions are in `docs/MAINNET-PLAN.md`. `preflight` 
   this version) stops the run until `LIFECYCLE_SETTLE_OPEN=<open id>` names it after a manual check of the server's state. `--preflight` shows
   the same decisions read-only. Rehearsal hook `LIFECYCLE_STOP_AFTER=interrupt-start|wallet-order|wallet-attempt|wallet-sent` (testnet only)
   stops right after that checkpoint's durable write, the way an interrupted process would.
+  Review of `bf0c800` (P2): a recovered wallet scenario is never completed from a receipt alone. The wallet scenario keeps its anonymous session
+  and identities in a PRIVATE local store, `data/lifecycle/<net>-<planId>.sessions.json` (gitignored `data/`; token, payer, order, request,
+  attempt, plan, policy/baseline digests, hash — written as each is learned, never a key). A re-run observes the attempt through that session
+  (`CONFIRMED`/`SUCCESS`, the recorded hash, no plan mismatch, no second signature, a successful receipt, the order paid), exports the attempt's
+  passport through the session and verifies it with the CLI (0 FAIL) BEFORE the scenario counts as complete; a terminal failure (reverted,
+  mismatch, not mined) settles the visitor ledger and the plan, writes FAILED evidence and stops; an attempt still open keeps the reservation
+  ("retry later", bounded by `LIFECYCLE_RECOVERY_WAIT_MS`, default 120000 ms); without the session file only `LIFECYCLE_SETTLE_OPEN` settles it.
+  `ARCPREFLIGHT_REPO` points the verifier CLI at the repository when the script runs from another working directory (tests). Both scripts'
+  recovery flows are tested end to end against a fake API and a fake Arc RPC: `pnpm -C scripts test`.
+- **Acceptance restart (review of `bf0c800`, P1):** `scripts/selftest/mainnet.ts` records every run it starts in the plan record under
+  `run-<round>-<fixture>:key:<admission key>` (before the POST) and `:run:<run id>` (once the server named it); a closed operation moves to
+  `settledRuns`. A re-run (same `PLAN_ID`) recovers the open operations FIRST — the same fixture and admission key re-sent: the server returns the
+  run it admitted, or admits the same operation now; a cooldown/busy refusal is waited out and re-sent; a budget or fixtures-missing refusal proves
+  nothing started and releases the reservation; a lost answer, `503 EXECUTION_GATED`, `409` or any other answer proves nothing, so the reservation is
+  KEPT and the script stops — then re-reads and re-verifies the positions completed earlier (by run id), and budgets ONLY the remaining positions
+  (the dry run shows the same recovery plan). A record without a key or position stops the step for a manual check. The recovery flow is tested
+  end to end against a fake API and a fake Arc RPC: `pnpm -C scripts test` (`scripts/test/mainnet-recovery.test.ts`).
 
 ## Delayed chain RPC (acceptance row S12, testnet only)
 

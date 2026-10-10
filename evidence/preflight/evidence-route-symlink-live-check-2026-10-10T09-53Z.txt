@@ -1,0 +1,16 @@
+Evidence route live check — symbolic links (review of bf0c800, P2; ACCEPTANCE AP33-115) — release 0d1088e, public testnet preview, 2026-10-10 09:53Z
+
+Context: an alias inside evidence/ whose target was excluded (private/) could be published by the manifest route of 40c5858 (links were allowed when their target stayed inside the root).
+Fix (0d1088e): no symbolic link is published or opened — the manifest skips links, and a request whose real path differs from the path reads nothing.
+Method: three TEMPORARY entries created on the server under /opt/arcpreflight/evidence (a private/ file, a file alias into it, a directory alias of selftest/), the public route checked, the entries removed. Nothing else on the server changed.
+
+lrwxrwxrwx 1 root root 24 Oct 10 17:53 /opt/arcpreflight/evidence/selftest/zz-alias.json -> ../private/zz-check.json
+lrwxrwxrwx 1 root root  8 Oct 10 17:53 /opt/arcpreflight/evidence/zz-mirror -> selftest
+== manifest mentions of the temporary names (must be none)
+files 197 temporary names listed: []
+/v1/evidence/selftest/zz-alias.json                                                                  404
+/v1/evidence/zz-mirror/passports/testnet-wallet-2026-10-10T07-35-28-806Z.passport.json               404
+/v1/evidence/private/zz-check.json                                                                   404
+/v1/evidence/baseline-testnet-CHANGED-016e7586.json                                                  200
+0
+temporary files removed

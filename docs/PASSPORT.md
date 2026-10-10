@@ -125,6 +125,13 @@ demo run is never "your wallet"), `buyer.complete` and `operator.complete` — `
 missing (business gas with a business tx, fee relay with a fee tx, order creation with a creation tx). The totals are then
 the known subtotal and a note names the missing component; a reader must not present them as the cost. 1.0 statements (no
 `role`, no `complete`) are still accepted by the verifier, which compares them against the 1.0 projection of its recomputation.
+
+Review of `bf0c800` (2026-10-10, P2): `complete` is also `false` when a source transaction the statement MUST account for is not
+recorded at all — a run always created its order (`sources.createOrderTx`), a paid business payment has a hash, a settled check fee has
+its settlement — with a note `… evidence missing: …`. "Not applicable" (a run that made no business payment) is told apart from
+"required evidence missing". The verifier derives the same requirements from the passport (subject kind, `execution.businessStatus`,
+`payment.settlement`): a statement that still claims completeness without the evidence differs from the recomputation and FAILS
+`COST_STATEMENT`; an honest incomplete statement is UNVERIFIED ("required evidence missing: …"), never PASS.
 ```json
 { "costStatementVersion": "1.0", "unit": "USDC", "nativeDecimals": 18, "tokenDecimals": 6, "capturedAt": "…",
   "buyer": { "address": "0x…",
