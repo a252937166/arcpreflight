@@ -16,7 +16,9 @@ const hue = (m: string): CSSProperties => ({ "--m": HUE[m] ?? "var(--ink-2)" } a
  *  joined by "or"; an inline schema is shown as its skeleton */
 function Shape({ doc, schema }: { doc: any; schema: Schema }) {
   const name = refName(schema);
-  if (name) return <a className="schema-link" href={`#${schemaId(name)}`}>{name}</a>;
+  if (name) return <>
+    <a className="schema-link" href={`#${schemaId(name)}`}>{name}</a>{schema?.nullable === true && <span className="muted"> or null</span>}
+  </>;
   const alternatives: Schema[] | null = Array.isArray(schema?.oneOf) ? schema.oneOf : Array.isArray(schema?.anyOf) ? schema.anyOf : null;
   const names = alternatives?.map((x) => refName(x));
   if (names && names.length > 0 && names.every((n) => n)) return <span className="schema-links">{names.map((n, i) => <span key={n}>{i > 0 && <span className="muted"> or </span>}<a className="schema-link" href={`#${schemaId(n!)}`}>{n}</a></span>)}</span>;

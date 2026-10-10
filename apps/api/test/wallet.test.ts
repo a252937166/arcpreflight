@@ -124,8 +124,8 @@ describe("attempt admission and durability (AP33-07)", () => {
     const id = await validated();
     expect(abandonAttempt(db, "visitor:b", id)).toMatchObject({ ok: false, status: 404 });
     expect(abandonAttempt(db, OWNER, id)).toMatchObject({ ok: true, attempt: { state: "NOT_SENT", businessStatus: "NOT_EXECUTED" } });
-    expect(abandonAttempt(db, OWNER, id)).toMatchObject({ ok: false, status: 409, error: "ATTEMPT_NOT_OPEN" });
-    expect(await markSent(db, OWNER, id, HASH, fakeRpc())).toMatchObject({ ok: false, status: 409, error: "ATTEMPT_NOT_OPEN" });
+    expect(abandonAttempt(db, OWNER, id)).toMatchObject({ ok: true, status: 200, attempt: { state: "NOT_SENT" } }); // review of 0d14ad9: the same statement again is idempotent
+    expect(await markSent(db, OWNER, id, HASH, fakeRpc())).toMatchObject({ ok: false, status: 409, error: "ATTEMPT_NOT_OPEN" }); // a hash for an abandoned attempt is not a repeat of anything
     expect(listAttempts(db, OWNER)).toHaveLength(1); expect(listAttempts(db, "visitor:b")).toHaveLength(0);
   });
 });
@@ -314,7 +314,7 @@ describe("review round 3 — durable prompt uncertainty, no closing without the 
     expect(markPrompted(db, OWNER, id, { event: "not-prompted", claimId: "tab-b-claim-0002" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" });
     const released = markPrompted(db, OWNER, id, { event: "not-prompted", claimId: "tab-a-claim-0001" });
     expect(released.ok && (released.attempt as any)).toMatchObject({ state: "VALIDATED", prompt: null, note: expect.stringContaining("nothing was prompted") });
-    expect(markPrompted(db, OWNER, id, { event: "not-prompted", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_NOT_CLAIMED" });
+    expect(markPrompted(db, OWNER, id, { event: "not-prompted", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: true, status: 200, attempt: { prompt: null } }); // review of 0d14ad9: released again (a lost answer retried) — nothing is held, 200 unchanged
     // tab B may claim now; its ambiguous answer upgrades ITS claim; a stale "prompted" or a stranger's "unknown-submission" is refused; an UNKNOWN_SUBMISSION is never handed back
     expect(markPrompted(db, OWNER, id, { event: "prompted", claimId: "tab-b-claim-0002" }).ok).toBe(true);
     expect(markPrompted(db, OWNER, id, { event: "unknown-submission", detail: "timeout", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" });
@@ -332,6 +332,30 @@ describe("review round 3 — durable prompt uncertainty, no closing without the 
     const id3 = await validated();
     expect(markPrompted(db, OWNER, id3, { event: "prompted", claimId: "x" }).ok).toBe(true);
     expect(markPrompted(db, OWNER, id3, { event: "not-prompted", claimId: "x" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" });
+  });
+  it("review of 0d14ad9: a repeat of the holder's own successful call answers 200 unchanged (a lost answer is retried safely); anything else stays refused", async () => {
+    const id = await validated(); const { markPrompted } = await import("../src/wallet.js");
+    expect(markPrompted(db, OWNER, id, { event: "prompted", claimId: "tab-a-claim-0001" }).ok).toBe(true);
+    const again = markPrompted(db, OWNER, id, { event: "prompted", claimId: "tab-a-claim-0001" }); // the grant's answer was lost: the same id asks again
+    expect(again).toMatchObject({ ok: true, status: 200, attempt: { state: "VALIDATED", prompt: { state: "PROMPTED" } } }); expect(getAttemptRow(db, id)!.prompt_json).toContain("tab-a-claim-0001");
+    expect(markPrompted(db, OWNER, id, { event: "prompted", claimId: "tab-b-claim-0002" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" }); // another id: still exclusive
+    expect(markPrompted(db, OWNER, id, { event: "prompted" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" }); // no id: not the holder
+    const marked = markPrompted(db, OWNER, id, { event: "unknown-submission", detail: "timeout", claimId: "tab-a-claim-0001" }); const at = marked.ok ? (marked.attempt as any).prompt.at : null; expect(at).toEqual(expect.any(String));
+    expect(markPrompted(db, OWNER, id, { event: "unknown-submission", detail: "timeout", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: true, attempt: { prompt: { state: "UNKNOWN_SUBMISSION", at, detail: "timeout" } } }); // repeated: the first moment stands
+    expect(markPrompted(db, OWNER, id, { event: "prompted", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: false, status: 409, error: "PROMPT_CLAIMED" }); // never downgraded, even for the holder
+    // the hash: reported, its answer lost, reported again — the same attempt, nothing changes; another hash is refused
+    const sent = await markSent(db, OWNER, id, HASH, fakeRpc()); expect(sent.ok && (sent.attempt as any).txHash).toBe(HASH);
+    const repeated = await markSent(db, OWNER, id, HASH.toUpperCase().replace("0X", "0x"), fakeRpc());
+    expect(repeated).toMatchObject({ ok: true, status: 200, attempt: { state: sent.ok ? (sent.attempt as any).state : "?", txHash: HASH, updatedAt: sent.ok ? (sent.attempt as any).updatedAt : "?" } });
+    expect(await markSent(db, OWNER, id, OTHER, fakeRpc())).toMatchObject({ ok: false, status: 409, error: "ATTEMPT_NOT_OPEN" });
+    // a rejection recorded twice; a release with nothing held (the first attempt may still be open for the order: the second needs its own)
+    const row0 = getAttemptRow(db, id)!; if (row0.state === "VALIDATED" || row0.state === "BROADCAST_ATTEMPTED") run(db, "UPDATE wallet_attempts SET state = 'NOT_MINED' WHERE attempt_id = ?", id);
+    const id2 = await validated();
+    expect(markPrompted(db, OWNER, id2, { event: "not-prompted", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: true, status: 200, attempt: { state: "VALIDATED", prompt: null } }); // nothing held: unchanged
+    expect(abandonAttempt(db, OWNER, id2)).toMatchObject({ ok: true, attempt: { state: "NOT_SENT" } });
+    const twice = abandonAttempt(db, OWNER, id2); expect(twice).toMatchObject({ ok: true, status: 200, attempt: { state: "NOT_SENT" } });
+    expect(await markSent(db, OWNER, id2, HASH, fakeRpc())).toMatchObject({ ok: false, status: 409 }); // a hash for an abandoned attempt is not a repeat of anything
+    expect(markPrompted(db, OWNER, id2, { event: "prompted", claimId: "tab-a-claim-0001" })).toMatchObject({ ok: false, status: 409, error: "ATTEMPT_NOT_OPEN" });
   });
   it("a receipt without the transaction body leaves the attempt open until the plan comparison can be made", async () => {
     const id = await validated();

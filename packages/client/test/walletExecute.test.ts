@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completePendingRecovery, executeValidatedAttempt, preSendChecks, releaseClaim, reportSent, walletRequestFromPlan, MIN_WINDOW_LEFT_MS, type AttemptLike, type PendingRecovery } from "../src/walletExecute.js";
+import { completePendingRecovery, executeValidatedAttempt, preSendChecks, releaseClaim, reportSent, settledPendingRecovery, walletRequestFromPlan, MIN_WINDOW_LEFT_MS, type AttemptLike, type PendingRecovery } from "../src/walletExecute.js";
 
 // The hand-over helper for integrators (usage guide, 2026-10-10): plan → wallet fields; account, chain, window and claim checked before the
 // prompt; the hash reported at once; a rejection abandoned; anything else marked and reconciled; a claim held elsewhere never prompts.
@@ -113,11 +113,12 @@ describe("pending-recovery: what the wallet settled is never lost to a failed AP
   });
   it("a failed claim release is unresolved, not not-prompted: the claim id and the failed check are kept, and the release is finished later", async () => {
     let reads = 0; const w = { calls: [] as string[], request: async ({ method }: { method: string }) => { if (method === "eth_accounts") return [PAYER]; if (method === "eth_chainId") return ++reads > 1 ? "0x1" : "0x4cef52"; throw new Error("never asked"); } };
-    let releasable = false;
-    const a = api({ [`GET ${BASE}`]: () => ok(attempt()), [`POST ${BASE}/prompt`]: (b) => (b.event === "not-prompted" ? (releasable ? ok(attempt()) : down()) : ok(attempt({ prompt: { state: "PROMPTED" } }))) });
+    let releasable = false, held = false; // the service: the claim stays held while its release is refused by the network
+    const a = api({ [`GET ${BASE}`]: () => ok(held ? attempt({ prompt: { state: "PROMPTED" } }) : attempt()), [`POST ${BASE}/prompt`]: (b) => { if (b.event === "not-prompted") { if (!releasable) down(); held = false; return ok(attempt()); } held = true; return ok(attempt({ prompt: { state: "PROMPTED" } })); } });
     const r = await run(a, w);
     expect(r).toMatchObject({ outcome: "pending-recovery", stage: "release-claim", txHash: null, claimId: "claim-123", check: { code: "CHAIN_CHANGED" }, attempt: { prompt: { state: "PROMPTED" } }, error: "Failed to fetch" });
     expect((r as PendingRecovery).next).toContain('"not-prompted"');
+    expect(await completePendingRecovery(target(a), r as PendingRecovery)).toMatchObject({ outcome: "pending-recovery", stage: "release-claim", error: "Failed to fetch" }); // still held, still unreachable: pending again
     releasable = true;
     expect(await completePendingRecovery(target(a), r as PendingRecovery)).toMatchObject({ outcome: "not-prompted", check: { code: "CHAIN_CHANGED" }, attempt: { prompt: null } });
     expect(a.calls.at(-1)?.body).toEqual({ event: "not-prompted", claimId: "claim-123", detail: "CHAIN_CHANGED" }); // the same claim id, as the API requires
@@ -137,6 +138,105 @@ describe("pending-recovery: what the wallet settled is never lost to a failed AP
     expect(b.calls.map((c) => c.path)).toEqual([BASE, `${BASE}/prompt`, `${BASE}/prompt`]); // no recover before the mark is durable
     markable = true;
     expect(await completePendingRecovery(target(b), r2 as PendingRecovery)).toMatchObject({ outcome: "unknown-submission", error: "request timed out", attempt: { state: "CONFIRMED" } });
-    expect(b.calls.slice(3).map((c) => [c.path, c.body?.event, c.body?.claimId, c.body?.detail])).toEqual([[`${BASE}/prompt`, "unknown-submission", "claim-123", "request timed out"], [`${BASE}/recover`, undefined, undefined, undefined]]);
+    expect(b.calls.slice(3).map((c) => [c.path, c.body?.event, c.body?.claimId, c.body?.detail])).toEqual([[BASE, undefined, undefined, undefined], [`${BASE}/prompt`, "unknown-submission", "claim-123", "request timed out"], [`${BASE}/recover`, undefined, undefined, undefined]]); // read first, then the mark, then the reconciliation
+  });
+});
+describe("lost answers never leave recovery stuck (review of 0d14ad9): a step the service applied is recognised from the attempt, and a repeat is the same call", () => {
+  const target = (a: ReturnType<typeof api>) => ({ api: "https://api.test", token: "tok", attemptId: "att-1", fetch: a.fetch });
+  const conflict = (error: string, attempt?: AttemptLike) => ({ status: 409, body: { error, reason: error, ...(attempt ? { attempt } : {}) } });
+  /** a service that applies every call before answering, and loses the answers it is told to lose (`drop[route]` times); idempotent like the real one */
+  function service(initial: AttemptLike = attempt(), drop: Record<string, number> = {}, opts: { holder?: string | null; staleGets?: number } = {}) {
+    const s = { a: initial, holder: opts.holder ?? null, staleGets: opts.staleGets ?? 0, drop };
+    const lose = (route: string) => { if ((s.drop[route] ?? 0) > 0) { s.drop[route]--; throw new TypeError("Failed to fetch"); } };
+    const stale = initial;
+    const calls = api({
+      [`GET ${BASE}`]: () => ok(s.staleGets-- > 0 ? stale : s.a),
+      [`POST ${BASE}/prompt`]: (b) => {
+        if (s.a.state !== "VALIDATED") return conflict("ATTEMPT_NOT_OPEN");
+        if (b.event === "prompted") { if (s.a.prompt && s.holder !== b.claimId) { lose("prompted-refused"); return conflict("PROMPT_CLAIMED", s.a); } s.a = { ...s.a, prompt: { state: "PROMPTED" } }; s.holder = b.claimId; lose("prompted"); return ok(s.a); }
+        if (b.event === "not-prompted") { if (!s.a.prompt) return ok(s.a); if (s.holder !== b.claimId) return conflict("PROMPT_CLAIMED", s.a); if (s.a.prompt.state !== "PROMPTED") return conflict("PROMPT_NOT_RELEASABLE", s.a); s.a = { ...s.a, prompt: null }; s.holder = null; lose("not-prompted"); return ok(s.a); }
+        s.a = { ...s.a, prompt: { state: "UNKNOWN_SUBMISSION" } }; lose("unknown-submission"); return ok(s.a);
+      },
+      [`POST ${BASE}/sent`]: (b) => { if (s.a.state !== "VALIDATED") return s.a.txHash === b.txHash ? ok(s.a) : conflict("ATTEMPT_NOT_OPEN"); s.a = { ...s.a, state: "BROADCAST_ATTEMPTED", txHash: b.txHash }; lose("sent"); return ok(s.a); },
+      [`POST ${BASE}/abandon`]: () => { if (s.a.state === "NOT_SENT") return ok(s.a); if (s.a.state !== "VALIDATED") return conflict("ATTEMPT_NOT_OPEN"); s.a = { ...s.a, state: "NOT_SENT" }; lose("abandon"); return ok(s.a); },
+      [`POST ${BASE}/recover`]: () => ok(s.a),
+    });
+    return { s, ...calls, since: (n: number) => calls.calls.slice(n).map((c) => `${c.method} ${c.path}${c.body?.event ? ` ${c.body.event}` : ""}`) };
+  }
+  it("the report's answer was lost after the hash was recorded: completion finds the hash on record and answers sent without a second report; a second completion changes nothing", async () => {
+    const svc = service(attempt(), { sent: 1 }); const w = wallet(() => HASH);
+    const r = await run(svc, w);
+    expect(r).toMatchObject({ outcome: "pending-recovery", stage: "report-sent", txHash: HASH }); expect(svc.s.a).toMatchObject({ state: "BROADCAST_ATTEMPTED", txHash: HASH }); // applied, unanswered
+    const n = svc.calls.length;
+    expect(await completePendingRecovery(target(svc), r as PendingRecovery)).toMatchObject({ outcome: "sent", txHash: HASH, attempt: { state: "BROADCAST_ATTEMPTED", txHash: HASH } });
+    expect(svc.since(n)).toEqual([`GET ${BASE}`]); // recognised from the attempt: no call that could conflict
+    expect(await completePendingRecovery(target(svc), r as PendingRecovery)).toMatchObject({ outcome: "sent" }); expect(svc.since(n)).toEqual([`GET ${BASE}`, `GET ${BASE}`]);
+    expect(w.calls.filter((m) => m === "eth_sendTransaction")).toHaveLength(1);
+    expect(await reportSent(target(svc), HASH)).toMatchObject({ state: "BROADCAST_ATTEMPTED", txHash: HASH }); // the plain repeat is idempotent on the service
+  });
+  it("a stale read followed by a 409 on the repeat (the attempt moved in between) is read again and decided from — never returned as pending for ever", async () => {
+    const svc = service(attempt(), { sent: 1 }); const r = await run(svc, wallet(() => HASH));
+    svc.s.staleGets = 1; // the next read still answers the attempt as it was before the report
+    expect(await completePendingRecovery(target(svc), r as PendingRecovery)).toMatchObject({ outcome: "sent", txHash: HASH, attempt: { state: "BROADCAST_ATTEMPTED" } });
+    const b = service(attempt(), { sent: 1 }); const r2 = await run(b, wallet(() => HASH));
+    b.s.a = { ...b.s.a, state: "CONFIRMED", txHash: null, businessTxHash: HASH }; // closed through the order before the hash was recorded (OrderPaid)
+    expect(await completePendingRecovery(target(b), r2 as PendingRecovery)).toMatchObject({ outcome: "sent", txHash: HASH, attempt: { state: "CONFIRMED" } }); // the caller keeps the hash; the attempt is closed
+  });
+  it("a rejection whose abandon was applied but unanswered: completion reads NOT_SENT and answers abandoned without a second abandon; a wallet error whose mark was applied: no second mark, reconciled", async () => {
+    const svc = service(attempt(), { abandon: 1 });
+    const r = await run(svc, wallet(() => { throw Object.assign(new Error("User rejected the request"), { code: 4001 }); }));
+    expect(r).toMatchObject({ outcome: "pending-recovery", stage: "abandon" }); expect(svc.s.a.state).toBe("NOT_SENT");
+    const n = svc.calls.length; expect(await completePendingRecovery(target(svc), r as PendingRecovery)).toMatchObject({ outcome: "abandoned", attempt: { state: "NOT_SENT" } }); expect(svc.since(n)).toEqual([`GET ${BASE}`]);
+    const b = service(attempt(), { "unknown-submission": 1 });
+    const r2 = await run(b, wallet(() => { throw new Error("request timed out"); }));
+    expect(r2).toMatchObject({ outcome: "pending-recovery", stage: "mark-unknown-submission", walletError: "request timed out" }); expect(b.s.a.prompt).toEqual({ state: "UNKNOWN_SUBMISSION" });
+    const m = b.calls.length; expect(await completePendingRecovery(target(b), r2 as PendingRecovery)).toMatchObject({ outcome: "unknown-submission", error: "request timed out", attempt: { prompt: { state: "UNKNOWN_SUBMISSION" } } });
+    expect(b.since(m)).toEqual([`GET ${BASE}`, `POST ${BASE}/recover`]); // the marker is on record: reconcile only
+  });
+  it("a release whose answer was lost after the claim was handed back: completion reads the attempt unclaimed and answers not-prompted with the failed check; a run afterwards takes a fresh claim", async () => {
+    let reads = 0; const w = { calls: [] as string[], request: async ({ method }: { method: string }) => { w.calls.push(method); if (method === "eth_accounts") return [PAYER]; if (method === "eth_chainId") return ++reads === 2 ? "0x1" : "0x4cef52"; if (method === "eth_sendTransaction") return HASH; throw new Error(`unexpected ${method}`); } }; // the chain is wrong at the second read only
+    const svc = service(attempt(), { "not-prompted": 1 });
+    const r = await run(svc, w);
+    expect(r).toMatchObject({ outcome: "pending-recovery", stage: "release-claim", check: { code: "CHAIN_CHANGED" }, claimId: "claim-123" }); expect(svc.s.a.prompt).toBeNull(); expect(svc.s.holder).toBeNull(); // handed back, unanswered
+    const n = svc.calls.length; expect(await completePendingRecovery(target(svc), r as PendingRecovery)).toMatchObject({ outcome: "not-prompted", check: { code: "CHAIN_CHANGED" }, attempt: { prompt: null } }); expect(svc.since(n)).toEqual([`GET ${BASE}`]);
+    expect(await run(svc, w, { claimId: "claim-456" })).toMatchObject({ outcome: "sent", txHash: HASH }); // the next execution claims afresh and goes through
+    expect(w.calls.filter((m) => m === "eth_sendTransaction")).toHaveLength(1);
+  });
+  it("the claim's answer was lost after the grant: the same id asks once more, is recognised as the holder, and the execution goes on to one prompt", async () => {
+    const svc = service(attempt(), { prompted: 1 }); const w = wallet(() => HASH);
+    expect(await run(svc, w)).toMatchObject({ outcome: "sent", txHash: HASH, attempt: { state: "BROADCAST_ATTEMPTED" } });
+    expect(svc.since(0)).toEqual([`GET ${BASE}`, `POST ${BASE}/prompt prompted`, `POST ${BASE}/prompt prompted`, `POST ${BASE}/sent`]); // the repeat under the same claim id, then the prompt once
+    expect(svc.calls.filter((c) => c.body?.event === "prompted").map((c) => c.body.claimId)).toEqual(["claim-123", "claim-123"]); expect(w.calls.filter((m) => m === "eth_sendTransaction")).toHaveLength(1);
+  });
+  it("the claim's answer was lost twice: pending at the claim stage; completion reads the marker, hands this call's claim back and says CLAIM_UNCONFIRMED; the next run claims afresh — nothing was ever prompted twice", async () => {
+    const svc = service(attempt(), { prompted: 2 }); const w = wallet(() => HASH);
+    const r = await run(svc, w);
+    expect(r).toMatchObject({ outcome: "pending-recovery", stage: "claim", txHash: null, claimId: "claim-123" }); expect(svc.s.a.prompt).toEqual({ state: "PROMPTED" }); expect(svc.s.holder).toBe("claim-123"); expect(w.calls).not.toContain("eth_sendTransaction");
+    const n = svc.calls.length; const done = await completePendingRecovery(target(svc), r as PendingRecovery);
+    expect(done).toMatchObject({ outcome: "not-prompted", check: { code: "CLAIM_UNCONFIRMED" }, attempt: { prompt: null } }); expect(svc.since(n)).toEqual([`GET ${BASE}`, `POST ${BASE}/prompt not-prompted`]); expect(svc.calls.at(-1)?.body).toMatchObject({ claimId: "claim-123" });
+    expect(await run(svc, w, { claimId: "claim-456" })).toMatchObject({ outcome: "sent", txHash: HASH }); expect(w.calls.filter((m) => m === "eth_sendTransaction")).toHaveLength(1);
+  });
+  it("the lost answer was somebody else's refusal: the repeat under the same id meets 409 PROMPT_CLAIMED and the outcome is claimed-elsewhere, without a prompt", async () => {
+    const svc = service(attempt({ prompt: null }), { "prompted-refused": 1 }, { holder: "tab-b" }); svc.s.a = { ...svc.s.a, prompt: { state: "PROMPTED" } }; // held by another tab; the server's view carries the marker
+    const w = wallet(() => HASH);
+    const held = await run({ ...svc, fetch: ((url: string, init?: RequestInit) => svc.fetch(url, init)) as typeof fetch }, w); // the first read sees the marker → ATTEMPT_UNCERTAIN before any claim
+    expect(held).toMatchObject({ outcome: "not-prompted", check: { code: "ATTEMPT_UNCERTAIN" } });
+    const svc2 = service(attempt(), { "prompted-refused": 1 }, { holder: "tab-b" }); // the marker is written by the other tab between this call's read and its claim
+    const original = svc2.fetch; let reads = 0;
+    const raced = (async (url: string, init?: RequestInit) => { const r = await original(url, init); if ((init?.method ?? "GET") === "GET" && ++reads === 1) { svc2.s.a = { ...svc2.s.a, prompt: { state: "PROMPTED" } }; } return r; }) as typeof fetch;
+    expect(await executeValidatedAttempt({ api: "https://api.test", token: "tok", attemptId: "att-1", provider: w, fetch: raced, now, claimId: "claim-123" })).toMatchObject({ outcome: "claimed-elsewhere", attempt: { prompt: { state: "PROMPTED" } } });
+    expect(svc2.since(0)).toEqual([`GET ${BASE}`, `POST ${BASE}/prompt prompted`, `POST ${BASE}/prompt prompted`]); expect(w.calls).not.toContain("eth_sendTransaction");
+  });
+  it("settledPendingRecovery reads every stage from the attempt alone", () => {
+    const base = { outcome: "pending-recovery" as const, claimId: "c", attempt: attempt(), error: "e", next: "n" };
+    expect(settledPendingRecovery({ ...base, stage: "report-sent", txHash: HASH }, attempt())).toBeNull();
+    expect(settledPendingRecovery({ ...base, stage: "report-sent", txHash: HASH }, attempt({ state: "BROADCAST_ATTEMPTED", txHash: HASH.toUpperCase().replace("0X", "0x") }))).toMatchObject({ outcome: "sent" });
+    expect(settledPendingRecovery({ ...base, stage: "release-claim", txHash: null, check: { ok: false, code: "CHAIN_CHANGED", reason: "" } }, attempt({ prompt: { state: "PROMPTED" } }))).toBeNull();
+    expect(settledPendingRecovery({ ...base, stage: "release-claim", txHash: null, check: { ok: false, code: "CHAIN_CHANGED", reason: "" } }, attempt())).toMatchObject({ outcome: "not-prompted", check: { code: "CHAIN_CHANGED" } });
+    expect(settledPendingRecovery({ ...base, stage: "claim", txHash: null }, attempt({ prompt: { state: "PROMPTED" } }))).toBeNull();
+    expect(settledPendingRecovery({ ...base, stage: "claim", txHash: null }, attempt({ state: "NOT_EXECUTED", prompt: { state: "PROMPTED" } }))).toMatchObject({ outcome: "not-prompted", check: { code: "ATTEMPT_NOT_OPEN" } });
+    expect(settledPendingRecovery({ ...base, stage: "abandon", txHash: null }, attempt({ state: "CONFIRMED", txHash: HASH }))).toMatchObject({ outcome: "unknown-submission", error: expect.stringContaining("closed as CONFIRMED") });
+    expect(settledPendingRecovery({ ...base, stage: "mark-unknown-submission", txHash: null, walletError: "x" }, attempt({ prompt: { state: "UNKNOWN_SUBMISSION" } }))).toBeNull();
+    expect(settledPendingRecovery({ ...base, stage: "mark-unknown-submission", txHash: null, walletError: "x" }, attempt({ state: "MISMATCH", txHash: HASH }))).toMatchObject({ outcome: "unknown-submission", error: "x" });
   });
 });

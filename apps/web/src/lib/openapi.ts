@@ -24,6 +24,7 @@ export const opId = (method: string, path: string) => `op-${method}-${path.repla
 /** the name a `$ref` points at, or null for an inline schema */
 export const refName = (schema: Schema | null | undefined): string | null => {
   if (!schema) return null;
+  if (typeof schema["x-ref"] === "string") return schema["x-ref"]; // a nullable copy of a component names it (OpenAPI 3.0 has no nullable $ref)
   if (typeof schema.$ref === "string") return /^#\/components\/schemas\/([^/]+)$/.exec(schema.$ref)?.[1] ?? null;
   if (Array.isArray(schema.allOf) && schema.allOf.length === 1) return refName(schema.allOf[0]); // `{ allOf: [ref], nullable }`: a reference that may be null
   return null;
@@ -36,7 +37,7 @@ export function resolve(doc: any, schema: Schema | null | undefined): Schema | n
   return schema;
 }
 const typeOf = (s: Schema): string => {
-  if (s.enum) return s.enum.map((v: unknown) => JSON.stringify(v)).join(" | ");
+  if (s.enum) return s.enum.filter((v: unknown) => v !== null).map((v: unknown) => JSON.stringify(v)).join(" | "); // null is said once, by the nullable suffix
   if (s.const !== undefined) return JSON.stringify(s.const);
   const t = Array.isArray(s.type) ? s.type.join(" | ") : s.type ?? (s.properties ? "object" : s.items ? "array" : "any");
   return s.format ? `${t} (${s.format})` : t;

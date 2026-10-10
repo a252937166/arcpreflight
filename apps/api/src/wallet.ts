@@ -152,7 +152,11 @@ const owned = (db: Db, principal: string, attemptId: string): AttemptRow | null 
 export async function markSent(db: Db, principal: string, attemptId: string, txHash: string, rpc: WalletRpc = liveRpc()): Promise<AttemptResult> {
   const a = owned(db, principal, attemptId); if (!a) return notFound;
   if (!/^0x[0-9a-f]{64}$/i.test(txHash)) return bad("txHash must be a 32-byte transaction hash");
-  if (a.state !== "VALIDATED") return conflict("ATTEMPT_NOT_OPEN", `the attempt is ${a.state}; a hash can be reported once, for a validated attempt`);
+  if (a.state !== "VALIDATED") {
+    // review of 0d14ad9: a report whose answer was lost is repeated — the same hash on the attempt it already moved is the same report: 200, nothing changes
+    if (a.tx_hash && a.tx_hash.toLowerCase() === txHash.toLowerCase()) return { ok: true, status: 200, attempt: shapeAttempt(db, a) };
+    return conflict("ATTEMPT_NOT_OPEN", `the attempt is ${a.state}; a hash can be reported once, for a validated attempt`);
+  }
   const head = await rpc.getBlockNumber().then((b) => b.toString()).catch(() => null);
   run(db, "UPDATE wallet_attempts SET state = 'BROADCAST_ATTEMPTED', tx_hash = ?, broadcast_block = ?, note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED'", txHash.toLowerCase(), head, "hash reported by the wallet; the transaction may be on the network; fields are compared with the plan once it is visible", now(), attemptId);
   await reconcileWalletAttempts(db, rpc, { attemptId, source: "sent" }).catch(() => {});
@@ -168,7 +172,10 @@ const RELEASED_NOTE = "the prompt claim was handed back by its holder before any
  *  never downgraded. `not-prompted`: the holder states that it did NOT ask the wallet after all (its re-check right before the prompt failed)
  *  and hands the claim back with its claim id; a claim that already turned into UNKNOWN_SUBMISSION, somebody else's claim or a closed attempt
  *  is never released. Either marker makes a VALIDATED attempt uncertain: it is reconciled from the chain before anything else may be signed,
- *  and a page refresh restores the uncertainty. The claim id never appears in the attempt view. */
+ *  and a page refresh restores the uncertainty. The claim id never appears in the attempt view.
+ *  Review of 0d14ad9 (2026-10-10): a repeat of the holder's own successful call is the same call (a lost answer is retried safely): `prompted`
+ *  under the claim id that holds the PROMPTED marker answers 200 with the grant standing, `not-prompted` with nothing held answers 200 unchanged,
+ *  a repeated `unknown-submission` keeps its first moment. */
 export function markPrompted(db: Db, principal: string, attemptId: string, body: any): AttemptResult {
   const a = owned(db, principal, attemptId); if (!a) return notFound;
   const event = String(body?.event ?? "");
@@ -183,16 +190,17 @@ export function markPrompted(db: Db, principal: string, attemptId: string, body:
     const r = run(db, "UPDATE wallet_attempts SET prompt_json = ?, note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED' AND prompt_json IS NULL", JSON.stringify(next), PROMPTED_NOTE, now(), attemptId);
     if (Number(r.changes) === 1) return { ok: true, status: 200, attempt: view() };
     const held = promptOf(getAttemptRow(db, attemptId)!);
+    if (held?.state === "PROMPTED" && claimId && held.claimId === claimId) return { ok: true, status: 200, attempt: view() }; // the holder asks again: its grant stands
     return conflict("PROMPT_CLAIMED", `the wallet prompt for this attempt was already claimed at ${held?.at ?? "an earlier time"} (${held?.state ?? "marker present"}); the transaction may have been submitted — reconcile instead of prompting again`, { attempt: view() });
   }
   if (event === "unknown-submission") {
     if (prior?.claimId && claimId && claimId !== prior.claimId) return conflict("PROMPT_CLAIMED", "another prompt claim holds this attempt; its holder's answer decides — reconcile instead", { attempt: view() });
-    const next: PromptMarker = { state: "UNKNOWN_SUBMISSION", at: now(), detail: detail ?? prior?.detail ?? null, ...(prior?.claimId ?? claimId ? { claimId: prior?.claimId ?? claimId! } : {}) };
+    const next: PromptMarker = { state: "UNKNOWN_SUBMISSION", at: prior?.state === "UNKNOWN_SUBMISSION" ? prior.at : now(), detail: detail ?? prior?.detail ?? null, ...(prior?.claimId ?? claimId ? { claimId: prior?.claimId ?? claimId! } : {}) }; // repeated: the first moment stands
     run(db, "UPDATE wallet_attempts SET prompt_json = ?, note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED'", JSON.stringify(next), UNKNOWN_NOTE, now(), attemptId);
     return { ok: true, status: 200, attempt: view() };
   }
   // not-prompted: hand back the holder's untouched claim — compare-and-set on the exact marker that was read, so a concurrent change wins
-  if (!prior) return conflict("PROMPT_NOT_CLAIMED", "no prompt claim is recorded for this attempt; nothing to hand back");
+  if (!prior) return { ok: true, status: 200, attempt: view() }; // nothing is held: a release repeated after a lost answer finds the attempt unclaimed — 200, unchanged
   if (prior.state !== "PROMPTED") return conflict("PROMPT_NOT_RELEASABLE", `the marker is ${prior.state}: the wallet answered ambiguously, so the claim cannot be handed back — reconcile instead`, { attempt: view() });
   if (!prior.claimId || !claimId || claimId !== prior.claimId) return conflict("PROMPT_CLAIMED", "only the holder of the prompt claim may hand it back (claim id mismatch); reconcile instead", { attempt: view() });
   const r = run(db, "UPDATE wallet_attempts SET prompt_json = NULL, note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED' AND prompt_json = ?", RELEASED_NOTE, now(), attemptId, a.prompt_json);
@@ -202,6 +210,7 @@ export function markPrompted(db: Db, principal: string, attemptId: string, body:
 /** POST …/abandon: the wallet prompt was rejected; nothing was sent. */
 export function abandonAttempt(db: Db, principal: string, attemptId: string): AttemptResult {
   const a = owned(db, principal, attemptId); if (!a) return notFound;
+  if (a.state === "NOT_SENT") return { ok: true, status: 200, attempt: shapeAttempt(db, a) }; // review of 0d14ad9: abandoning again is the same statement — 200, unchanged
   if (a.state !== "VALIDATED") return conflict("ATTEMPT_NOT_OPEN", `the attempt is ${a.state}; only a validated attempt can be abandoned`);
   run(db, "UPDATE wallet_attempts SET state = 'NOT_SENT', business_status = 'NOT_EXECUTED', note = ?, updated_at = ? WHERE attempt_id = ? AND state = 'VALIDATED'", "the wallet prompt was rejected or abandoned by the visitor; nothing was sent; the order stays unpaid", now(), attemptId);
   return { ok: true, status: 200, attempt: shapeAttempt(db, getAttemptRow(db, attemptId)!) };

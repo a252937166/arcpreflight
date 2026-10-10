@@ -296,7 +296,11 @@ stale view, a retry — receives `409 PROMPT_CLAIMED` with the current attempt i
 `unknown-submission` records the holder's ambiguous answer on top of the claim (a claim id, when given, must be the holder's); `{ event:
 "not-prompted", claimId }` hands an untouched claim back — the holder's re-check right before the prompt failed, so nothing was prompted and
 the attempt is a plain `VALIDATED` attempt again; an `UNKNOWN_SUBMISSION` marker (`409 PROMPT_NOT_RELEASABLE`), somebody else's claim
-(`409 PROMPT_CLAIMED`), a missing claim (`409 PROMPT_NOT_CLAIMED`) or a closed attempt (`409 ATTEMPT_NOT_OPEN`) is never released. The claim
+(`409 PROMPT_CLAIMED`) or a closed attempt (`409 ATTEMPT_NOT_OPEN`) is never released. *(review of `0d14ad9`, 2026-10-10)* A repeat of the
+holder's own successful call is the same call, so a lost answer is retried safely: `prompted` under the claim id that holds the `PROMPTED`
+marker answers 200 with the grant standing, `not-prompted` with nothing held answers 200 unchanged (there is no `PROMPT_NOT_CLAIMED` any
+more), a repeated `unknown-submission` keeps its first moment, the same hash reported again to `…/sent` answers 200 unchanged, and abandoning
+a `NOT_SENT` attempt again answers 200. The claim
 id is generated per call, kept in that call's memory only and never appears in the attempt view, so a reloaded page can never hand back a
 claim it did not make. *(P1-2)* After the claim call the browser reads the wallet's account and chain **again** and the clock after them,
 immediately before `eth_sendTransaction`; a change hands the claim back and says why (`ACCOUNT_CHANGED`, `CHAIN_CHANGED`, `WINDOW_CLOSED`,

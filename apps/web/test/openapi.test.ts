@@ -37,5 +37,9 @@ describe("the API reference model", () => {
     expect(skeleton(DOC, { $ref: "#/components/schemas/Missing" })).toBe("any"); expect(skeleton(DOC, null)).toBe("…");
     expect(skeleton(DOC, { type: "string", nullable: true })).toBe("string | null"); expect(skeleton(DOC, { type: "object", properties: { a: { type: "integer", nullable: true } } })).toBe(`{\n  "a?": integer | null\n}`);
     expect(refName({ allOf: [{ $ref: "#/components/schemas/Network" }], nullable: true })).toBe("Network"); // a reference that may be null still links to its schema
+    // review of 0d14ad9: a nullable copy of a component names it with x-ref and links; a nullable enum lists null once, by the suffix
+    expect(refName({ "x-ref": "Network", type: "object", nullable: true, properties: { network: { type: "string" } } })).toBe("Network");
+    expect(skeleton(DOC, { "x-ref": "Network", type: "object", nullable: true, properties: { network: { type: "string" } } })).toBe(`{\n  "network?": string\n} | null`);
+    expect(skeleton(DOC, { type: "string", enum: ["MAIN", "CHANGED", null], nullable: true })).toBe('"MAIN" | "CHANGED" | null');
   });
 });
