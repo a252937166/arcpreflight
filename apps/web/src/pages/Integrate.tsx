@@ -135,12 +135,14 @@ export TOKEN=…`;
 #   GET  …/{id} until CONFIRMED
 #   a lost answer → POST …/{id}/recover, never a second payment`;
 
-  const walletHelper = `// the hand-over the site performs, from your own code: one instance,
-// one session. Nothing is on npm — save the download (link below)
-// next to this file; it has no dependencies.
+  const walletHelper = `// the hand-over the site performs, from your own code: one
+// instance, one session. Nothing is on npm — save the download
+// (link below) next to this file; it has no dependencies.
 import { executeValidatedAttempt, completePendingRecovery }
   from "./arcpreflight-walletExecute";
-const target = { api: "${apiBase}", token: TOKEN, attemptId };
+const target = {
+  api: "${apiBase}", token: TOKEN, attemptId,
+};
 const r = await executeValidatedAttempt({
   ...target, provider: window.ethereum,   // any EIP-1193 provider
 });
@@ -149,15 +151,21 @@ const r = await executeValidatedAttempt({
 // account, the chain and the window; claims the prompt (claimId);
 // checks again; eth_sendTransaction; reports the hash at once.
 switch (r.outcome) {
-  case "sent": /* r.txHash; observe GET …/{id} until it closes */ break;
-  case "not-prompted": /* r.check.code: ACCOUNT_CHANGED, CHAIN_CHANGED,
-     WINDOW_CLOSED, ATTEMPT_UNCERTAIN … nothing was asked */ break;
-  case "claimed-elsewhere": /* another tab holds the claim: recover */ break;
-  case "abandoned": /* the wallet prompt was rejected: NOT_SENT */ break;
-  case "unknown-submission": /* marked and reconciled; never re-prompt */ break;
-  case "pending-recovery": /* the wallet answered but the API call that
-     records it failed: r.txHash (when the wallet returned one), r.claimId
-     and r.stage are kept; nothing is prompted again — finish the step: */
+  case "sent": /* r.txHash; observe GET …/{id} until it
+     closes */ break;
+  case "not-prompted": /* r.check.code: ACCOUNT_CHANGED,
+     CHAIN_CHANGED, WINDOW_CLOSED, ATTEMPT_UNCERTAIN …
+     nothing was asked */ break;
+  case "claimed-elsewhere": /* another tab holds the claim:
+     recover */ break;
+  case "abandoned": /* the wallet prompt was rejected:
+     NOT_SENT */ break;
+  case "unknown-submission": /* marked and reconciled;
+     never re-prompt */ break;
+  case "pending-recovery": /* the wallet answered but the API
+     call recording it failed: r.txHash (when the wallet returned
+     one), r.claimId and r.stage are kept; nothing is prompted
+     again — finish the step: */
     await completePendingRecovery(target, r); break;
 }`;
   const setupCheckout = `git clone --recurse-submodules \\
