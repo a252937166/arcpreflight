@@ -12,10 +12,14 @@ import { describeError, type Described } from "../lib/errors";
 const HUE: Record<string, string> = { GET: "var(--mint)", POST: "var(--sky)", PUT: "var(--violet)", PATCH: "var(--violet)", DELETE: "var(--rose)" };
 const hue = (m: string): CSSProperties => ({ "--m": HUE[m] ?? "var(--ink-2)" } as CSSProperties);
 
-/** a referenced schema is a link to the schemas section (rendered once, below); an inline schema is shown as its skeleton */
+/** a referenced schema is a link to the schemas section (rendered once, below); one of several referenced schemas (a `oneOf` answer) is the links
+ *  joined by "or"; an inline schema is shown as its skeleton */
 function Shape({ doc, schema }: { doc: any; schema: Schema }) {
   const name = refName(schema);
   if (name) return <a className="schema-link" href={`#${schemaId(name)}`}>{name}</a>;
+  const alternatives: Schema[] | null = Array.isArray(schema?.oneOf) ? schema.oneOf : Array.isArray(schema?.anyOf) ? schema.anyOf : null;
+  const names = alternatives?.map((x) => refName(x));
+  if (names && names.length > 0 && names.every((n) => n)) return <span className="schema-links">{names.map((n, i) => <span key={n}>{i > 0 && <span className="muted"> or </span>}<a className="schema-link" href={`#${schemaId(n!)}`}>{n}</a></span>)}</span>;
   return <pre className="skeleton">{skeleton(doc, schema)}</pre>;
 }
 function SchemaCard({ s, doc }: { s: NamedSchema; doc: any }) {

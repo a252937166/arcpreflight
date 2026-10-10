@@ -9,7 +9,7 @@ export type WayId = "api" | "cli" | "browser";
 export type Way = { id: WayId; title: string; hue: string; what: string; needs: string; anchor: string };
 export const WAYS: readonly Way[] = [
   { id: "api", title: "HTTP API", hue: "var(--sky)", what: "Your app or agent calls the service over JSON. Your own key signs the fee and the payment.", needs: "a session token and a wallet or key that can sign", anchor: "#api" },
-  { id: "cli", title: "Command line", hue: "var(--mint)", what: "The reference agent runs a payment from a durable store. The verifier checks any passport in a clean process.", needs: "the repository checkout, Node 22.6 or newer, pnpm", anchor: "#cli" },
+  { id: "cli", title: "Command line", hue: "var(--mint)", what: "The reference agent runs a payment from a durable store. The verifier checks any passport in a clean process.", needs: "the source checkout of this site's release (newer than the public repository may be), Node 22.6 or newer, pnpm", anchor: "#cli" },
   { id: "browser", title: "Browser", hue: "var(--violet)", what: "The live demo pays from project funds. The wallet workflow runs every stage with your wallet.", needs: "a browser; for the wallet workflow, a wallet with testnet USDC", anchor: "#browser" },
 ];
 export const wayById = (id: WayId): Way => WAYS.find((w) => w.id === id)!;

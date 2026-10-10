@@ -116,6 +116,16 @@ describe("executeAttempt: the state machine", () => {
     expect(rememberedAttempts()[0].state).toBe("CONFIRMED");
     expect(deviationRows(result.attempt!.deviations)).toEqual([{ field: "nonce", plan: "7", actual: "8", kind: "deviation" }]);
   });
+  it("review of 199dd55: a hash whose report failed is kept and reported again while the attempt is observed, until the service records it", async () => {
+    let reports = 0;
+    const calls = fakeApi({ sent: () => { if (reports++ === 0) throw new TypeError("Failed to fetch"); return response(view({ state: "BROADCAST_ATTEMPTED", txHash: D })); }, observe: (n) => response(n < 2 ? view() : view({ state: "CONFIRMED", txHash: D, businessTxHash: D, businessStatus: "SUCCESS" })) });
+    const events: any[] = [];
+    const r = await executeAttempt({ provider: wallet(() => D), account: ACCOUNT, requestId: REQUEST, orderId: ORDER, policy: {}, withToken, onEvent: (e) => events.push(e), poll: { wait: async () => {}, intervalMs: 0 } });
+    expect(paths(calls).filter((p) => p === `POST /v1/wallet/attempts/${ATTEMPT}/sent`)).toHaveLength(2); // the report that failed, then the one that succeeded during the observation
+    expect(calls.filter((c) => c.path.endsWith("/sent")).every((c) => c.body.txHash === D)).toBe(true);
+    expect(events.find((e) => e.phase === "error")).toMatchObject({ txHash: D, error: { code: "NETWORK" } }); // the failure is shown with the hash kept
+    expect(r.phase).toBe("done"); expect(r.txHash).toBe(D); expect(r.attempt?.state).toBe("CONFIRMED");
+  });
   it("a rejected prompt (4001) abandons the attempt: NOT_SENT, nothing was sent", async () => {
     const calls = fakeApi({ observe: () => response(view()) });
     const provider = wallet(() => { const e: any = new Error("User rejected the request."); e.code = 4001; throw e; });

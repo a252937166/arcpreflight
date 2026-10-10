@@ -17,5 +17,8 @@
     "@arcpreflight/runner": "workspace:*",
     "@arcpreflight/schema": "workspace:*",
     "viem": "^2.57.2"
+  },
+  "devDependencies": {
+    "@seriousme/openapi-schema-validator": "2.11.0"
   }
 }

@@ -234,10 +234,14 @@ async function sendInner(i: SendInput): Promise<ExecuteEvent> {
   emit({ phase: "reporting", attempt, txHash });
   let sent: AttemptView | null = null;
   try { sent = await i.withToken((t, c) => c.attemptSent(attempt.attemptId, txHash, t)); rememberView(sent, base); }
-  catch (e) { emit({ phase: "error", attempt, txHash, error: describeError(e) }); /* the hash exists on the network; keep observing — the worker also recovers through OrderPaid */ }
+  catch (e) { emit({ phase: "error", attempt, txHash, error: describeError(e) }); /* the hash exists on the network: it is reported again on every observation until the service has it (below) — the worker also recovers through OrderPaid */ }
   if (sent && !isOpen(sent.state)) return emit({ phase: "done", attempt: sent, txHash });
   emit({ phase: "polling", attempt: sent ?? attempt, txHash });
-  const polled = await pollAttempt(attempt.attemptId, i.withToken, i.poll, (a) => { rememberView(a, base); emit({ phase: "polling", attempt: a, txHash }); });
+  let reporting: Promise<unknown> | null = null; // review of 199dd55: a known hash the service has not recorded is never dropped — one report at a time, retried per observation
+  const polled = await pollAttempt(attempt.attemptId, i.withToken, i.poll, (a) => {
+    rememberView(a, base); emit({ phase: "polling", attempt: a, txHash });
+    if (!sent && !a.txHash && isOpen(a.state) && !reporting) reporting = i.withToken((t, c) => c.attemptSent(attempt.attemptId, txHash, t)).then((s) => { sent = s; rememberView(s, base); }).catch(() => null).finally(() => { reporting = null; });
+  });
   const last = polled.attempt ?? sent ?? attempt;
   return emit({ phase: polled.settled ? "done" : "unresolved", attempt: last, txHash });
 }

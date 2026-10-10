@@ -201,7 +201,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       res.writeHead(200, { "content-type": "application/json", "cache-control": "public, max-age=60", ...CORS }); return res.end(f);
     }
     if (req.method === "GET" && path === "/health/ready") {
-      if (lastReady && Date.now() - lastReady.at < 10_000) return json(res, 200, lastReady.body);
+      if (lastReady && Date.now() - lastReady.at < 10_000) return json(res, (lastReady.body as { ready?: boolean }).ready ? 200 : 503, lastReady.body); // review of 199dd55: a cached degraded answer keeps its 503
       const deps: Record<string, unknown> = {};
       try { const t = Date.now(); const bn = await Promise.race([client.getBlockNumber(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("rpc timeout")), 4000))]); deps.rpc = { ok: true, head: bn.toString(), ms: Date.now() - t }; } catch (e: any) { deps.rpc = { ok: false, error: String(e?.message ?? e) }; }
       try { row(db, "SELECT 1"); deps.db = { ok: true }; } catch (e: any) { deps.db = { ok: false, error: String(e?.message ?? e) }; }

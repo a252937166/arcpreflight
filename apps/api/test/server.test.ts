@@ -450,6 +450,88 @@ describe("the complete lifecycle for every session (design v3.3): orders and wal
   });
 });
 
+describe("every documented branch is a branch the route answers (review of 199dd55, 2026-10-10)", () => {
+  const ATT6 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  /** the answer validates against the document's schema for that route and status */
+  const documented = (r: { status: number; body: any }, method: string, path: string) => { expect(check(DOC, method, path, r.status, r.body), `${method.toUpperCase()} ${path} ${r.status} ${JSON.stringify(r.body).slice(0, 160)}`).toEqual([]); return r; };
+  it("a check that is unpaid or whose payment failed reads 200 with its payment state (never 402); the quote, the refused payment and the conflicts validate too", async () => {
+    const intent = makeIntent(); const p = payment();
+    const quoted = documented(await call("POST", "/v1/preflight", { intent }), "post", "/v1/preflight");
+    expect(quoted).toMatchObject({ status: 402, body: { quote: { requestId: expect.any(String) }, paymentRequirements: expect.anything() } }); expect(quoted.body.error).toBeUndefined();
+    const unpaid = documented(await call("GET", `/v1/requests/${quoted.body.requestId}`), "get", "/v1/requests/{requestId}");
+    expect(unpaid).toMatchObject({ status: 200, body: { state: "WAITING_PAYMENT", payment: { state: "NOT_REQUESTED", paymentId: null, backend: null, transaction: null, reason: null }, quote: { requestId: quoted.body.requestId }, quoteExpired: false } });
+    expect(unpaid.body.delivery).toBeUndefined(); // the unpaid branch: a status, not a report
+    const rebound = documented(await call("POST", "/v1/preflight", { intent: { ...intent, valueNativeAtomic: "50000000000000001" } }), "post", "/v1/preflight"); expect(rebound).toMatchObject({ status: 409, body: { error: "REQUEST_CONFLICT" } });
+    mocks.relay.mockImplementationOnce(failure);
+    const refused = documented(await call("POST", "/v1/preflight", { intent, payment: p }), "post", "/v1/preflight");
+    expect(refused).toMatchObject({ status: 402, body: { error: "PAYMENT_FAILED", payment: { state: "FAILED", reason: "payer balance below the authorized amount", backend: "relay" }, quote: { requestId: quoted.body.requestId } } });
+    const failed = documented(await call("GET", `/v1/requests/${quoted.body.requestId}`), "get", "/v1/requests/{requestId}");
+    expect(failed).toMatchObject({ status: 200, body: { payment: { state: "FAILED", backend: "relay", transaction: null }, quoteExpired: false } }); expect(failed.body.delivery).toBeUndefined();
+    db.prepare("UPDATE quotes SET expires_at = ?").run(new Date(Date.now() - 1).toISOString()); p.authorization.nonce = T;
+    const conflict = documented(await call("POST", "/v1/preflight", { intent, payment: p }), "post", "/v1/preflight"); expect(conflict).toMatchObject({ status: 409, body: { error: "PAYMENT_CONFLICT" } });
+    const other = { ...makeIntent(), clientRequestId: "another-request" }; const q2 = await call("POST", "/v1/preflight", { intent: other });
+    db.prepare("UPDATE quotes SET expires_at = ? WHERE request_id = ?").run(new Date(Date.now() - 1).toISOString(), q2.body.requestId);
+    const expired = documented(await call("POST", "/v1/preflight", { intent: other, payment: payment() }), "post", "/v1/preflight"); expect(expired).toMatchObject({ status: 409, body: { error: "QUOTE_EXPIRED", requestId: q2.body.requestId } });
+  });
+  it("a settling fee reads 202 with the same status shape on POST /v1/preflight, GET /v1/requests/{id} and POST …/recover; a delivered check reads 200 on all three", async () => {
+    const intent = makeIntent(); const p = payment(); const quoted = await call("POST", "/v1/preflight", { intent });
+    mocks.relay.mockImplementation(async (d: any, requestId: string) => { d.prepare("UPDATE payments SET state = 'PENDING', tx_hash = ? WHERE request_id = ?").run(T, requestId); return { state: "PENDING", txHash: T, reason: "receipt not yet available", evidence: null }; });
+    try {
+      expect(documented(await call("POST", "/v1/preflight", { intent, payment: p }), "post", "/v1/preflight")).toMatchObject({ status: 202, body: { payment: { state: "PENDING", transaction: T }, note: expect.stringContaining("not yet confirmed") } });
+      expect(documented(await call("GET", `/v1/requests/${quoted.body.requestId}`), "get", "/v1/requests/{requestId}")).toMatchObject({ status: 202, body: { state: "WAITING_PAYMENT", payment: { state: "PENDING", backend: "relay", transaction: T } } });
+      expect(documented(await call("POST", `/v1/requests/${quoted.body.requestId}/recover`), "post", "/v1/requests/{requestId}/recover")).toMatchObject({ status: 202, body: { payment: { state: "PENDING" } } });
+      mocks.relay.mockImplementation(completion);
+      expect(documented(await call("POST", `/v1/requests/${quoted.body.requestId}/recover`), "post", "/v1/requests/{requestId}/recover")).toMatchObject({ status: 200, body: { delivery: "DELIVERED", payment: { state: "COMPLETED", transaction: T }, expired: false } });
+      expect(documented(await call("GET", `/v1/requests/${quoted.body.requestId}`), "get", "/v1/requests/{requestId}")).toMatchObject({ status: 200, body: { delivery: "DELIVERED" } });
+      expect(documented(await call("POST", "/v1/preflight", { intent, payment: p }), "post", "/v1/preflight")).toMatchObject({ status: 200, body: { delivery: "DELIVERED" } });
+    } finally { mocks.relay.mockReset(); }
+  });
+  it("a paused relayer answers 503 SETTLEMENT_PAUSED as documented and stores no authorization", async () => {
+    const intent = makeIntent(); await call("POST", "/v1/preflight", { intent });
+    mocks.paused.mockResolvedValueOnce({ paused: true, balanceNativeAtomic: 1n, floorNativeAtomic: 10n ** 18n });
+    const paused = documented(await call("POST", "/v1/preflight", { intent, payment: payment() }), "post", "/v1/preflight");
+    expect(paused).toMatchObject({ status: 503, body: { error: "SETTLEMENT_PAUSED", retryAfterSeconds: 60, note: expect.stringContaining("no authorization was stored") } });
+    expect(db.prepare("SELECT count(*) AS n FROM payments").get()?.n).toBe(0); expect(mocks.relay).not.toHaveBeenCalled();
+  });
+  it("the faucet's 200, 202 (pending, with the hash) and 503 (a hash when one was sent) validate", async () => {
+    const { claimFaucet } = await import("../src/demo.js");
+    const sent = { ok: true as const, txHash: T, amountNativeAtomic: "200000000000000000", address: payer as Hex };
+    vi.mocked(claimFaucet).mockResolvedValueOnce({ ...sent, pending: false, note: "sent and confirmed" } as any);
+    expect(documented(await call("POST", "/v1/faucet", { address: payer }, null), "post", "/v1/faucet").status).toBe(200);
+    vi.mocked(claimFaucet).mockResolvedValueOnce({ ...sent, pending: true, note: "sent, not yet confirmed: no receipt within the wait; follow the hash on the explorer" } as any);
+    expect(documented(await call("POST", "/v1/faucet", { address: payer }, null), "post", "/v1/faucet")).toMatchObject({ status: 202, body: { pending: true, txHash: T } });
+    vi.mocked(claimFaucet).mockResolvedValueOnce({ ok: false, status: 503, error: "FAUCET_FAILED", reason: "no receipt", txHash: T } as any);
+    expect(documented(await call("POST", "/v1/faucet", { address: payer }, null), "post", "/v1/faucet")).toMatchObject({ status: 503, body: { error: "FAUCET_FAILED", txHash: T } });
+    expect(documented(await call("POST", "/v1/faucet", { address: payer }, null), "post", "/v1/faucet")).toMatchObject({ status: 404, body: { error: "FAUCET_DISABLED" } }); // the default mock: disabled
+  });
+  it("POST /v1/wallet/attempts: 503 while gated (not 403), 409 ATTEMPT_OPEN with reasons: null, 409 VALIDATION_FAILED with reasons, 429 — each as documented", async () => {
+    const { cfg } = await import("../src/config.js");
+    (cfg as any).publicExecution = false;
+    try { expect(documented(await call("POST", "/v1/wallet/attempts", { requestId: ATT6, orderId: D, policy: {} }), "post", "/v1/wallet/attempts")).toMatchObject({ status: 503, body: { error: "EXECUTION_GATED" } }); }
+    finally { (cfg as any).publicExecution = true; }
+    expect(DOC.paths["/v1/wallet/attempts"].post.responses[403]).toBeUndefined(); // the route never answers 403
+    mocks.attempt.mockResolvedValueOnce({ ok: false, status: 409, error: "ATTEMPT_OPEN", reason: "an attempt for this order is still open", attemptId: ATT6 });
+    const open = documented(await call("POST", "/v1/wallet/attempts", { requestId: ATT6, orderId: D, policy: {} }), "post", "/v1/wallet/attempts");
+    expect(open).toMatchObject({ status: 409, body: { error: "ATTEMPT_OPEN", reasons: null, attemptId: ATT6 } });
+    mocks.attempt.mockResolvedValueOnce({ ok: false, status: 409, error: "VALIDATION_FAILED", reason: "the decision is REVIEW_REQUIRED: nothing is executed", reasons: ["BASELINE_STATUS: implementation changed"], attemptId: ATT6 });
+    expect(documented(await call("POST", "/v1/wallet/attempts", { requestId: ATT6, orderId: D, policy: {} }), "post", "/v1/wallet/attempts")).toMatchObject({ status: 409, body: { reasons: ["BASELINE_STATUS: implementation changed"] } });
+    mocks.attempt.mockResolvedValueOnce({ ok: false, status: 409, error: "ORDER_ALREADY_PAID", reason: "this order already reads as paid" });
+    expect(documented(await call("POST", "/v1/wallet/attempts", { requestId: ATT6, orderId: D, policy: {} }), "post", "/v1/wallet/attempts")).toMatchObject({ status: 409, body: { reasons: null, attemptId: null } });
+    mocks.attempt.mockResolvedValueOnce({ ok: false, status: 429, error: "RATE_LIMITED", reason: "at most 20 validations per principal per day" });
+    expect(documented(await call("POST", "/v1/wallet/attempts", { requestId: ATT6, orderId: D, policy: {} }), "post", "/v1/wallet/attempts").status).toBe(429);
+  });
+  it("orders answer 429 on the budget or the cooldown, runs 409 RUN_CONFLICT, readiness 503 when degraded — each as documented", async () => {
+    mocks.order.mockResolvedValueOnce({ ok: false, status: 429, error: "DEMO_COOLDOWN", reason: "this client created an order 10 s ago; wait 50 s" });
+    expect(documented(await call("POST", "/v1/demo/orders", { payer }), "post", "/v1/demo/orders")).toMatchObject({ status: 429, body: { error: "DEMO_COOLDOWN" } });
+    mocks.order.mockResolvedValueOnce({ ok: false, status: 503, error: "GAS_CAP_EXCEEDED", reason: "the creation would cost more than the cap" });
+    expect(documented(await call("POST", "/v1/demo/orders", { payer }), "post", "/v1/demo/orders").status).toBe(503);
+    mocks.startRun.mockResolvedValueOnce({ ok: false, status: 409, error: "RUN_CONFLICT", reason: "clientRunRequestId already bound to another fixture" });
+    expect(documented(await call("POST", "/v1/demo/run", { fixture: "APPROVED_PAYMENT", clientRunRequestId: "k".repeat(20) }, null), "post", "/v1/demo/run")).toMatchObject({ status: 409, body: { error: "RUN_CONFLICT", sampleRunId: null } });
+    expect(DOC.paths["/v1/demo/run"].post.summary).toContain("RUN_CONFLICT"); expect(DOC.paths["/v1/demo/run"].post.summary).not.toContain("ADMISSION_CONFLICT");
+    expect(documented(await call("GET", "/health/ready", undefined, null), "get", "/health/ready")).toMatchObject({ status: 503, body: { ready: false, state: "degraded" } });
+  });
+});
+
 describe("faucet route", () => {
   it("validates the address and answers 404 where the faucet is disabled (mainnet)", async () => {
     expect(await call("POST", "/v1/faucet", { address: "0x1234" }, null)).toMatchObject({ status: 400, body: { error: "INVALID_INPUT" } });

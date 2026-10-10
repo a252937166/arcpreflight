@@ -1849,7 +1849,9 @@ describe("how to use (usage guide, 2026-10-10) · three ways in, one lifecycle",
     const commands = snips.filter((n) => !n.props.output).map((n) => n.props.code).join("\n");
     expect(commands).toContain("pnpm exec tsx packages/verifier/src/cli.ts"); expect(commands).toContain("pnpm exec tsx examples/merchant-agent/src/run.ts reconcile"); // commands that run as written from the checkout
     expect(commands).not.toMatch(/\$A\b|arcpreflight-verify/); // no shell variable standing in for a command, no bin that the root does not expose
-    expect(snips.some((n) => n.props.label.includes("wallet helper") && n.props.code.includes("executeValidatedAttempt"))).toBe(true); // the hand-over helper, shown in use
+    const helper = snips.find((n) => n.props.label.includes("wallet helper"))!.props.code; expect(helper).toContain("executeValidatedAttempt"); // the hand-over helper, shown in use
+    expect(helper).toContain('from "./arcpreflight-walletExecute"'); expect(helper).not.toContain("@arcpreflight/client"); expect(helper).toContain('case "pending-recovery"'); expect(helper).toContain("completePendingRecovery(target, r)"); // review of 199dd55: imported from the downloaded file (no package is published), and the unresolved outcome handled
+    expect(commands).toContain("release 964a61b"); expect(commands).not.toContain("exist in both"); expect(text).toContain("a public checkout that still shows an older release does not have them yet"); // the commands belong to this release's source, said plainly
     expect(text).toContain("MCP: this release has no MCP server"); // honest about what does not exist
     expect(nodes(tree).filter((n) => n.props?.className === "way").map((n) => n.props.id)).toEqual(["api", "cli", "browser"]);
   });
@@ -1874,18 +1876,20 @@ describe("how to use (usage guide, 2026-10-10) · three ways in, one lifecycle",
 describe("API reference page (2026-10-10) · the instance's document, grouped and readable", () => {
   const DOC = { openapi: "3.0.3", info: { title: "ArcPreflight API", version: "abc1234", description: "profile=SUBMISSION_RESTRICTED; network=eip155:5042002. A note." },
     paths: { "/v1/network": { get: { summary: "the instance", responses: { 200: { description: "now" } } } },
-      "/v1/demo/orders": { post: { summary: "create an order", security: [{ bearer: [] }], requestBody: { content: { "application/json": { schema: { type: "object", properties: { payer: { type: "string", format: "0x address" }, proxy: { type: "string", enum: ["MAIN", "CHANGED"] } }, required: ["payer"] } } } }, responses: { 201: { description: "created" }, 401: { description: "no token" } } } } },
-    components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } } } };
+      "/v1/demo/orders": { post: { summary: "create an order", security: [{ bearer: [] }], requestBody: { content: { "application/json": { schema: { type: "object", properties: { payer: { type: "string", format: "0x address" }, proxy: { type: "string", enum: ["MAIN", "CHANGED"] } }, required: ["payer"] } } } }, responses: { 201: { description: "created" }, 401: { description: "no token" } } } },
+      "/v1/requests/{requestId}": { get: { summary: "read a check", security: [{ bearer: [] }], responses: { 200: { description: "delivered, or the payment state", content: { "application/json": { schema: { oneOf: [{ $ref: "#/components/schemas/Delivered" }, { $ref: "#/components/schemas/RequestStatus" }] } } } } } } } },
+    components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } }, schemas: { Delivered: { type: "object", properties: { delivery: { type: "string", enum: ["DELIVERED"] } } }, RequestStatus: { type: "object", properties: { state: { type: "string" } } } } } };
   /** a card, expanded one level, plus the shapes it renders (Shape is a hook-free child component, so it is called like the card itself) */
-  const cards = (tree: any) => nodes(tree).filter((n) => typeof n.type === "function" && n.type.name === "OperationCard").map((n) => { const card = n.type(n.props); const shapes = nodes(card).filter((x) => typeof x.type === "function" && x.type.name === "Shape").map((x) => content(x.type(x.props))); return { props: n.props, rendered: [content(card), ...shapes].join(" ") }; });
+  const cards = (tree: any) => nodes(tree).filter((n) => typeof n.type === "function" && n.type.name === "OperationCard").map((n) => { const card = n.type(n.props); const shapes = nodes(card).filter((x) => typeof x.type === "function" && x.type.name === "Shape").map((x) => content(x.type(x.props))); return { props: n.props, rendered: [content(card), ...shapes].join(" "), shapes }; });
   it("reads GET /openapi.json of the selected instance, lists the groups in the index and renders one card per operation with method, path, access, body skeleton and responses", async () => {
     const paths: string[] = []; vi.stubGlobal("fetch", vi.fn(async (path: string) => { paths.push(path); if (path.endsWith("/openapi.json")) return response(DOC); throw new Error(`unexpected ${path}`); }));
     render(Reference); await flush(); const tree = render(Reference);
     expect(paths).toEqual(["/openapi.json"]);
-    expect(content(tree)).toContain("2 operations, release abc1234");
-    expect(nodes(tree).filter((n) => n.type === "a" && String(n.props.href).startsWith("#op-")).map((n) => n.props.href)).toEqual(["#op-get-v1-network", "#op-post-v1-demo-orders"]); // the index
-    expect(nodes(tree).filter((n) => n.type === "h2").map(content)).toEqual([expect.stringContaining("Network and public reads"), expect.stringContaining("Orders")]);
-    const [network, order] = cards(tree);
+    expect(content(tree)).toContain("3 operations, release abc1234");
+    expect(nodes(tree).filter((n) => n.type === "a" && String(n.props.href).startsWith("#op-")).map((n) => n.props.href)).toEqual(["#op-get-v1-network", "#op-post-v1-demo-orders", "#op-get-v1-requests-requestId"]); // the index
+    expect(nodes(tree).filter((n) => n.type === "h2").map(content)).toEqual([expect.stringContaining("Network and public reads"), expect.stringContaining("Orders"), expect.stringContaining("Checks over x402"), expect.stringContaining("Schemas")]); // the groups in their fixed order, then the schemas section the document now has
+    const [network, order, read] = cards(tree);
+    expect(read.shapes).toHaveLength(1); expect(read.shapes[0]).toContain("#schema-Delivered"); expect(read.shapes[0]).toContain("#schema-RequestStatus"); expect(read.shapes[0]).toContain(" or "); expect(read.shapes[0]).not.toContain("delivery"); // a oneOf answer: the two schema links joined by "or", not two inlined skeletons (review of 199dd55)
     expect(network.props.op.method).toBe("GET"); expect(network.rendered).toContain("open"); expect(network.rendered).toContain("the instance");
     expect(order.props.op.secured).toBe(true); expect(order.rendered).toContain("bearer"); expect(order.rendered).toContain('\\"payer\\": string (0x address)'); expect(order.rendered).toContain('\\"proxy?\\": \\"MAIN\\" | \\"CHANGED\\"'); // the harness serializes the rendered text, so its quotes read escaped expect(order.rendered).toContain("201"); expect(order.rendered).toContain("no token");
     expect(order.rendered).toContain("http://offline.invalid/v1/demo/orders"); // the full URL on this instance

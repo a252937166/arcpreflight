@@ -74,6 +74,8 @@ export default function Integrate() {
     return () => { alive = false; };
   }, [base]);
   const api_ = wayById("api"), cli = wayById("cli"), browser = wayById("browser");
+  const release = net?.release ?? "this site runs"; // the commands belong to this release's source: a public checkout may still hold an older one
+  const cliIntro = `Two programs in the repository, run with pnpm exec tsx from the checkout's root. Nothing is on npm. Both belong to the source this site runs (release ${release}): a public checkout that still shows an older release does not have them yet. The verifier needs only a passport, an Arc RPC and anchors you trust. The reference agent runs the lifecycle from a durable store and restarts into recovery.`;
   const networkPreview = net ? JSON.stringify({ network: net.network, chainId: net.chainId, head: net.head, release: net.release, priceTokenAtomic: net.priceTokenAtomic, access: net.access ? { publicExecution: net.access.publicExecution, walletExecution: net.access.walletExecution } : undefined }, null, 2) : "…";
 
   // every command line stays under 66 characters: it is read in a column, never wrapped mid-token
@@ -133,12 +135,14 @@ export TOKEN=…`;
 #   GET  …/{id} until CONFIRMED
 #   a lost answer → POST …/{id}/recover, never a second payment`;
 
-  const walletHelper = `// packages/client/src/walletExecute.ts (download below): the hand-over
-// the site performs, for your own code — one instance, one session
-import { executeValidatedAttempt } from "@arcpreflight/client";
+  const walletHelper = `// the hand-over the site performs, from your own code: one instance,
+// one session. Nothing is on npm — save the download (link below)
+// next to this file; it has no dependencies.
+import { executeValidatedAttempt, completePendingRecovery }
+  from "./arcpreflight-walletExecute";
+const target = { api: "${apiBase}", token: TOKEN, attemptId };
 const r = await executeValidatedAttempt({
-  api: "${apiBase}", token: TOKEN,
-  attemptId, provider: window.ethereum,   // any EIP-1193 provider
+  ...target, provider: window.ethereum,   // any EIP-1193 provider
 });
 // it reads the attempt; converts the plan to the wallet's fields
 // (hex value, gas, fees, type 2, chainId; no nonce); checks the
@@ -151,22 +155,29 @@ switch (r.outcome) {
   case "claimed-elsewhere": /* another tab holds the claim: recover */ break;
   case "abandoned": /* the wallet prompt was rejected: NOT_SENT */ break;
   case "unknown-submission": /* marked and reconciled; never re-prompt */ break;
+  case "pending-recovery": /* the wallet answered but the API call that
+     records it failed: r.txHash (when the wallet returned one), r.claimId
+     and r.stage are kept; nothing is prompted again — finish the step: */
+    await completePendingRecovery(target, r); break;
 }`;
   const setupCheckout = `git clone --recurse-submodules \\
   https://github.com/a252937166/arcpreflight && cd arcpreflight
 pnpm install && (cd packages/contracts && forge build)
-# Node 22.6 or newer, pnpm and Foundry. The public repository holds an
-# older release than this site; the commands below exist in both.`;
-  const verifyPublished = `E=${apiBase}/v1/evidence/selftest/passports
+# Node 22.6 or newer, pnpm and Foundry. The commands below belong to
+# the source this site runs (release ${release}). A public checkout
+# that still shows an older release does not have them yet.`;
+  const verifyPublished = `# from the root of the checkout of release ${release} or newer
+E=${apiBase}/v1/evidence/selftest/passports
 P=testnet-wallet-2026-10-10T07-35-28-806Z
 curl -sO "$E/$P.passport.json" && curl -sO "$E/$P.anchors.json"
 pnpm exec tsx packages/verifier/src/cli.ts $P.passport.json \\
   --rpc ${rpc} --anchors $P.anchors.json
-# run from the checkout's root; no API, no token, no key
+# no API, no token, no key
 # exit 0 when nothing fails, 2 on a FAIL; --json for machines
 # without --rpc the online findings stay UNVERIFIED`;
-  const runAgent = `# against your own testnet API (README): the runner key pays
-# the check fee and the order; run from the checkout's root
+  const runAgent = `# from the root of the checkout of release ${release} or newer,
+# against your own testnet API (README); the runner key pays
+# the check fee and the order
 ARC_NET=testnet API_URL=http://127.0.0.1:4040 \\
 RUNNER_TOKEN=… BASELINE_DIGEST_MAIN=0x… \\
   pnpm exec tsx examples/merchant-agent/src/run.ts run APPROVED_PAYMENT
@@ -252,7 +263,7 @@ ARC_NET=testnet pnpm exec tsx examples/merchant-agent/src/run.ts \\
               <Snippet label="Create an order for your wallet (0.05 USDC on the MAIN proxy)" code={createOrder} />
               <Snippet label="Quote the check, pay its fee, receive the report" code={quoteCheck} note="the data is pay(orderId) on the DemoMerchant proxy; every field is defined in the request schema below" />
               <Snippet label="Validate, claim the prompt, sign, report the hash, recover" code={executeAttempt} />
-              <Snippet label="The same hand-over from your own code: the wallet helper" code={walletHelper} note={<>the helper is <a href={walletHelperDownload} download="arcpreflight-walletExecute.ts">one file without dependencies</a>, tested in <code>packages/client/test/walletExecute.test.ts</code>; the site's Developer page runs the same checks</>} />
+              <Snippet label="The same hand-over from your own code: the wallet helper" code={walletHelper} note={<>the helper is <a href={walletHelperDownload} download="arcpreflight-walletExecute.ts">one file without dependencies</a>, imported from where you saved it (no package is published); tested in <code>packages/client/test/walletExecute.test.ts</code>; the site's Developer page runs the same checks</>} />
             </div>
           </div>
         </div>
@@ -260,7 +271,7 @@ ARC_NET=testnet pnpm exec tsx examples/merchant-agent/src/run.ts \\
 
       <section id="cli" className="way" style={hue(cli)} tabIndex={-1} aria-labelledby="way-cli">
         <div className="container">
-          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-cli">Command line</h2><p className="muted">Two programs in the repository, run with <code>pnpm exec tsx</code> from the checkout's root: nothing is on npm, and the public repository holds an older release than this site. The verifier needs only a passport, an Arc RPC and anchors you trust. The reference agent runs the lifecycle from a durable store and restarts into recovery.</p></div></div>
+          <div className="way-head"><span className="way-mark" aria-hidden="true" /><div><h2 id="way-cli">Command line</h2><p className="muted">{cliIntro}</p></div></div>
           <div className="way-body">
             <div className="stack" style={{ gap: 14 }}>
               <h3>What it does</h3>
