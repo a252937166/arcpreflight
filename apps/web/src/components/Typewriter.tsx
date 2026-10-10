@@ -1,23 +1,35 @@
 import { useEffect, useState } from "react";
 
-/** Types a sequence of lines like an agent thinking out loud. Deterministic text; no model involved. */
+/** Types a sequence of lines like an agent thinking out loud. Deterministic text; no model involved.
+ *  Presentation finding 2026-10-10: the block takes its FINAL height from the first render — every line is laid out invisibly in full from the
+ *  start (a ghost layer) and the typed text is painted over it in the same grid cell, so the page never grows while the narration types and
+ *  the scrollbar stays put. The caret takes no layout width, so it never wraps a line that its own text would not wrap. */
+const LAYER = { gridArea: "1 / 1" } as const;
+const GHOST = { gridArea: "1 / 1", visibility: "hidden" } as const;
+const CARET = { display: "inline-block", width: 0, overflow: "visible" } as const;
 export function Typewriter({ lines, speed = 22, pause = 700, loop = false, className }: { lines: string[]; speed?: number; pause?: number; loop?: boolean; className?: string }) {
   const [li, setLi] = useState(0);
   const [ci, setCi] = useState(0);
-  const [done, setDone] = useState<string[]>([]);
-  useEffect(() => { setLi(0); setCi(0); setDone([]); }, [lines.join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setLi(0); setCi(0); }, [lines.join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (li >= lines.length) { if (loop) { const t = setTimeout(() => { setLi(0); setCi(0); setDone([]); }, 4000); return () => clearTimeout(t); } return; }
+    if (li >= lines.length) { if (loop) { const t = setTimeout(() => { setLi(0); setCi(0); }, 4000); return () => clearTimeout(t); } return; }
     const line = lines[li];
     if (ci < line.length) { const t = setTimeout(() => setCi(ci + 1), speed + (line[ci] === "." || line[ci] === "—" ? 120 : 0)); return () => clearTimeout(t); }
-    const t = setTimeout(() => { setDone((d) => [...d, line]); setLi(li + 1); setCi(0); }, pause);
+    const t = setTimeout(() => { setLi(li + 1); setCi(0); }, pause);
     return () => clearTimeout(t);
   }, [li, ci, lines, speed, pause, loop]);
-  const current = li < lines.length ? lines[li].slice(0, ci) : null;
   return (
     <div className={className}>
-      {done.map((l, i) => <p key={i} className="type-line done">{l}</p>)}
-      {current !== null && <p className="type-line">{current}<span className="caret">▍</span></p>}
+      {lines.map((line, i) => {
+        if (i < li) return <p key={i} className="type-line done">{line}</p>;
+        const typed = i === li ? line.slice(0, ci) : null; // the line being typed; later lines are reserved by their ghost alone
+        return (
+          <p key={i} className="type-line" style={{ display: "grid" }}>
+            <span style={GHOST} aria-hidden="true">{line}</span>
+            {typed !== null && <span style={LAYER}>{typed}<span className="caret" style={CARET}>▍</span></span>}
+          </p>
+        );
+      })}
     </div>
   );
 }

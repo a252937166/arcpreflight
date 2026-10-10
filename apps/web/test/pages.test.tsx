@@ -1773,3 +1773,44 @@ describe("review of c3afab7 · P2: the purchase is bound before the wallet signs
     expect(after.filter((p) => !p.startsWith("/testnet/"))).toEqual([]); // … all on the instance the execution began on
   });
 });
+
+describe("presentation finding 2026-10-10 · the typed narration reserves its final height from the first render", () => {
+  // The home hero (and the run panels) type their lines; a line used to be rendered only once it was reached, so the block grew with every line
+  // and the whole page reflowed under the reader — the scrollbar kept moving. Every line box now exists from the first render, holding its full
+  // text invisibly; the typed text is painted over it; the caret takes no layout width.
+  const LINES = ["First line of the monologue.", "Second line, a little longer than the first one.", "Third."];
+  const lineBoxes = (tree: any) => nodes(tree).filter((n) => n.type === "p" && String(n.props?.className ?? "").includes("type-line"));
+  const ghostOf = (p: any) => nodes(p).find((n) => n.type === "span" && n.props?.["aria-hidden"] === "true")?.props.children ?? null;
+  const liveOf = (p: any) => nodes(p).find((n) => n.type === "span" && n.props?.["aria-hidden"] !== "true" && n.props?.style?.gridArea === "1 / 1");
+  const typedOf = (p: any) => { const live = liveOf(p); return live ? String(live.props.children[0]) : null; };
+  const caretOf = (p: any) => nodes(p).find((n) => n.type === "span" && n.props?.className === "caret");
+  it("reproduction + control: all line boxes exist from the first render, each already holding its full text invisibly; the typed text grows inside them, a finished line turns 'done', the box count never changes, the caret has no width", async () => {
+    const { Typewriter } = await import("../src/components/Typewriter");
+    const show = () => render(() => Typewriter({ lines: LINES, speed: 10, pause: 50 }));
+    const tick = async () => { await vi.advanceTimersByTimeAsync(200); return show(); }; // one scheduled step (a character or the pause) per tick
+    let tree = show();
+    expect(lineBoxes(tree)).toHaveLength(3); // the final height is reserved at once (the old component rendered one box and added the next only when reached)
+    expect(lineBoxes(tree).map(ghostOf)).toEqual(LINES);
+    expect(typedOf(lineBoxes(tree)[0])).toBe(""); expect(caretOf(lineBoxes(tree)[0]).props.style).toMatchObject({ display: "inline-block", width: 0, overflow: "visible" });
+    expect(liveOf(lineBoxes(tree)[1])).toBeUndefined(); expect(liveOf(lineBoxes(tree)[2])).toBeUndefined(); // later lines: ghost only
+    for (let k = 0; k < 5; k++) tree = await tick();
+    expect(typedOf(lineBoxes(tree)[0])).toBe("First"); expect(lineBoxes(tree)).toHaveLength(3); expect(lineBoxes(tree).map(ghostOf)).toEqual(LINES);
+    for (let k = 0; k < LINES[0].length - 5 + 1; k++) tree = await tick(); // the rest of the line, then the pause
+    expect(String(lineBoxes(tree)[0].props.className)).toContain("done"); expect(lineBoxes(tree)[0].props.children).toBe(LINES[0]); // finished: the plain text, same height
+    expect(typedOf(lineBoxes(tree)[1])).toBe(""); expect(ghostOf(lineBoxes(tree)[2])).toBe(LINES[2]); expect(lineBoxes(tree)).toHaveLength(3);
+    for (let k = 0; k < LINES[1].length + 1 + LINES[2].length + 1; k++) tree = await tick();
+    expect(lineBoxes(tree).map((p) => String(p.props.className))).toEqual(["type-line done", "type-line done", "type-line done"]); expect(nodes(tree).find((n) => n.props?.className === "caret")).toBeUndefined();
+  });
+  it("interrupted variant: a new set of lines resets the typing and reserves the new set's height at once; in loop mode the restart keeps every box", async () => {
+    const { Typewriter } = await import("../src/components/Typewriter");
+    let lines = LINES; const show = () => render(() => Typewriter({ lines, speed: 10, pause: 50, loop: true }));
+    let tree = show(); for (let k = 0; k < 8; k++) { await vi.advanceTimersByTimeAsync(200); tree = show(); }
+    expect(typedOf(lineBoxes(tree)[0])).toBe("First li");
+    lines = ["Only two lines now.", "And the second."]; tree = show(); tree = show(); // the reset effect runs, then the next render reflects it
+    expect(lineBoxes(tree)).toHaveLength(2); expect(lineBoxes(tree).map(ghostOf)).toEqual(lines); expect(typedOf(lineBoxes(tree)[0])).toBe("");
+    for (let k = 0; k < lines[0].length + 1 + lines[1].length + 1; k++) { await vi.advanceTimersByTimeAsync(200); tree = show(); }
+    expect(lineBoxes(tree).map((p) => String(p.props.className))).toEqual(["type-line done", "type-line done"]);
+    await vi.advanceTimersByTimeAsync(4100); tree = show(); // loop: the restart
+    expect(lineBoxes(tree)).toHaveLength(2); expect(lineBoxes(tree).map(ghostOf)).toEqual(lines); expect(typedOf(lineBoxes(tree)[0])).toBe("");
+  });
+});
