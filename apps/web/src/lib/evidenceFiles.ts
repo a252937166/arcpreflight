@@ -6,8 +6,11 @@ export type EvidenceRow = { path: string; name: string; bytes: number; /** the `
 export type EvidenceGroup = { dir: string; label: string; rows: EvidenceRow[]; files: number; bytes: number };
 
 export const ROOT_DIR = "";
-const dirOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ROOT_DIR);
-const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+/** folders are at most two levels deep (`selftest/passports`); anything below becomes part of the row's name — an exported passport
+ *  directory stays one folder, not six */
+export const GROUP_DEPTH = 2;
+const dirOf = (path: string) => { const parts = path.split("/"); return parts.length <= 1 ? ROOT_DIR : parts.slice(0, Math.min(GROUP_DEPTH, parts.length - 1)).join("/"); };
+const nameOf = (path: string) => { const dir = dirOf(path); return dir === ROOT_DIR ? path : path.slice(dir.length + 1); };
 /** "1.2 MB", "76.7 KB", "202 B" — a size a reader can compare at a glance */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "—";
@@ -28,7 +31,7 @@ export function groupEvidenceFiles(files: EvidenceFile[]): EvidenceGroup[] {
     const byName = new Map(list.map((f) => [nameOf(f.path), f]));
     const rows: EvidenceRow[] = [];
     for (const f of list) {
-      const name = nameOf(f.path);
+      const name = nameOf(f.path); // relative to the folder: a file of a deeper directory keeps that tail in its name
       if (name.endsWith(".anchors.json") && byName.has(`${name.slice(0, -".anchors.json".length)}.passport.json`)) continue; // folded into its passport's row
       const anchors = name.endsWith(".passport.json") ? byName.get(`${name.slice(0, -".passport.json".length)}.anchors.json`) ?? null : null;
       rows.push({ path: f.path, name, bytes: f.bytes, anchors });
