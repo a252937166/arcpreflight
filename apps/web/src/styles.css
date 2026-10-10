@@ -543,6 +543,87 @@ table.t.findings tr.fail td { background: rgba(251,113,133,0.06); }
 .wp-full { display: block; font-family: var(--mono); font-size: 0.72rem; color: var(--ink-2); overflow-wrap: anywhere; user-select: all; padding: 0 4px 4px; }
 .wp-balance { font-family: var(--mono); font-size: 0.8rem; color: var(--ink); padding: 2px 4px 6px; overflow-wrap: anywhere; }
 .wp-balance .dim { font-family: var(--grotesk); }
+
+/* ---- product entry and integration guide ---- */
+.home-entry { padding-top: 56px; padding-bottom: 30px; }
+.home-entry-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin: 28px 0 32px; }
+.home-hero { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(0, 1fr); gap: 48px; align-items: center; }
+.home-hero > * { min-width: 0; }
+.home-intro { gap: 22px; }
+.home-format { font-family: var(--grotesk); color: var(--teal); font-size: 0.86rem; font-weight: 500; }
+.home-intro h1 { font-size: clamp(2.6rem, 4.9vw, 3.85rem); line-height: 1.08; text-wrap: balance; }
+.home-lead { color: var(--ink-2); font-size: 1.04rem; line-height: 1.7; max-width: 520px; }
+.home-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.home-actions .btn { padding: 12px 17px; font-size: 0.9rem; }
+.home-entry .btn.primary, .integrate-page .btn.primary { box-shadow: none; }
+.home-start-note { color: var(--ink-2); font-size: 0.82rem; line-height: 1.65; max-width: 510px; }
+.home-network { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; font-size: 0.75rem; color: var(--ink-2); }
+.home-network > span:last-child { flex-basis: 100%; padding-left: 26px; }
+.home-api-preview { background: rgba(7,9,15,0.55); border: 1px solid var(--line-2); border-radius: 14px; padding: 26px; }
+.home-api-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.home-api-heading h2 { font-family: var(--grotesk); font-size: 1.2rem; font-weight: 500; }
+.home-api-calls { margin: 22px 0; }
+.home-api-calls > div { padding: 15px 0; border-top: 1px solid var(--line); }
+.home-api-calls dt { display: flex; gap: 12px; align-items: baseline; font-size: 0.8rem; }
+.home-api-calls dt > span { color: var(--teal); font-family: var(--mono); font-size: 0.71rem; width: 36px; flex: none; }
+.home-api-calls code { overflow-wrap: anywhere; font-size: 0.88em; }
+.home-api-calls dd { margin: 8px 0 0 48px; font-size: 0.8rem; line-height: 1.6; color: var(--ink-2); }
+.home-use { border-top: 1px solid var(--line-2); padding-top: 30px; }
+.home-use h2 { font-size: 1.8rem; margin-bottom: 24px; }
+.home-use-path { display: grid; grid-template-columns: 170px minmax(0, 1fr) 172px; gap: 26px; align-items: center; padding: 20px 0; border-top: 1px solid var(--line); }
+.home-use-path p { color: var(--ink-2); font-size: 0.86rem; line-height: 1.6; }
+.home-use-path .btn { justify-self: end; }
+.home-api-preview .btn, .home-use-path .btn, .integrate-page .btn { min-height: 44px; }
+.home-availability { margin-top: 20px; color: var(--ink-2); font-size: 0.81rem; }
+.home-quick-links { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 14px; }
+.home-quick-links > span { flex-basis: 100%; font-size: 0.78rem; }
+.home-entry a:focus-visible, .home-use a:focus-visible, .integrate-page :is(a, button, summary):focus-visible, .integration-workbench-link a:focus-visible, .nav a:focus-visible { outline: 2px solid var(--sky); outline-offset: 5px; }
+.integrate-intro h1 { font-size: clamp(2.6rem, 5vw, 3.85rem); line-height: 1.1; }
+.integrate-page :is(#http-api, #cli) { scroll-margin-top: 128px !important; }
+.integration-methods { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line); padding: 24px 0; }
+.integration-method { min-width: 0; }
+.integration-method .row { justify-content: flex-start; }
+.integration-code { min-width: 0; padding: 12px 16px 16px; background: rgba(7,9,15,0.6); border: 1px solid var(--line); border-radius: 10px; }
+.integration-code .json { margin: 0; padding: 0; border: 0; background: transparent; max-height: none; cursor: text; border-radius: 0; }
+.integration-code .json:hover { background: transparent; }
+.integration-code-header { gap: 8px; }
+.integration-contract-links { padding-top: 22px; border-top: 1px solid var(--line); }
+.integration-contract-text { margin-top: 12px !important; white-space: pre-wrap; overflow-wrap: anywhere; }
+.integration-flow { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 40px; }
+.integration-step { display: flex; gap: 18px; border-top: 1px solid var(--line); padding: 24px 0; min-width: 0; }
+.integration-step > .stack { min-width: 0; }
+.integration-number { flex: none; color: var(--ink-2); font-size: 0.8rem; padding-top: 3px; }
+.integration-endpoints code { font-size: 0.72rem; color: var(--teal); overflow-wrap: anywhere; }
+.integration-footer, .integration-workbench-link { border-top: 1px solid var(--line-2); padding: 24px 0; gap: 20px; }
+.integration-footer.panel { border-radius: 0; background: transparent; border-right: 0; border-left: 0; border-bottom: 0; }
+.nav .nav-links { display: none; }
+.nav .mobile-links { display: flex; }
+.nav .mobile-links a { display: inline-flex; align-items: center; min-height: 44px; }
+.nav .nav-inner { flex-wrap: nowrap; height: 64px; padding: 0; }
+@media (max-width: 960px) {
+  .home-hero { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .home-intro h1 { max-width: 680px; }
+  .home-lead, .home-start-note { max-width: 680px; }
+  .home-api-preview { max-width: 680px; }
+}
+@media (max-width: 720px) {
+  .nav .nav-inner { height: auto; flex-wrap: wrap; padding: 10px 0 4px; }
+  .home-entry { padding-top: 34px; padding-bottom: 18px; }
+  .home-intro { gap: 18px; }
+  .home-api-preview { padding: 20px; }
+  .home-use-path { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 20px 0; }
+  .home-use-path .btn { justify-self: start; }
+  .integration-methods, .integration-flow { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .integration-flow { gap: 0; }
+  .integration-method { padding: 0 0 22px; border-bottom: 1px solid var(--line); }
+  .integration-method:last-child { padding-bottom: 0; border-bottom: 0; }
+  .integration-number { display: none; }
+  .integrate-page :is(#http-api, #cli) { scroll-margin-top: 184px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .home .thread, .aurora::before, .aurora::after, .aurora .blob { animation: none; }
+}
 .wp-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 4px; }
 .wp-action { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 999px; border: 1px solid var(--line-2); background: rgba(255,255,255,0.03); color: var(--ink); font-family: var(--grotesk); font-size: 0.82rem; line-height: 1.3; cursor: pointer; text-decoration: none; }
 .wp-action:hover, .wp-action:focus-visible { background: rgba(255,255,255,0.08); outline: none; text-decoration: none; }

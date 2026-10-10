@@ -1,22 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useNet } from "../App";
-import { api, explorerAddr, type RunSummary } from "../lib/api";
+import { api, apiPath, explorerAddr, type RunSummary } from "../lib/api";
 import { Chip, DecisionBadge, Hex } from "../components/Badges";
 import { RunsTable } from "../components/RunsTable";
 import { Pipeline } from "../components/Pipeline";
-import { Typewriter } from "../components/Typewriter";
 import { Thread, type Anchor } from "../components/Thread";
-import { HeroScene, TwoFaces, PinnedBlocks, ReceiptChain, FacilitatorFlow, ProxySwap, Squiggle } from "../components/Illustrations";
+import { TwoFaces, PinnedBlocks, ReceiptChain, FacilitatorFlow, ProxySwap } from "../components/Illustrations";
 import { usdcToken } from "../lib/format";
-
-const MONOLOGUE = [
-  "I'm an agent about to pay a 0.05 USDC order on Arc. The merchant is an upgradeable proxy, approved on implementation A.",
-  "Before I sign I buy one pinned report: what is behind that proxy right now, and does my exact call still match the order?",
-  "The proxy moved to B — same ABI, same calldata, the payment would still succeed. I stop. B was never approved.",
-  "Another day my response vanished after the transaction may have left. I don't pay again — I recover the original attempt.",
-  "When it's done, the Payment Passport leaves with me: a new process can verify what was approved, sent and settled.",
-];
 
 export default function Home() {
   const { net, link = (to: string) => to } = useNet();
@@ -32,60 +23,55 @@ export default function Home() {
     <div className="home" ref={home}>
       <Thread container={home} anchors={anchors} />
 
-      {/* hero: Arc first, then the payment that outlives its session */}
-      <section className="section" style={{ paddingTop: 48, paddingBottom: 30 }}>
+      <section className="section home-entry">
         <div className="container" ref={hero}>
           <div className="arc-lockup">
             <img src="/arc/logo-gradient.svg" className="arc-logo-big" alt="Arc" />
             <p className="arc-logo-note">built on <b>Arc</b> — Circle's chain where <b>USDC is the gas</b>, chain id {net?.chainId ?? 5042}, ~1 s blocks</p>
           </div>
-          <div className="cols" style={{ marginTop: 34 }}>
-            <div className="stack" style={{ gap: 22 }}>
-              <h1>Pay the approved order.<br />Recover the original attempt.<br /><span className="underline-squiggle">Take the proof with you.<Squiggle /></span></h1>
-              <p className="muted" style={{ fontSize: "1.15rem", maxWidth: 640 }}>Recoverable USDC checkout on Arc, with approval-aware execution and portable proof.</p>
-              
-              <Typewriter lines={MONOLOGUE} className="monologue" />
-              <div className="row" style={{ marginTop: 4, flexWrap: "wrap" }}>
-                <Link to={link("/demo")} className="btn primary" title="the project's runner pays from project funds; no wallet needed">Watch a project-funded demo</Link>
-                <Link to={link("/developer")} className="btn" title="your wallet pays the check fee, the order and the gas on Arc testnet; the faucet funds it">Try with my wallet</Link>
-                <Link to={link("/verify")} className="btn ghost">Verify a passport</Link>
-                <Link to={link("/inspect")} className="btn ghost">Inspect the sample contracts</Link>
-              </div>
-              <div className="chain-strip">
-                <span className="blk" /><span className="blk" /><span className="blk" />
-                <span>head <b style={{ color: "var(--ink-2)" }}>{net?.head ? `#${net.head}` : "…"}</b></span>
-                <span>· {net?.caip2 ?? "eip155:5042"}</span>
-                <span>· a check costs {net ? usdcToken(net.priceTokenAtomic) : "0.01 USDC"}</span>
-                <span>· live runs today {net ? `${net.budget.usedToday}/${net.budget.maxRunsPerDay}` : "…"}</span>
+          <div className="home-entry-bar">
+            <p className="home-format">HTTP API + browser workbench</p>
+            <div className="home-actions">
+              <Link to={link("/integrate")} className="btn primary">Integrate via API</Link>
+              <Link to={link("/demo")} className="btn" title="the project's runner pays from project funds; no wallet needed">Watch a project-funded demo</Link>
+            </div>
+          </div>
+          <div className="home-hero">
+            <div className="stack home-intro">
+              <h1>A payment API for recoverable USDC orders.</h1>
+              <p className="home-lead">Check an order before paying on Arc. Track the original payment when its result is uncertain. Export a Payment Passport that another process can verify.</p>
+              <p className="home-start-note">The demo needs no wallet and uses project funds. <Link to={link("/developer")}>Try with my wallet</Link> to create your own order and use the full workflow.</p>
+              <div className="home-network">
+                <img src="/arc/arc-icon.svg" className="arc-icon" alt="" />
+                <span>{net ? netName : "Arc network loading"}{!mainnet && " preview"}</span>
+                <span>{mainnet ? "Check execution availability in the guide" : "Free test funds for the wallet workflow"}</span>
               </div>
             </div>
-            <HeroScene />
+            <div className="home-api-preview" aria-label="What your app gets from the API">
+              <div className="home-api-heading"><h2>Your app calls the API.</h2><span className="chip info">HTTP / JSON</span></div>
+              <p className="small muted">Your signer authorizes payments. ArcPreflight records the checks, attempts and proof.</p>
+              <dl className="home-api-calls">
+                <div><dt><span>POST</span><code>{apiPath("/v1/preflight")}</code></dt><dd>Get a check quote, authorize its fee, then receive the report.</dd></div>
+                <div><dt><span>GET</span><code>{apiPath("/v1/wallet/attempts/{id}")}</code></dt><dd>Follow the original attempt, its transaction and the order outcome.</dd></div>
+                <div><dt><span>GET</span><code>{apiPath("/v1/wallet/attempts/{id}/passport")}</code></dt><dd>Export the records for independent verification.</dd></div>
+              </dl>
+              <a href={apiPath("/openapi.json")} target="_blank" rel="noreferrer" className="btn sm">Open API reference</a>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* how to explore: three paths, what each needs (design v3.3: the whole lifecycle with your own wallet) */}
       <section className="section-tight">
         <div className="container">
-          <div className="panel soft" aria-label="how to explore">
-            <div className="row between" style={{ alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-              <div className="kicker">explore in three minutes</div>
-              <span className="tiny dim">{mainnet ? "business execution on Arc mainnet opens after the mainnet acceptance — the testnet side is free to use now" : "everything below runs on Arc testnet with free test funds; the mainnet side shows the same product behind its acceptance gate"}</span>
+          <div className="home-use" aria-label="how to use ArcPreflight">
+            <h2>Choose how to use ArcPreflight.</h2>
+            <div className="home-use-paths">
+              <div className="home-use-path"><h3>HTTP API</h3><p>Connect your app or agent to the hosted service for orders, checks, recorded attempts and recovery.</p><Link to={`${link("/integrate")}#http-api`} className="btn sm">Read the API guide</Link></div>
+              <div className="home-use-path"><h3>Browser workflow</h3><p>Try the payment lifecycle with your wallet. Use the project-funded demo first if you want to explore without connecting.</p><Link to={link("/developer")} className="btn sm">Try with my wallet</Link></div>
+              <div className="home-use-path"><h3>CLI examples</h3><p>Run the reference agent from the repository, or verify an exported Passport in a separate process.</p><Link to={`${link("/integrate")}#cli`} className="btn sm">See CLI commands</Link></div>
             </div>
-            <div className="three" style={{ gap: 20, marginTop: 10 }}>
-              <div className="stack" style={{ gap: 6 }}>
-                <b>1 · Watch a project-funded demo</b>
-                <span className="small muted">No wallet needed. <Link to={link("/demo")}>Watch a project-funded demo</Link>: the project runner pays a real order from project funds.</span>
-              </div>
-              <div className="stack" style={{ gap: 6 }}>
-                <b>2 · Try with my wallet</b>
-                <span className="small muted"><Link to={link("/developer")}>Try with my wallet</Link>: your wallet, your order, the seven steps, your passport.</span>
-              </div>
-              <div className="stack" style={{ gap: 6 }}>
-                <b>3 · Check the proof</b>
-                <span className="small muted"><Link to={link("/verify")}>Verify</Link> any passport offline and against an Arc RPC — in the browser or in a clean process.</span>
-              </div>
-            </div>
+            <p className="home-availability">MCP is not available. The TypeScript libraries and CLI examples exist in the current checkout; publication of this release's source is pending.</p>
+            <p className="small muted home-quick-links"><Link to={link("/verify")}>Verify a passport</Link><Link to={link("/inspect")}>Inspect the sample contracts</Link><span>A check costs {net ? usdcToken(net.priceTokenAtomic) : "0.01 USDC"}; the current payment adapter supports DemoMerchant orders.</span></p>
           </div>
         </div>
       </section>

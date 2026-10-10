@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import type { NetworkInfo } from "../lib/api";
-import { availableNetworks, netName, toggleVisible, type Instance, type NetChoice } from "../lib/network";
+import { availableNetworks, netName, toggleVisible, withNet, type Instance, type NetChoice } from "../lib/network";
 import { setTargetNetwork } from "../lib/wallet";
 import { WalletChip } from "./WalletChip";
 
-const LINKS = [["/", "Overview"], ["/demo", "Live demo"], ["/inspect", "Inspect"], ["/developer", "Developer"], ["/verify", "Verify"], ["/evidence", "Evidence"]] as const;
+const LINKS = [["/", "Overview"], ["/integrate", "API & CLI"], ["/demo", "Live demo"], ["/developer", "Wallet workflow"], ["/inspect", "Inspect"], ["/verify", "Verify"], ["/evidence", "Evidence"]] as const;
 
 /** The network switch: one button per network that an instance REPORTS (never per path); shown only when two differ. */
 export function NetworkToggle({ instances, selected, onSelect }: { instances: readonly Instance[]; selected: Instance | null; onSelect: (c: NetChoice) => void }) {
@@ -21,7 +21,7 @@ export function NetworkToggle({ instances, selected, onSelect }: { instances: re
 }
 
 export function Nav({ net, testWallet, instances = [], selected = null, onSelect = () => {} }: { net: NetworkInfo | null; testWallet: boolean; instances?: readonly Instance[]; selected?: Instance | null; onSelect?: (c: NetChoice) => void }) {
-  const links = LINKS.map(([to, label]) => <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => (isActive ? "active" : "")}>{label}</NavLink>);
+  const links = LINKS.map(([to, label]) => <NavLink key={to} to={withNet(to, selected)} end={to === "/"} className={({ isActive }) => (isActive ? "active" : "")}>{label}</NavLink>);
   // the wallet store learns the API's chain here (the nav is always mounted): a connected wallet on another chain is asked once to switch
   useEffect(() => { setTargetNetwork(net); }, [net]);
   return (
