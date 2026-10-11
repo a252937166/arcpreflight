@@ -3,7 +3,7 @@
   "planId": "gate-d-mainnet-2026-10",
   "network": "mainnet",
   "createdAt": "2026-10-11T08:09:06.723Z",
-  "updatedAt": "2026-10-11T09:26:36.481Z",
+  "updatedAt": "2026-10-11T09:37:20.059Z",
   "approved": {
     "budgetCapNativeAtomic": "690000000000000000",
     "maxFeePerGasCeiling": "40000000000",
@@ -98,17 +98,25 @@
       "updatedAt": "2026-10-11T09:26:36.481Z"
     },
     "lifecycle": {
-      "status": "pending",
-      "outflowNativeAtomic": "0",
+      "status": "done",
+      "outflowNativeAtomic": "64111960500057393",
       "pendingNativeAtomic": "0",
       "internalNativeAtomic": "0",
-      "baselineTotalNativeAtomic": null,
-      "measuredAddresses": null,
+      "baselineTotalNativeAtomic": "5462096597818659330",
+      "measuredAddresses": [
+        "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+        "0xa71138ff271db9a18d2b216caf13b830eeab3ff2",
+        "0xb6eef219f86ae75ffc3af9ef3cade49f89a7582b",
+        "0xc6182d363d7c3da6db491f703c430dc91d0e2ace"
+      ],
       "openRuns": [],
-      "settledRuns": [],
+      "settledRuns": [
+        "wallet-2026-10-11T09-36-07-576Z:order:0x3fa9bdc0e106100b4bc83bc551f36af8ad2a83b2d5f8e47c8cff3cad08067fb8:attempt:0f536e6b-739d-4caf-ace0-1d08c96f29f9:tx:0xdbeda39c5c5ea24bfda5f7fd9f779b2693258f68ec32aedb423dc22c54245bb0",
+        "interrupt-2026-10-11T09-36-07-576Z:key:lc-2c562edb-8b47-487e-9566-edbd2127c3a4"
+      ],
       "releasedRuns": [],
-      "invocations": 0,
-      "updatedAt": null
+      "invocations": 1,
+      "updatedAt": "2026-10-11T09:37:20.059Z"
     }
   }
 }

@@ -1,0 +1,30 @@
+{
+  "updatedAt": "2026-10-11T09:36:41.299Z",
+  "label": "lifecycle-wallet",
+  "network": "mainnet",
+  "perTxCapUsdc": "0.03",
+  "totalCapUsdc": "0.05",
+  "maxFeeCeilingGwei": "40",
+  "committedUsdc": "0.015807280046458964",
+  "remainingUsdc": "0.034192719953541036",
+  "entries": [
+    {
+      "purpose": "check fee authorization",
+      "to": "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+      "worstNativeAtomic": "10000000000000000",
+      "actualNativeAtomic": "10000000000000000",
+      "status": "settled",
+      "txHash": null,
+      "at": "2026-10-11T09:36:24.736Z"
+    },
+    {
+      "purpose": "business payment",
+      "to": "0xa09f5dd3753823b4920cea629e83fc481fe00ebc",
+      "worstNativeAtomic": "5977640046885985",
+      "actualNativeAtomic": "5807280046458964",
+      "status": "settled",
+      "txHash": "0xdbeda39c5c5ea24bfda5f7fd9f779b2693258f68ec32aedb423dc22c54245bb0",
+      "at": "2026-10-11T09:36:38.726Z"
+    }
+  ]
+}

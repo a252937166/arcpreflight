@@ -1,0 +1,49 @@
+network eip155:5042 release ab49fc7 publicExecution False operatorAcceptance True executionReady True
+probe POST /v1/demo/run (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+probe POST /v1/demo/orders (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+probe POST /v1/wallet/attempts (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+gate closed: only the operator's admin token passes
+== preflight (read-only)
+2026-10-11T09:36:05.337Z PREFLIGHT (read-only: no session, no order, no signature) · eip155:5042 release ab49fc7 · gate: publicExecution false · operatorAcceptance true · executionReady true · admin token supplied
+2026-10-11T09:36:05.337Z caps: visitor key 0.03 per transaction / 0.05 total (fee authorization + business tx + gas) · project outflow 0.12 (measured over 4 keys, baseline 5.46209659781865933 USDC)
+2026-10-11T09:36:05.337Z plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.251964764995234458 · remaining 0.438035235004765542
+2026-10-11T09:36:05.337Z   deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+2026-10-11T09:36:05.337Z   fund        done     cap 0.2    outflow 0.000840000043722    pending 0                    internal 0.15   invocations 1
+2026-10-11T09:36:05.337Z   probe       done     cap 0.02   outflow 0.011742900100303895 pending 0                    internal 0      invocations 1
+2026-10-11T09:36:05.338Z   acceptance  done     cap 0.35   outflow 0.186160502081036775 pending 0                    internal 0      invocations 2 settled 9 baseline 5.598257099899696105
+2026-10-11T09:36:05.338Z   lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+2026-10-11T09:36:05.338Z   (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+2026-10-11T09:36:05.338Z   wallet     worst 0.028 USDC
+2026-10-11T09:36:05.338Z   interrupt  worst 0.073 USDC
+2026-10-11T09:36:05.338Z   total worst 0.101 USDC
+2026-10-11T09:36:05.338Z PREFLIGHT OK: nothing was created, signed or sent.
+== execute: wallet scenario + labelled interruption through the closed gate with the operator's token; passports verified by the CLI
+2026-10-11T09:36:09.801Z limits · eip155:5042 release ab49fc7 · gate: publicExecution false · operatorAcceptance true · executionReady true · admin token supplied
+2026-10-11T09:36:09.802Z caps: visitor key 0.03 per transaction / 0.05 total (fee authorization + business tx + gas) · project outflow 0.12 (measured over 4 keys, baseline 5.46209659781865933 USDC)
+2026-10-11T09:36:09.802Z plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.251964764995234458 · remaining 0.438035235004765542
+2026-10-11T09:36:09.802Z   deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+2026-10-11T09:36:09.802Z   fund        done     cap 0.2    outflow 0.000840000043722    pending 0                    internal 0.15   invocations 1
+2026-10-11T09:36:09.802Z   probe       done     cap 0.02   outflow 0.011742900100303895 pending 0                    internal 0      invocations 1
+2026-10-11T09:36:09.802Z   acceptance  done     cap 0.35   outflow 0.186160502081036775 pending 0                    internal 0      invocations 2 settled 9 baseline 5.598257099899696105
+2026-10-11T09:36:09.802Z   lifecycle   running  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 1 baseline 5.46209659781865933
+2026-10-11T09:36:09.802Z   (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+2026-10-11T09:36:09.803Z   wallet     worst 0.028 USDC
+2026-10-11T09:36:09.803Z   interrupt  worst 0.073 USDC
+2026-10-11T09:36:09.803Z   total worst 0.101 USDC
+2026-10-11T09:36:10.170Z wallet: measured project outflow so far 0 USDC; worst case of this scenario 0.028 USDC; cap 0.12 USDC
+2026-10-11T09:36:10.190Z wallet scenario: payer 0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2, amount 5000000000000000 native units, reference "lifecycle rehearsal 2026-10-11T09-36-07"
+2026-10-11T09:36:13.892Z order 0x3fa9bdc0e1… created in 0xef832304854a4e792af8633c147a3f5171037e501d7ca8a1b525e28e2555c654 (block 25391194) on 0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc
+2026-10-11T09:36:28.649Z report delivered; fee settled in 0xf5834c8b9629a4e87747127b362906af3bb4c6b84216715dd1b30bbac02e050c; baselineResult MATCH
+2026-10-11T09:36:34.331Z attempt 0f536e6b-739d-4caf-ace0-1d08c96f29f9 VALIDATED until 2026-10-11T09:37:25.064Z; plan nonce 0 gas 40735 maxFee 24.000001151 gwei
+2026-10-11T09:36:38.726Z prompt claim probe: granted once (200), second claim 409 PROMPT_CLAIMED, stranger's hand-back 409 PROMPT_CLAIMED, holder's hand-back 200 → plain VALIDATED again
+2026-10-11T09:36:40.029Z wallet broadcast 0xdbeda39c5c5ea24bfda5f7fd9f779b2693258f68ec32aedb423dc22c54245bb0
+2026-10-11T09:36:40.982Z attempt CONFIRMED: order paid in block 25391246; cost statement buyer total 0.015807280046458964 USDC
+2026-10-11T09:36:41.300Z visitor key spend: 0.015807280046458964 USDC of the 0.05 USDC cap
+2026-10-11T09:36:47.309Z verifier: exit 0, pass 10, fail 0, unverified 0; TRANSACTION_PLAN_AGREEMENT=PASS ORDER_OUTCOME=PASS COST_STATEMENT=PASS
+2026-10-11T09:36:48.885Z interrupt: measured project outflow so far 0.009556020251889916 USDC; worst case of this scenario 0.073 USDC; cap 0.12 USDC
+2026-10-11T09:36:50.756Z live demo run 46932149-43f3-4bd3-82a6-77de5f81946e started with a labelled interruption after the broadcast
+2026-10-11T09:37:11.683Z run stopped: state DONE, outcome PAID (store), store CONFIRMED
+2026-10-11T09:37:11.683Z reconciled: 0xfe881b1747ecfb8747594df1310d2b10357c4a4631529bfcfcf6aa02bfaffaea CONFIRMED/SUCCESS; recovery added orders=0 signatures=0
+2026-10-11T09:37:18.393Z verifier: exit 0, pass 10, fail 0; ORDER_OUTCOME=PASS TRANSACTION_PLAN_AGREEMENT=PASS COST_STATEMENT=PASS
+2026-10-11T09:37:20.060Z measured project outflow: 0.064111960500057393 USDC of the 0.12 USDC cap
+2026-10-11T09:37:20.061Z evidence written to <repo>/evidence/selftest/mainnet-lifecycle-2026-10-11T09-36-07-576Z.json
