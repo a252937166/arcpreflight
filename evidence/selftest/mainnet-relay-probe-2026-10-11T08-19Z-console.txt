@@ -1,0 +1,35 @@
+guard: https://arcpreflight.axiqo.xyz reports chain 5042002 / relayer 0x06873b35575D6A22eC8008f30F56c71C19BeE7b0 — no conflict
+network=mainnet chainId=5042 mode=DRY RUN (nothing will be sent)
+plan: ONE transferWithAuthorization on USDC 0x3600000000000000000000000000000000000000
+  payer   demo-runner    0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE  native 5.0 USDC, erc20 5 USDC  → pays 0.01 USDC (6-dec 10000)
+  relayer merchant-payto 0x06873b35575D6A22eC8008f30F56c71C19BeE7b0  native 0.5 USDC  → receives 0.01 USDC, pays gas
+  gas bound (measured on testnet; nothing signed on mainnet in a dry run) 87141 (limit 104569) at 24.000001151 gwei max → cost ceiling 0.002509656120358919 USDC (cap 0.005)
+  spend guard: 0.016 USDC per transaction (fee + gas), 0.02 USDC for the step, 0.0 already committed
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.054061362813893788 · remaining 0.635938637186106212
+  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+  fund        done     cap 0.2    outflow 0.000840000043722    pending 0                    internal 0.15   invocations 1
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+DRY RUN OK: nothing sent. Re-run with --execute to relay this one authorization.
+guard: https://arcpreflight.axiqo.xyz reports chain 5042002 / relayer 0x06873b35575D6A22eC8008f30F56c71C19BeE7b0 — no conflict
+network=mainnet chainId=5042 mode=EXECUTE
+plan: ONE transferWithAuthorization on USDC 0x3600000000000000000000000000000000000000
+  payer   demo-runner    0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE  native 5.0 USDC, erc20 5 USDC  → pays 0.01 USDC (6-dec 10000)
+  relayer merchant-payto 0x06873b35575D6A22eC8008f30F56c71C19BeE7b0  native 0.5 USDC  → receives 0.01 USDC, pays gas
+  gas estimate 88074 (limit 105688) at 24.000001151 gwei max → cost ceiling 0.002536512121646888 USDC (cap 0.005)
+  spend guard: 0.016 USDC per transaction (fee + gas), 0.02 USDC for the step, 0.0 already committed
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.054061362813893788 · remaining 0.635938637186106212
+  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+  fund        done     cap 0.2    outflow 0.000840000043722    pending 0                    internal 0.15   invocations 1
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+  authorization nonce 0xf31989cce4… validBefore 1791707381 (unused on-chain: true)
+signed relay tx 0x7ff5563fa73e823659a9d1c7e9bd03720615bbcd06bd53af53658babe03e343e (nonce 0); recorded before broadcast → <repo>/evidence/selftest/mainnet-relay-probe-2026-10-11T08-19-42-808Z.json
+receipt: status=success block=25382147 gasUsed=87145 gasPaid=0.001742900100303895 USDC
+evidence: AuthorizationUsed@13 + Transfer@15 in 0x7ff5563fa73e823659a9d1c7e9bd03720615bbcd06bd53af53658babe03e343e
+balances: payer 5.0 → 4.99 (−0.01 expected); relayer 0.5 → 0.508257099899696105 (+0.01 − gas expected); authorizationState now true
+PASS: one check fee self-relayed on mainnet. Evidence: <repo>/evidence/selftest/mainnet-relay-probe-2026-10-11T08-19-42-808Z.json

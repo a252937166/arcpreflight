@@ -1,0 +1,21 @@
+{
+  "updatedAt": "2026-10-11T08:19:44.337Z",
+  "label": "relay-probe",
+  "network": "mainnet",
+  "perTxCapUsdc": "0.016",
+  "totalCapUsdc": "0.02",
+  "maxFeeCeilingGwei": "40",
+  "committedUsdc": "0.011742900100303895",
+  "remainingUsdc": "0.008257099899696105",
+  "entries": [
+    {
+      "purpose": "relay probe",
+      "to": "0x3600000000000000000000000000000000000000",
+      "worstNativeAtomic": "12536512121646888",
+      "actualNativeAtomic": "11742900100303895",
+      "status": "settled",
+      "txHash": "0x7ff5563fa73e823659a9d1c7e9bd03720615bbcd06bd53af53658babe03e343e",
+      "at": "2026-10-11T08:19:42.805Z"
+    }
+  ]
+}
