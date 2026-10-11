@@ -3,7 +3,7 @@
   "planId": "gate-d-mainnet-2026-10",
   "network": "mainnet",
   "createdAt": "2026-10-11T08:09:06.723Z",
-  "updatedAt": "2026-10-11T08:19:44.684Z",
+  "updatedAt": "2026-10-11T09:09:25.034Z",
   "approved": {
     "budgetCapNativeAtomic": "690000000000000000",
     "maxFeePerGasCeiling": "40000000000",
@@ -71,17 +71,23 @@
       "updatedAt": "2026-10-11T08:19:44.684Z"
     },
     "acceptance": {
-      "status": "pending",
-      "outflowNativeAtomic": "0",
+      "status": "stopped",
+      "outflowNativeAtomic": "3748500215726175",
       "pendingNativeAtomic": "0",
       "internalNativeAtomic": "0",
-      "baselineTotalNativeAtomic": null,
-      "measuredAddresses": null,
+      "baselineTotalNativeAtomic": "5598257099899696105",
+      "measuredAddresses": [
+        "0x06873b35575d6a22ec8008f30f56c71c19bee7b0",
+        "0xb6eef219f86ae75ffc3af9ef3cade49f89a7582b",
+        "0xc6182d363d7c3da6db491f703c430dc91d0e2ace"
+      ],
       "openRuns": [],
-      "settledRuns": [],
+      "settledRuns": [
+        "run-1-CHANGED_IMPLEMENTATION:key:mn-000e06d9-4050-4833-a4a7-2b7dc42f51a5:run:5cab2579-6d61-4c9e-883d-9e7d66d5b0d5"
+      ],
       "releasedRuns": [],
-      "invocations": 0,
-      "updatedAt": null
+      "invocations": 1,
+      "updatedAt": "2026-10-11T09:09:25.034Z"
     },
     "lifecycle": {
       "status": "pending",

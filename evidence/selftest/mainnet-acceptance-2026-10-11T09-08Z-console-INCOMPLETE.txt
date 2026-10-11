@@ -1,0 +1,52 @@
+network eip155:5042 release ab49fc7 publicExecution False operatorAcceptance True executionReady True
+probe POST /v1/demo/run (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+probe POST /v1/demo/orders (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+probe POST /v1/wallet/attempts (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+gate closed: only the operator's admin token passes
+== dry run first (nothing started)
+network=mainnet chainId=5042 release=ab49fc7 profile=SUBMISSION_RESTRICTED mode=DRY RUN (nothing will be started)
+plan: 3 round(s) x [CHANGED_IMPLEMENTATION, AMOUNT_UNIT_MISMATCH, APPROVED_PAYMENT] = 9 sequential runs, one start per 48 s (~8 min)
+spend list, worst case (project funds only; every transfer stays inside the project's own addresses):
+  service fee       9 x 0.01 = 0.09 USDC   demo-runner -> merchant-payto via x402 (the merchant relayer pays settlement gas in USDC)
+  business payment  3 x 0.05 = 0.15 USDC   demo-runner -> MAIN proxy, APPROVED_PAYMENT only (owner-withdrawable)
+  fee + business    0.24 USDC
+  fee relay gas     9 x <= 0.005 = 0.045 USDC   merchant-payto (the API's per-relay cap)
+  TOTAL worst case  0.3486 USDC (fees + business + all gas ceilings) · hard cap 0.35 · stops before any run whose worst case would carry the measured outflow past it
+  gas               createOrder 9 x <=150000 gas (order-creator) + pay 3 x <=80000 gas (demo-runner) at <=40 gwei: <= 0.0636 USDC (expected ~0.0200811)
+  demo-runner       4.99 USDC (needs >= 0.4496 for the remaining work: spend + server floor 0.15 + order 0.05; a whole batch needs 0.4496)
+  order-creator     0.1 USDC (needs >= 0.054 for the remaining createOrder gas; a whole batch needs 0.054; the deployer-admin key is not used by the demo)
+  server budget     0/14 runs used today, cooldown 45 s, active run none
+  recovery          0 open operation(s) of previous invocations (recovered first: the same fixture and admission key re-sent), 0 completed (re-verified from the server's record), 0 released reservation(s) and 0 settled without a run id (NOT counted as done: run again), 9 of 9 runs remaining; budgeted for the remaining work: 0.3486 USDC
+  EXPECTED_RELEASE not set (required for --execute); the server reports ab49fc7
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.065804262914197683 · remaining 0.624195737085802317
+  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+  fund        done     cap 0.2    outflow 0.000840000043722    pending 0                    internal 0.15   invocations 1
+  probe       done     cap 0.02   outflow 0.011742900100303895 pending 0                    internal 0      invocations 1
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+DRY RUN OK: nothing was started. To run: API_URL=https://arcpreflight.axiqo.xyz EXPECTED_RELEASE=ab49fc7 pnpm exec tsx scripts/selftest/mainnet.ts --execute
+== execute: 3 rounds × 3 fixtures through the closed gate with the operator's token; cap 0.35 USDC incl. gas ceilings, measured outflow stop
+network=mainnet chainId=5042 release=ab49fc7 profile=SUBMISSION_RESTRICTED mode=EXECUTE
+plan: 3 round(s) x [CHANGED_IMPLEMENTATION, AMOUNT_UNIT_MISMATCH, APPROVED_PAYMENT] = 9 sequential runs, one start per 48 s (~8 min)
+spend list, worst case (project funds only; every transfer stays inside the project's own addresses):
+  service fee       9 x 0.01 = 0.09 USDC   demo-runner -> merchant-payto via x402 (the merchant relayer pays settlement gas in USDC)
+  business payment  3 x 0.05 = 0.15 USDC   demo-runner -> MAIN proxy, APPROVED_PAYMENT only (owner-withdrawable)
+  fee + business    0.24 USDC
+  fee relay gas     9 x <= 0.005 = 0.045 USDC   merchant-payto (the API's per-relay cap)
+  TOTAL worst case  0.3486 USDC (fees + business + all gas ceilings) · hard cap 0.35 · stops before any run whose worst case would carry the measured outflow past it
+  gas               createOrder 9 x <=150000 gas (order-creator) + pay 3 x <=80000 gas (demo-runner) at <=40 gwei: <= 0.0636 USDC (expected ~0.0200811)
+  demo-runner       4.99 USDC (needs >= 0.4496 for the remaining work: spend + server floor 0.15 + order 0.05; a whole batch needs 0.4496)
+  order-creator     0.1 USDC (needs >= 0.054 for the remaining createOrder gas; a whole batch needs 0.054; the deployer-admin key is not used by the demo)
+  server budget     0/14 runs used today, cooldown 45 s, active run none
+  recovery          0 open operation(s) of previous invocations (recovered first: the same fixture and admission key re-sent), 0 completed (re-verified from the server's record), 0 released reservation(s) and 0 settled without a run id (NOT counted as done: run again), 9 of 9 runs remaining; budgeted for the remaining work: 0.3486 USDC
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.065804262914197683 · remaining 0.624195737085802317
+  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+  fund        done     cap 0.2    outflow 0.000840000043722    pending 0                    internal 0.15   invocations 1
+  probe       done     cap 0.02   outflow 0.011742900100303895 pending 0                    internal 0      invocations 1
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+[1/9] round 1 CHANGED_IMPLEMENTATION: starting a live mainnet run (measured outflow so far 0.0 of 0.35 USDC)
+STOPPED after 0/9 verified runs: passport text contains a 65-byte hex string outside transaction calldata
+INCOMPLETE evidence (money trail of the failing run included): <repo>/evidence/selftest/mainnet-2026-10-11T09-09-00-192Z-INCOMPLETE.json

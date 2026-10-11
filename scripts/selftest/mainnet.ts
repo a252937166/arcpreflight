@@ -205,13 +205,18 @@ export async function verifyRun(ctx: Ctx, fixture: FixtureId, run: any): Promise
   };
 }
 
+/** The passport is public evidence: no signature-shaped value — a 0x-prefixed hex string of exactly 65 bytes, as the verifier's DISCLOSURE
+ *  finding defines it — may appear anywhere in its text. Longer hex strings (a receipt's logsBloom, bytecode, eth_call results, calldata)
+ *  are not signatures; the unbounded pattern used before 2026-10-11 matched their substrings and stopped the first mainnet acceptance after
+ *  a run that was in order (run 5cab2579: scripts/test/mainnet-passport-scan.test.ts). */
+export const signatureShapedValues = (text: string): string[] => text.match(/0x[0-9a-fA-F]{130}(?![0-9a-fA-F])/g) ?? [];
 /** AP32-28 on mainnet: export the finished run's passport through the public route, verify it with the independent verifier against
  *  the mainnet RPC (anchors = the baseline digest /v1/network lists for the fixture and the run's own policy digest), require no FAIL. */
 export async function verifyRunPassport(api: string, run: any, rpcUrl: string, baselineDigest: string, dir: string): Promise<NonNullable<RunReport["passport"]>> {
   const res = await fetch(`${api}/v1/demo/runs/${run.runId}/passport`, { signal: AbortSignal.timeout(60_000) });
   must(res.status === 200, `passport export returned ${res.status}`);
   const text = await res.text();
-  must(!/[0-9a-f]{130}/i.test(text.replace(/"input":"0x[0-9a-f]+"/gi, "")) , "passport text contains a 65-byte hex string outside transaction calldata");
+  { const sigs = signatureShapedValues(text); must(sigs.length === 0, `passport text contains ${sigs.length} signature-shaped value(s) (65-byte hex): ${sigs.map((x) => `${x.slice(0, 10)}…`).join(", ")}`); }
   const files = fromBundle(text);
   const v = await verifyPassport(files, { rpc: rpcFromUrl(rpcUrl), anchors: { baselineDigests: [baselineDigest], policyDigests: [run.result.policyDigest] } });
   const findings = Object.fromEntries(v.findings.map((f) => [f.id, f.status]));

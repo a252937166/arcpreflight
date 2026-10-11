@@ -1,0 +1,51 @@
+{
+  "status": "INCOMPLETE",
+  "chainId": 5042,
+  "network": "mainnet",
+  "release": "ab49fc7",
+  "profile": "SUBMISSION_RESTRICTED",
+  "api": "https://arcpreflight.axiqo.xyz",
+  "startedAtUTC": "2026-10-11T09:09:00.192Z",
+  "finishedAtUTC": "2026-10-11T09:09:25.035Z",
+  "repeats": 3,
+  "accounts": {
+    "deployerAdmin": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
+    "orderCreator": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b",
+    "demoRunner": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+    "merchantPayTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0"
+  },
+  "plan": {
+    "runs": 9,
+    "serviceFeeUsdc": "0.09",
+    "businessPaymentUsdc": "0.15",
+    "capUsdc": "0.35",
+    "gasCeilingUsdc": "0.1086",
+    "totalWorstUsdc": "0.3486"
+  },
+  "positions": {
+    "total": 9,
+    "recoveredOpen": 0,
+    "completedBefore": 0,
+    "releasedBefore": 0,
+    "unverifiedBefore": 0,
+    "remainingAtStart": 9,
+    "budgetedForRemainingUsdc": "0.3486",
+    "verified": 0
+  },
+  "recovered": [],
+  "measuredOutflowUsdc": "0.003748500215726175",
+  "spent": {
+    "serviceFeeUsdc": "0.0",
+    "businessPaymentUsdc": "0.0",
+    "note": "service fees land in merchant-payto, business payments in the MAIN proxy; both stay inside the project"
+  },
+  "runs": [],
+  "failure": {
+    "message": "passport text contains a 65-byte hex string outside transaction calldata",
+    "fixture": "CHANGED_IMPLEMENTATION",
+    "runId": "5cab2579-6d61-4c9e-883d-9e7d66d5b0d5",
+    "lastStep": null,
+    "serviceFeeTx": null,
+    "businessTxHash": null
+  }
+}
