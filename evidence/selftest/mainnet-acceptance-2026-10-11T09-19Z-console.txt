@@ -1,0 +1,88 @@
+network eip155:5042 release ab49fc7 publicExecution False operatorAcceptance True executionReady True
+probe POST /v1/demo/run (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+probe POST /v1/demo/orders (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+probe POST /v1/wallet/attempts (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+gate closed: only the operator's admin token passes
+== dry run first (nothing started)
+network=mainnet chainId=5042 release=ab49fc7 profile=SUBMISSION_RESTRICTED mode=DRY RUN (nothing will be started)
+plan: 3 round(s) x [CHANGED_IMPLEMENTATION, AMOUNT_UNIT_MISMATCH, APPROVED_PAYMENT] = 9 sequential runs, one start per 48 s (~8 min)
+spend list, worst case (project funds only; every transfer stays inside the project's own addresses):
+  service fee       9 x 0.01 = 0.09 USDC   demo-runner -> merchant-payto via x402 (the merchant relayer pays settlement gas in USDC)
+  business payment  3 x 0.05 = 0.15 USDC   demo-runner -> MAIN proxy, APPROVED_PAYMENT only (owner-withdrawable)
+  fee + business    0.24 USDC
+  fee relay gas     9 x <= 0.005 = 0.045 USDC   merchant-payto (the API's per-relay cap)
+  TOTAL worst case  0.3486 USDC (fees + business + all gas ceilings) · hard cap 0.35 · stops before any run whose worst case would carry the measured outflow past it
+  gas               createOrder 9 x <=150000 gas (order-creator) + pay 3 x <=80000 gas (demo-runner) at <=40 gwei: <= 0.0636 USDC (expected ~0.0200811)
+  demo-runner       4.98 USDC (needs >= 0.4396 for the remaining work: spend + server floor 0.15 + order 0.05; a whole batch needs 0.4496)
+  order-creator     0.097994159884563908 USDC (needs >= 0.048 for the remaining createOrder gas; a whole batch needs 0.054; the deployer-admin key is not used by the demo)
+  server budget     1/14 runs used today, cooldown 45 s, active run none
+  recovery          0 open operation(s) of previous invocations (recovered first: the same fixture and admission key re-sent), 1 completed (re-verified from the server's record), 0 released reservation(s) and 0 settled without a run id (NOT counted as done: run again), 8 of 9 runs remaining; budgeted for the remaining work: 0.3276 USDC
+    completed run-1-CHANGED_IMPLEMENTATION:key:mn-000e06d9-4050-4833-a4a7-2b7dc42f51a5:run:5cab2579-6d61-4c9e-883d-9e7d66d5b0d5
+  EXPECTED_RELEASE not set (required for --execute); the server reports ab49fc7
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.069552763129923858 · remaining 0.620447236870076142
+  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+  fund        done     cap 0.2    outflow 0.000840000043722    pending 0                    internal 0.15   invocations 1
+  probe       done     cap 0.02   outflow 0.011742900100303895 pending 0                    internal 0      invocations 1
+  acceptance  stopped  cap 0.35   outflow 0.003748500215726175 pending 0                    internal 0      invocations 1 settled 1 baseline 5.598257099899696105
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+DRY RUN OK: nothing was started. To run: API_URL=https://arcpreflight.axiqo.xyz EXPECTED_RELEASE=ab49fc7 pnpm exec tsx scripts/selftest/mainnet.ts --execute
+== execute: 3 rounds × 3 fixtures through the closed gate with the operator's token; cap 0.35 USDC incl. gas ceilings, measured outflow stop
+network=mainnet chainId=5042 release=ab49fc7 profile=SUBMISSION_RESTRICTED mode=EXECUTE
+plan: 3 round(s) x [CHANGED_IMPLEMENTATION, AMOUNT_UNIT_MISMATCH, APPROVED_PAYMENT] = 9 sequential runs, one start per 48 s (~8 min)
+spend list, worst case (project funds only; every transfer stays inside the project's own addresses):
+  service fee       9 x 0.01 = 0.09 USDC   demo-runner -> merchant-payto via x402 (the merchant relayer pays settlement gas in USDC)
+  business payment  3 x 0.05 = 0.15 USDC   demo-runner -> MAIN proxy, APPROVED_PAYMENT only (owner-withdrawable)
+  fee + business    0.24 USDC
+  fee relay gas     9 x <= 0.005 = 0.045 USDC   merchant-payto (the API's per-relay cap)
+  TOTAL worst case  0.3486 USDC (fees + business + all gas ceilings) · hard cap 0.35 · stops before any run whose worst case would carry the measured outflow past it
+  gas               createOrder 9 x <=150000 gas (order-creator) + pay 3 x <=80000 gas (demo-runner) at <=40 gwei: <= 0.0636 USDC (expected ~0.0200811)
+  demo-runner       4.98 USDC (needs >= 0.4396 for the remaining work: spend + server floor 0.15 + order 0.05; a whole batch needs 0.4496)
+  order-creator     0.097994159884563908 USDC (needs >= 0.048 for the remaining createOrder gas; a whole batch needs 0.054; the deployer-admin key is not used by the demo)
+  server budget     1/14 runs used today, cooldown 45 s, active run none
+  recovery          0 open operation(s) of previous invocations (recovered first: the same fixture and admission key re-sent), 1 completed (re-verified from the server's record), 0 released reservation(s) and 0 settled without a run id (NOT counted as done: run again), 8 of 9 runs remaining; budgeted for the remaining work: 0.3276 USDC
+    completed run-1-CHANGED_IMPLEMENTATION:key:mn-000e06d9-4050-4833-a4a7-2b7dc42f51a5:run:5cab2579-6d61-4c9e-883d-9e7d66d5b0d5
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.069552763129923858 · remaining 0.620447236870076142
+  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+  fund        done     cap 0.2    outflow 0.000840000043722    pending 0                    internal 0.15   invocations 1
+  probe       done     cap 0.02   outflow 0.011742900100303895 pending 0                    internal 0      invocations 1
+  acceptance  stopped  cap 0.35   outflow 0.003748500215726175 pending 0                    internal 0      invocations 1 settled 1 baseline 5.598257099899696105
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+  resuming: measured outflow carried from the first invocation 0.003748500215726175 USDC (baseline 5.598257099899696105 USDC, now 5.59450859968396993)
+  run-1-CHANGED_IMPLEMENTATION:key:mn-000e06d9-4050-4833-a4a7-2b7dc42f51a5:run:5cab2579-6d61-4c9e-883d-9e7d66d5b0d5: completed earlier as run 5cab2579-6d61-4c9e-883d-9e7d66d5b0d5; re-verified
+[2/9] round 1 AMOUNT_UNIT_MISMATCH: starting a live mainnet run (measured outflow so far 0.003748500215726175 of 0.35 USDC)
+{"round":1,"fixture":"AMOUNT_UNIT_MISMATCH","runId":"6382a463-066a-438f-9ee7-244cabf7c7bf","how":"started","decision":"BLOCKED","serviceFeeTx":"0xb207f61ca1a2d0876303d6d4e1f5da4ae9175e0d103b2b1a92fecfb257f03175","businessTx":null,"orderPaid":false,"durationMs":12866}
+  cooldown: waiting 28 s before the next start
+[3/9] round 1 APPROVED_PAYMENT: starting a live mainnet run (measured outflow so far 0.007497240431466162 of 0.35 USDC)
+{"round":1,"fixture":"APPROVED_PAYMENT","runId":"5bbf4b4a-a9db-4d87-bf60-b13277e92b6d","how":"started","decision":"NO_POLICY_VIOLATION","serviceFeeTx":"0xd7fb1aa19af58ae4a315b842a4f73a482df88756ac58b0c9f70c5450b10f4ce4","businessTx":"0xea9ca88e2f71c5b76dffa7d28cb81df81be249a8393013ef6c50d69417d64021","orderPaid":true,"durationMs":23205}
+  cooldown: waiting 18 s before the next start
+[4/9] round 2 CHANGED_IMPLEMENTATION: starting a live mainnet run (measured outflow so far 0.062053260693665113 of 0.35 USDC)
+{"round":2,"fixture":"CHANGED_IMPLEMENTATION","runId":"68615b9f-b315-4453-8319-aee44568497c","how":"started","decision":"REVIEW_REQUIRED","serviceFeeTx":"0xe5b93dfdbc80f0498c2801dc96a60795dcccc4d2ff598a925ae73d38a8eb19a1","businessTx":null,"orderPaid":false,"durationMs":12006}
+  cooldown: waiting 30 s before the next start
+[5/9] round 2 AMOUNT_UNIT_MISMATCH: starting a live mainnet run (measured outflow so far 0.06580240090942812 of 0.35 USDC)
+{"round":2,"fixture":"AMOUNT_UNIT_MISMATCH","runId":"27e66916-32f6-48ea-8b78-de9cb718f618","how":"started","decision":"BLOCKED","serviceFeeTx":"0xb5792899a09d18778244eaceba5317a145dfaa95f2c59bc255b4cec06066bf10","businessTx":null,"orderPaid":false,"durationMs":12305}
+  cooldown: waiting 29 s before the next start
+[6/9] round 2 APPROVED_PAYMENT: starting a live mainnet run (measured outflow so far 0.069551541125191127 of 0.35 USDC)
+{"round":2,"fixture":"APPROVED_PAYMENT","runId":"375789c7-d2e8-4378-9da9-1842d29babb6","how":"started","decision":"NO_POLICY_VIOLATION","serviceFeeTx":"0x791e72ddd7db96604c3771ae83e0949a46392b00e16df358d654a15066f8656d","businessTx":"0xb797fd659c946c3fb09682a3ae231d1e0bf90a34102faf7cae92b4b038ae0f46","orderPaid":true,"durationMs":23585}
+  cooldown: waiting 5 s before the next start
+[7/9] round 3 CHANGED_IMPLEMENTATION: starting a live mainnet run (measured outflow so far 0.124107081387362454 of 0.35 USDC)
+{"round":3,"fixture":"CHANGED_IMPLEMENTATION","runId":"48964cdb-99b0-4136-8d18-8a5cbecaf9b3","how":"started","decision":"REVIEW_REQUIRED","serviceFeeTx":"0x978927fc55e8e5d5204c61f6ce776f7ceb1bcd2274db1d0d11994e1a096cfde0","businessTx":null,"orderPaid":false,"durationMs":12458}
+  cooldown: waiting 28 s before the next start
+[8/9] round 3 AMOUNT_UNIT_MISMATCH: starting a live mainnet run (measured outflow so far 0.127855981603111649 of 0.35 USDC)
+{"round":3,"fixture":"AMOUNT_UNIT_MISMATCH","runId":"42838e30-f04d-45ef-b23f-bd038db03fe6","how":"started","decision":"BLOCKED","serviceFeeTx":"0x2d56e3138e480370c771788234333618a7270d6bf44e692fb5819e0aeb1bb575","businessTx":null,"orderPaid":false,"durationMs":13077}
+  cooldown: waiting 29 s before the next start
+[9/9] round 3 APPROVED_PAYMENT: starting a live mainnet run (measured outflow so far 0.131604481818837824 of 0.35 USDC)
+{"round":3,"fixture":"APPROVED_PAYMENT","runId":"334ab548-fc9f-428e-aab5-c708ced36639","how":"started","decision":"NO_POLICY_VIOLATION","serviceFeeTx":"0x6f881fca106a918491af9baea3b006a0d967262be4b474bce473b9d8344aa05e","businessTx":"0x9388f5fc37728785a36b2a231693d92a64056cd66c244297947740774d8cd782","orderPaid":true,"durationMs":23344}
+
+ #  scenario                decision             service fee (0.01)   business payment (0.05)  order   ms      recovery
+ 1  CHANGED_IMPLEMENTATION  REVIEW_REQUIRED      0xe5f457c6…286ed5    —                        unpaid   12528  SKIPPED  passport 8 pass / 2 unverified / 0 fail
+ 2  AMOUNT_UNIT_MISMATCH    BLOCKED              0xb207f61c…f03175    —                        unpaid   12866  SKIPPED  passport 8 pass / 2 unverified / 0 fail
+ 3  APPROVED_PAYMENT        NO_POLICY_VIOLATION  0xd7fb1aa1…0f4ce4    0xea9ca88e…d64021        paid     23205  SKIPPED  passport 10 pass / 0 unverified / 0 fail
+ 4  CHANGED_IMPLEMENTATION  REVIEW_REQUIRED      0xe5b93dfd…eb19a1    —                        unpaid   12006  SKIPPED  passport 8 pass / 2 unverified / 0 fail
+ 5  AMOUNT_UNIT_MISMATCH    BLOCKED              0xb5792899…66bf10    —                        unpaid   12305  SKIPPED  passport 8 pass / 2 unverified / 0 fail
+ 6  APPROVED_PAYMENT        NO_POLICY_VIOLATION  0x791e72dd…f8656d    0xb797fd65…ae0f46        paid     23585  SKIPPED  passport 10 pass / 0 unverified / 0 fail
+ 7  CHANGED_IMPLEMENTATION  REVIEW_REQUIRED      0x978927fc…6cfde0    —                        unpaid   12458  SKIPPED  passport 8 pass / 2 unverified / 0 fail
+ 8  AMOUNT_UNIT_MISMATCH    BLOCKED              0x2d56e313…1bb575    —                        unpaid   13077  SKIPPED  passport 8 pass / 2 unverified / 0 fail
+ 9  APPROVED_PAYMENT        NO_POLICY_VIOLATION  0x6f881fca…4aa05e    0x9388f5fc…8cd782        paid     23344  SKIPPED  passport 10 pass / 0 unverified / 0 fail
+PASS: 9 mainnet runs (1 re-verified from previous invocations, 0 recovered); digest chains, service fees, business payments and order states re-read from the mainnet RPC; every passport verified independently. Evidence: <repo>/evidence/selftest/mainnet-2026-10-11T09-19-32-130Z.json

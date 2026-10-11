@@ -3,7 +3,7 @@
   "planId": "gate-d-mainnet-2026-10",
   "network": "mainnet",
   "createdAt": "2026-10-11T08:09:06.723Z",
-  "updatedAt": "2026-10-11T09:09:25.034Z",
+  "updatedAt": "2026-10-11T09:26:36.481Z",
   "approved": {
     "budgetCapNativeAtomic": "690000000000000000",
     "maxFeePerGasCeiling": "40000000000",
@@ -71,8 +71,8 @@
       "updatedAt": "2026-10-11T08:19:44.684Z"
     },
     "acceptance": {
-      "status": "stopped",
-      "outflowNativeAtomic": "3748500215726175",
+      "status": "done",
+      "outflowNativeAtomic": "186160502081036775",
       "pendingNativeAtomic": "0",
       "internalNativeAtomic": "0",
       "baselineTotalNativeAtomic": "5598257099899696105",
@@ -83,11 +83,19 @@
       ],
       "openRuns": [],
       "settledRuns": [
-        "run-1-CHANGED_IMPLEMENTATION:key:mn-000e06d9-4050-4833-a4a7-2b7dc42f51a5:run:5cab2579-6d61-4c9e-883d-9e7d66d5b0d5"
+        "run-1-CHANGED_IMPLEMENTATION:key:mn-000e06d9-4050-4833-a4a7-2b7dc42f51a5:run:5cab2579-6d61-4c9e-883d-9e7d66d5b0d5",
+        "run-1-AMOUNT_UNIT_MISMATCH:key:mn-226416a0-78fb-499b-a88e-e69c667c67af:run:6382a463-066a-438f-9ee7-244cabf7c7bf",
+        "run-1-APPROVED_PAYMENT:key:mn-a772220c-d0a1-40c9-9121-d1b3c3a36c88:run:5bbf4b4a-a9db-4d87-bf60-b13277e92b6d",
+        "run-2-CHANGED_IMPLEMENTATION:key:mn-cda6156f-5716-4bd6-8d66-3353b6e18ca6:run:68615b9f-b315-4453-8319-aee44568497c",
+        "run-2-AMOUNT_UNIT_MISMATCH:key:mn-eb0da4b5-fdf9-437e-9c9e-ecf83a1fb7a3:run:27e66916-32f6-48ea-8b78-de9cb718f618",
+        "run-2-APPROVED_PAYMENT:key:mn-14c26310-36fb-494f-bdca-e16fbd855af7:run:375789c7-d2e8-4378-9da9-1842d29babb6",
+        "run-3-CHANGED_IMPLEMENTATION:key:mn-f729220e-d4be-4ea3-b6f2-ee76ef349322:run:48964cdb-99b0-4136-8d18-8a5cbecaf9b3",
+        "run-3-AMOUNT_UNIT_MISMATCH:key:mn-3f00205a-9b86-4d82-9f26-11fff8dbc198:run:42838e30-f04d-45ef-b23f-bd038db03fe6",
+        "run-3-APPROVED_PAYMENT:key:mn-2f029faf-cb76-4be4-b80b-6b2489d46cd9:run:334ab548-fc9f-428e-aab5-c708ced36639"
       ],
       "releasedRuns": [],
-      "invocations": 1,
-      "updatedAt": "2026-10-11T09:09:25.034Z"
+      "invocations": 2,
+      "updatedAt": "2026-10-11T09:26:36.481Z"
     },
     "lifecycle": {
       "status": "pending",

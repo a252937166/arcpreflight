@@ -1,0 +1,735 @@
+{
+  "status": "PASS",
+  "chainId": 5042,
+  "network": "mainnet",
+  "release": "ab49fc7",
+  "profile": "SUBMISSION_RESTRICTED",
+  "api": "https://arcpreflight.axiqo.xyz",
+  "startedAtUTC": "2026-10-11T09:19:32.130Z",
+  "finishedAtUTC": "2026-10-11T09:26:36.481Z",
+  "repeats": 3,
+  "accounts": {
+    "deployerAdmin": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
+    "orderCreator": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b",
+    "demoRunner": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+    "merchantPayTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0"
+  },
+  "plan": {
+    "runs": 9,
+    "serviceFeeUsdc": "0.09",
+    "businessPaymentUsdc": "0.15",
+    "capUsdc": "0.35",
+    "gasCeilingUsdc": "0.1086",
+    "totalWorstUsdc": "0.3486"
+  },
+  "positions": {
+    "total": 9,
+    "recoveredOpen": 0,
+    "completedBefore": 1,
+    "releasedBefore": 0,
+    "unverifiedBefore": 0,
+    "remainingAtStart": 8,
+    "budgetedForRemainingUsdc": "0.3276",
+    "verified": 9
+  },
+  "recovered": [
+    {
+      "id": "run-1-CHANGED_IMPLEMENTATION:key:mn-000e06d9-4050-4833-a4a7-2b7dc42f51a5:run:5cab2579-6d61-4c9e-883d-9e7d66d5b0d5",
+      "how": "completed by a previous invocation; re-read and re-verified",
+      "runId": "5cab2579-6d61-4c9e-883d-9e7d66d5b0d5",
+      "position": {
+        "round": 1,
+        "fixture": "CHANGED_IMPLEMENTATION"
+      }
+    }
+  ],
+  "measuredOutflowUsdc": "0.186160502081036775",
+  "spent": {
+    "serviceFeeUsdc": "0.09",
+    "businessPaymentUsdc": "0.15",
+    "note": "service fees land in merchant-payto, business payments in the MAIN proxy; both stay inside the project"
+  },
+  "runs": [
+    {
+      "fixture": "CHANGED_IMPLEMENTATION",
+      "runId": "5cab2579-6d61-4c9e-883d-9e7d66d5b0d5",
+      "requestId": "bebf387b-932f-45cd-bfe6-9891c2d68861",
+      "labels": [
+        "LIVE_REQUEST",
+        "DEMO_ON_MAINNET"
+      ],
+      "decision": "REVIEW_REQUIRED",
+      "chainStatus": "NOT_SIGNED",
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 12528,
+      "serviceFee": {
+        "kind": "SERVICE_FEE",
+        "amountUsdc": "0.01",
+        "tx": "0xe5f457c63f6c793768d1a7f1d3785fc8eab47add0521c431e6e21f60f4286ed5",
+        "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+        "payTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+        "verifiedOnChain": true
+      },
+      "order": {
+        "orderId": "0xeede80edaba0573d854395de3da6d879e99310c8b9987db2fed9064653148d1a",
+        "merchant": "0x3bc7340CfE664c3b09D4e64d1B7dE239F6748605",
+        "createTx": "0xaf1b9e4f7ecd825a6caef327a6e8954d1c115033150c3be9690bae4182e06971",
+        "paidOnChain": false
+      },
+      "businessPayment": {
+        "kind": "BUSINESS_PAYMENT",
+        "amountUsdc": "0",
+        "tx": null,
+        "executed": false
+      },
+      "digests": {
+        "intent": "0xfe386d9b5949ccb39bd00982bf5289801fbc8f585cdafe2a7d0fc8121f25bf3a",
+        "report": "0x350d65594bf14ebe5730e6e39958bbf3d0ded48cd8fa771989af98ae01f7e3a3",
+        "decision": "0xdb4068e0539ae656c7961a24904b9215e69d4dc1ba8caa2fcc11731fdbad66a1",
+        "finalValidation": null,
+        "transactionPlan": null,
+        "execution": "0x8ef974c8002679ce14b9b90078a07e7d0c004fa791a0242b36f3d16cd1534b60"
+      },
+      "gasUsdc": {
+        "createOrder": "0.002005840115436092",
+        "businessPay": null
+      },
+      "round": 1,
+      "recovery": {
+        "unauthenticatedStatus": 401,
+        "authenticated": "SKIPPED (no DEMO_RUNNER_TOKEN)"
+      },
+      "passport": {
+        "file": "evidence/selftest/passports/mainnet-5cab2579-6d61-4c9e-883d-9e7d66d5b0d5.passport.json",
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "UNVERIFIED",
+          "ORDER_OUTCOME": "UNVERIFIED",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "counts": {
+          "pass": 8,
+          "fail": 0,
+          "unverified": 2,
+          "notEvaluated": 1
+        }
+      }
+    },
+    {
+      "fixture": "AMOUNT_UNIT_MISMATCH",
+      "runId": "6382a463-066a-438f-9ee7-244cabf7c7bf",
+      "requestId": "4b3b0db1-1f29-4768-b74b-505620543982",
+      "labels": [
+        "LIVE_REQUEST",
+        "DEMO_ON_MAINNET"
+      ],
+      "decision": "BLOCKED",
+      "chainStatus": "NOT_SIGNED",
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 12866,
+      "serviceFee": {
+        "kind": "SERVICE_FEE",
+        "amountUsdc": "0.01",
+        "tx": "0xb207f61ca1a2d0876303d6d4e1f5da4ae9175e0d103b2b1a92fecfb257f03175",
+        "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+        "payTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+        "verifiedOnChain": true
+      },
+      "order": {
+        "orderId": "0xdcb72782d220cd9f7b9897b99ad201c7554b4f8ce164306e2a9085ad42a72a21",
+        "merchant": "0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc",
+        "createTx": "0xb075ecb0a4e5c8a630464904d24d154a104b26031358931915d6eb0a3c9dcf5f",
+        "paidOnChain": false
+      },
+      "businessPayment": {
+        "kind": "BUSINESS_PAYMENT",
+        "amountUsdc": "0",
+        "tx": null,
+        "executed": false
+      },
+      "digests": {
+        "intent": "0x99346dda6ba2a83a3643a2d68a3bb5004162e08c4158063763c6e6616bc0857b",
+        "report": "0x07be4128d3fdfb56a99bbea4ec15c56654840fdaf0cb9d85b4f514598b0d2083",
+        "decision": "0xa0a9906075ee6f5dc95e43a15644e7143bfcf92a85a87b4c97917945e10e8c96",
+        "finalValidation": null,
+        "transactionPlan": null,
+        "execution": "0x4bac41af18e745bc131bf3b79443cb95194a255934f1658c043f1bdb435ac922"
+      },
+      "gasUsdc": {
+        "createOrder": "0.002005840115436092",
+        "businessPay": null
+      },
+      "round": 1,
+      "recovery": {
+        "unauthenticatedStatus": 401,
+        "authenticated": "SKIPPED (no DEMO_RUNNER_TOKEN)"
+      },
+      "passport": {
+        "file": "evidence/selftest/passports/mainnet-6382a463-066a-438f-9ee7-244cabf7c7bf.passport.json",
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "UNVERIFIED",
+          "ORDER_OUTCOME": "UNVERIFIED",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "counts": {
+          "pass": 8,
+          "fail": 0,
+          "unverified": 2,
+          "notEvaluated": 1
+        }
+      },
+      "admission": {
+        "replayStatus": 200,
+        "sameRun": true
+      }
+    },
+    {
+      "fixture": "APPROVED_PAYMENT",
+      "runId": "5bbf4b4a-a9db-4d87-bf60-b13277e92b6d",
+      "requestId": "5e7688fa-d123-4aac-99bc-3736c059d546",
+      "labels": [
+        "LIVE_REQUEST",
+        "DEMO_ON_MAINNET"
+      ],
+      "decision": "NO_POLICY_VIOLATION",
+      "chainStatus": "CONFIRMED",
+      "businessStatus": "SUCCESS",
+      "durationMs": 23205,
+      "serviceFee": {
+        "kind": "SERVICE_FEE",
+        "amountUsdc": "0.01",
+        "tx": "0xd7fb1aa19af58ae4a315b842a4f73a482df88756ac58b0c9f70c5450b10f4ce4",
+        "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+        "payTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+        "verifiedOnChain": true
+      },
+      "order": {
+        "orderId": "0xacda55596471ac3b07208932966cba592614cbd0b8588fae288af9a377cb9bfe",
+        "merchant": "0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc",
+        "createTx": "0x05a3e2b703ff1480520a511da76419a45f0201501ce9897e4743a8b5800840c4",
+        "paidOnChain": true
+      },
+      "businessPayment": {
+        "kind": "BUSINESS_PAYMENT",
+        "amountUsdc": "0.05",
+        "tx": "0xea9ca88e2f71c5b76dffa7d28cb81df81be249a8393013ef6c50d69417d64021",
+        "executed": true
+      },
+      "digests": {
+        "intent": "0x2c3c419c9edbb8030dcaaa05f398d24a7cc6bae1211e8ed87d6f2e2b0b6db362",
+        "report": "0x6ae067fbe47bdac6dfc0ee89700b18376eb3e981f0b16fc3588a9f0bff3b359b",
+        "decision": "0x062e6627e578b2752f4869877b74ec6e725bfb9bdc724c6292e2bc6b78888044",
+        "finalValidation": "0x58b3bb24cce102793bf6d20ef75a7687a9207fcfeeda416f5e7c55cd3c2873cd",
+        "transactionPlan": "0x4e3c61d2604ef5ad3aefd05d3ff388f9705acfd0682dc7e6cdd44b6b54b12b38",
+        "execution": "0x582f6c00f111cd3e5e8de9b720ea4384597c84073f9ce1f039160e19be0c3ee5"
+      },
+      "gasUsdc": {
+        "createOrder": "0.002005840115436092",
+        "businessPay": "0.000807280046458964"
+      },
+      "round": 1,
+      "recovery": {
+        "unauthenticatedStatus": 401,
+        "authenticated": "SKIPPED (no DEMO_RUNNER_TOKEN)"
+      },
+      "passport": {
+        "file": "evidence/selftest/passports/mainnet-5bbf4b4a-a9db-4d87-bf60-b13277e92b6d.passport.json",
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "PASS",
+          "ORDER_OUTCOME": "PASS",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "counts": {
+          "pass": 10,
+          "fail": 0,
+          "unverified": 0,
+          "notEvaluated": 1
+        }
+      },
+      "admission": {
+        "replayStatus": 200,
+        "sameRun": true
+      }
+    },
+    {
+      "fixture": "CHANGED_IMPLEMENTATION",
+      "runId": "68615b9f-b315-4453-8319-aee44568497c",
+      "requestId": "19a9f0d3-fe3c-4269-afcc-0b0756227bcf",
+      "labels": [
+        "LIVE_REQUEST",
+        "DEMO_ON_MAINNET"
+      ],
+      "decision": "REVIEW_REQUIRED",
+      "chainStatus": "NOT_SIGNED",
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 12006,
+      "serviceFee": {
+        "kind": "SERVICE_FEE",
+        "amountUsdc": "0.01",
+        "tx": "0xe5b93dfdbc80f0498c2801dc96a60795dcccc4d2ff598a925ae73d38a8eb19a1",
+        "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+        "payTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+        "verifiedOnChain": true
+      },
+      "order": {
+        "orderId": "0xedb3cea107bd36e0a164a7c8a8379a3fccd3d2b25c86afcc952b30b24b1e197d",
+        "merchant": "0x3bc7340CfE664c3b09D4e64d1B7dE239F6748605",
+        "createTx": "0x3b6f188b61bc0642d10e5933fd4503031c49fe5da7fb6139ee457502c2187500",
+        "paidOnChain": false
+      },
+      "businessPayment": {
+        "kind": "BUSINESS_PAYMENT",
+        "amountUsdc": "0",
+        "tx": null,
+        "executed": false
+      },
+      "digests": {
+        "intent": "0x4a89ebb804dffa7dedb030f98eda249aa2ea203ff8f5ce2584dda3351911a827",
+        "report": "0x3706d8684fb23ef13f9f38b057052ea8ea0c46fb2e947be63d5bccee558d639a",
+        "decision": "0x106709f79cb7ce027de7d961e23e70fe7dd1690c3d1934ee0518ca28a06828c4",
+        "finalValidation": null,
+        "transactionPlan": null,
+        "execution": "0x365745fb04101de4b5f4c6179904e257efcb5aa126d8cbdb482f157d1fc4cbb4"
+      },
+      "gasUsdc": {
+        "createOrder": "0.002005840115436092",
+        "businessPay": null
+      },
+      "round": 2,
+      "recovery": {
+        "unauthenticatedStatus": 401,
+        "authenticated": "SKIPPED (no DEMO_RUNNER_TOKEN)"
+      },
+      "passport": {
+        "file": "evidence/selftest/passports/mainnet-68615b9f-b315-4453-8319-aee44568497c.passport.json",
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "UNVERIFIED",
+          "ORDER_OUTCOME": "UNVERIFIED",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "counts": {
+          "pass": 8,
+          "fail": 0,
+          "unverified": 2,
+          "notEvaluated": 1
+        }
+      },
+      "admission": {
+        "replayStatus": 200,
+        "sameRun": true
+      }
+    },
+    {
+      "fixture": "AMOUNT_UNIT_MISMATCH",
+      "runId": "27e66916-32f6-48ea-8b78-de9cb718f618",
+      "requestId": "51f21364-504b-4ac8-b224-eb5f3d35d508",
+      "labels": [
+        "LIVE_REQUEST",
+        "DEMO_ON_MAINNET"
+      ],
+      "decision": "BLOCKED",
+      "chainStatus": "NOT_SIGNED",
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 12305,
+      "serviceFee": {
+        "kind": "SERVICE_FEE",
+        "amountUsdc": "0.01",
+        "tx": "0xb5792899a09d18778244eaceba5317a145dfaa95f2c59bc255b4cec06066bf10",
+        "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+        "payTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+        "verifiedOnChain": true
+      },
+      "order": {
+        "orderId": "0x95bf6a2f8fbab414e8028881692eec4c19f40cae8bd6d43997a1989b9eeed1d1",
+        "merchant": "0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc",
+        "createTx": "0x113a14ebf9e573744dbe12ae4864d29190c4c50b747e0291c3772f015b2fb344",
+        "paidOnChain": false
+      },
+      "businessPayment": {
+        "kind": "BUSINESS_PAYMENT",
+        "amountUsdc": "0",
+        "tx": null,
+        "executed": false
+      },
+      "digests": {
+        "intent": "0x3778a2986fd1c2d6c616a7840c91a92577c4cd82aa15f8af3d01ff54993a2f80",
+        "report": "0x079026b61e9758ee336a280487e5b6969ecfb4ae1f0fd795b16685373d1cf3e8",
+        "decision": "0xe26501477ed56eea5a7a759724544c7d8ab0cbd4432519b5588a49ef548472cf",
+        "finalValidation": null,
+        "transactionPlan": null,
+        "execution": "0x376bb53e273bed39c790cedba5a55cf53ae352f3d21333ea8ffb2bdd7b1a7071"
+      },
+      "gasUsdc": {
+        "createOrder": "0.002005840115436092",
+        "businessPay": null
+      },
+      "round": 2,
+      "recovery": {
+        "unauthenticatedStatus": 401,
+        "authenticated": "SKIPPED (no DEMO_RUNNER_TOKEN)"
+      },
+      "passport": {
+        "file": "evidence/selftest/passports/mainnet-27e66916-32f6-48ea-8b78-de9cb718f618.passport.json",
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "UNVERIFIED",
+          "ORDER_OUTCOME": "UNVERIFIED",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "counts": {
+          "pass": 8,
+          "fail": 0,
+          "unverified": 2,
+          "notEvaluated": 1
+        }
+      },
+      "admission": {
+        "replayStatus": 200,
+        "sameRun": true
+      }
+    },
+    {
+      "fixture": "APPROVED_PAYMENT",
+      "runId": "375789c7-d2e8-4378-9da9-1842d29babb6",
+      "requestId": "b89165c5-f0a5-47c7-820d-e04519179947",
+      "labels": [
+        "LIVE_REQUEST",
+        "DEMO_ON_MAINNET"
+      ],
+      "decision": "NO_POLICY_VIOLATION",
+      "chainStatus": "CONFIRMED",
+      "businessStatus": "SUCCESS",
+      "durationMs": 23585,
+      "serviceFee": {
+        "kind": "SERVICE_FEE",
+        "amountUsdc": "0.01",
+        "tx": "0x791e72ddd7db96604c3771ae83e0949a46392b00e16df358d654a15066f8656d",
+        "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+        "payTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+        "verifiedOnChain": true
+      },
+      "order": {
+        "orderId": "0xa4e31dc9324a3c2a9746c0f39c27061e0db24e1f30c23bd468a221c2d8aaae2f",
+        "merchant": "0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc",
+        "createTx": "0x1bafdfdb32dcd9991ff7d286ac5c74be1adb72326e5d049c706146397187a9ea",
+        "paidOnChain": true
+      },
+      "businessPayment": {
+        "kind": "BUSINESS_PAYMENT",
+        "amountUsdc": "0.05",
+        "tx": "0xb797fd659c946c3fb09682a3ae231d1e0bf90a34102faf7cae92b4b038ae0f46",
+        "executed": true
+      },
+      "digests": {
+        "intent": "0x72a4b5112eff27d06f0bad811c8bd3883ab171b618ce8aa0a7f397874f4163f6",
+        "report": "0x1e4d26cd0e6e5e29a2658212949a04cbca1351698ec3f53d06ac9fcb2a2abac0",
+        "decision": "0xd25a637d3fadd7c13f3b6290973ee0bc1c4e92ef01b6757530526e6bcd2bf6e0",
+        "finalValidation": "0x5ea4abe92095f39106652274f83bde84abaa6ebc8d9a84119edf1e776f4a98b0",
+        "transactionPlan": "0x2d8ad797b3c17cac523d5c2fba1b9d29c4c03cafdbbe7928c1739a773142c8de",
+        "execution": "0x571ec442624c74b13113a6148890d1ee0dc54c306b6cb42705d1b5a4598304f9"
+      },
+      "gasUsdc": {
+        "createOrder": "0.002005840115436092",
+        "businessPay": "0.000807280046458964"
+      },
+      "round": 2,
+      "recovery": {
+        "unauthenticatedStatus": 401,
+        "authenticated": "SKIPPED (no DEMO_RUNNER_TOKEN)"
+      },
+      "passport": {
+        "file": "evidence/selftest/passports/mainnet-375789c7-d2e8-4378-9da9-1842d29babb6.passport.json",
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "PASS",
+          "ORDER_OUTCOME": "PASS",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "counts": {
+          "pass": 10,
+          "fail": 0,
+          "unverified": 0,
+          "notEvaluated": 1
+        }
+      },
+      "admission": {
+        "replayStatus": 200,
+        "sameRun": true
+      }
+    },
+    {
+      "fixture": "CHANGED_IMPLEMENTATION",
+      "runId": "48964cdb-99b0-4136-8d18-8a5cbecaf9b3",
+      "requestId": "a7501e0b-f2af-448f-a27a-05c946d0bde9",
+      "labels": [
+        "LIVE_REQUEST",
+        "DEMO_ON_MAINNET"
+      ],
+      "decision": "REVIEW_REQUIRED",
+      "chainStatus": "NOT_SIGNED",
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 12458,
+      "serviceFee": {
+        "kind": "SERVICE_FEE",
+        "amountUsdc": "0.01",
+        "tx": "0x978927fc55e8e5d5204c61f6ce776f7ceb1bcd2274db1d0d11994e1a096cfde0",
+        "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+        "payTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+        "verifiedOnChain": true
+      },
+      "order": {
+        "orderId": "0xb8642e6bebf0537867618938ee407e1f381d16599dc11287ccdd010feb3784c5",
+        "merchant": "0x3bc7340CfE664c3b09D4e64d1B7dE239F6748605",
+        "createTx": "0x83b7ff7e9e9ec8d22b024ee8c71d3495aa13d7538b060596695e763c8e0c4f99",
+        "paidOnChain": false
+      },
+      "businessPayment": {
+        "kind": "BUSINESS_PAYMENT",
+        "amountUsdc": "0",
+        "tx": null,
+        "executed": false
+      },
+      "digests": {
+        "intent": "0x472dbdd0669409aa512be38e9d1fac9beffc97e795602d152707f8db47d63071",
+        "report": "0x49a7e4fdd202724dba435e8b262b23a0adc7a8c19f7d2d047135d6b3b708b9fa",
+        "decision": "0x70808ba640883a0e6941ed2843a3e48f8c790f7e94b5023933ded352ad3ad9b3",
+        "finalValidation": null,
+        "transactionPlan": null,
+        "execution": "0x1e1f6163f1c9c61c57e6bbe54d9c142ab51df9308a496ff2f020aefdf0860e97"
+      },
+      "gasUsdc": {
+        "createOrder": "0.002005840115436092",
+        "businessPay": null
+      },
+      "round": 3,
+      "recovery": {
+        "unauthenticatedStatus": 401,
+        "authenticated": "SKIPPED (no DEMO_RUNNER_TOKEN)"
+      },
+      "passport": {
+        "file": "evidence/selftest/passports/mainnet-48964cdb-99b0-4136-8d18-8a5cbecaf9b3.passport.json",
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "UNVERIFIED",
+          "ORDER_OUTCOME": "UNVERIFIED",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "counts": {
+          "pass": 8,
+          "fail": 0,
+          "unverified": 2,
+          "notEvaluated": 1
+        }
+      },
+      "admission": {
+        "replayStatus": 200,
+        "sameRun": true
+      }
+    },
+    {
+      "fixture": "AMOUNT_UNIT_MISMATCH",
+      "runId": "42838e30-f04d-45ef-b23f-bd038db03fe6",
+      "requestId": "4097ea95-81a1-4c16-8e98-ac5dc72cb296",
+      "labels": [
+        "LIVE_REQUEST",
+        "DEMO_ON_MAINNET"
+      ],
+      "decision": "BLOCKED",
+      "chainStatus": "NOT_SIGNED",
+      "businessStatus": "NOT_EXECUTED",
+      "durationMs": 13077,
+      "serviceFee": {
+        "kind": "SERVICE_FEE",
+        "amountUsdc": "0.01",
+        "tx": "0x2d56e3138e480370c771788234333618a7270d6bf44e692fb5819e0aeb1bb575",
+        "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+        "payTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+        "verifiedOnChain": true
+      },
+      "order": {
+        "orderId": "0xc9060edb69095ca445c4a5a64ad8309d095aa1b60497166f6c2b350f749d3594",
+        "merchant": "0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc",
+        "createTx": "0x092b1633d67b374068ebe4769c5950925673c5d76f070d1a633be8b22caa316a",
+        "paidOnChain": false
+      },
+      "businessPayment": {
+        "kind": "BUSINESS_PAYMENT",
+        "amountUsdc": "0",
+        "tx": null,
+        "executed": false
+      },
+      "digests": {
+        "intent": "0xc8bb96652107c4e2d36612e0e00f0c3e20ef29c9fd4aa560c9908635ee35565a",
+        "report": "0x39f6b9077138189736b5534625de2eec3b2ca3b8fbcff8856958ab79e054e568",
+        "decision": "0xa7ac3b41ac209faa50e2c0204e775219abc27c2d46be1d84b9d4dbfee1449788",
+        "finalValidation": null,
+        "transactionPlan": null,
+        "execution": "0xb2796b60fc859a1ba2277afb4fc8f84eacdbde4830f72c6807b526c7977903a8"
+      },
+      "gasUsdc": {
+        "createOrder": "0.002005840115436092",
+        "businessPay": null
+      },
+      "round": 3,
+      "recovery": {
+        "unauthenticatedStatus": 401,
+        "authenticated": "SKIPPED (no DEMO_RUNNER_TOKEN)"
+      },
+      "passport": {
+        "file": "evidence/selftest/passports/mainnet-42838e30-f04d-45ef-b23f-bd038db03fe6.passport.json",
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "UNVERIFIED",
+          "ORDER_OUTCOME": "UNVERIFIED",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "counts": {
+          "pass": 8,
+          "fail": 0,
+          "unverified": 2,
+          "notEvaluated": 1
+        }
+      },
+      "admission": {
+        "replayStatus": 200,
+        "sameRun": true
+      }
+    },
+    {
+      "fixture": "APPROVED_PAYMENT",
+      "runId": "334ab548-fc9f-428e-aab5-c708ced36639",
+      "requestId": "ff685752-7643-4c6e-ac61-1017aaff6da3",
+      "labels": [
+        "LIVE_REQUEST",
+        "DEMO_ON_MAINNET"
+      ],
+      "decision": "NO_POLICY_VIOLATION",
+      "chainStatus": "CONFIRMED",
+      "businessStatus": "SUCCESS",
+      "durationMs": 23344,
+      "serviceFee": {
+        "kind": "SERVICE_FEE",
+        "amountUsdc": "0.01",
+        "tx": "0x6f881fca106a918491af9baea3b006a0d967262be4b474bce473b9d8344aa05e",
+        "payer": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+        "payTo": "0x06873b35575D6A22eC8008f30F56c71C19BeE7b0",
+        "verifiedOnChain": true
+      },
+      "order": {
+        "orderId": "0x1c2b24d20f48abb62f0842fc7ffb57ff48befb1a3456d405879deeefaf58dbb2",
+        "merchant": "0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc",
+        "createTx": "0x695b66250da69ea9d0a03d2b5997c20c4eeef36b780d4f31ab52a42492e40cc3",
+        "paidOnChain": true
+      },
+      "businessPayment": {
+        "kind": "BUSINESS_PAYMENT",
+        "amountUsdc": "0.05",
+        "tx": "0x9388f5fc37728785a36b2a231693d92a64056cd66c244297947740774d8cd782",
+        "executed": true
+      },
+      "digests": {
+        "intent": "0xb80541cc4523d5569c11464e2ee2b4efd82628b4254492a80bd928c19f9358f8",
+        "report": "0x046bcb67f973aaed92128e001960ebbc6af9b8d026755ece1e05803bddc4dfe2",
+        "decision": "0x938bfd259f66343d2f37453f60e23b5291848bb90a76f1c3a038e03ed5b7bbfd",
+        "finalValidation": "0xd0aea4bc39f927c1ccbfb879b6603687f53f04023d3c8b6d40e54d74b7e39d48",
+        "transactionPlan": "0xa5f076d9d23bace2b966d1565cbf87615b058a97517c1b9f85b70a9af4aa9469",
+        "execution": "0xd5c7c6cd504b4cc70294880e510d2a4905f706736feebb2f3383abbf72cea0c1"
+      },
+      "gasUsdc": {
+        "createOrder": "0.002005840115436092",
+        "businessPay": "0.000807280046458964"
+      },
+      "round": 3,
+      "recovery": {
+        "unauthenticatedStatus": 401,
+        "authenticated": "SKIPPED (no DEMO_RUNNER_TOKEN)"
+      },
+      "passport": {
+        "file": "evidence/selftest/passports/mainnet-334ab548-fc9f-428e-aab5-c708ced36639.passport.json",
+        "findings": {
+          "FILE_INTEGRITY": "PASS",
+          "DIGEST_INTEGRITY": "PASS",
+          "DISCLOSURE": "PASS",
+          "APPROVAL_SOURCE": "PASS",
+          "APPROVAL_COVERAGE": "PASS",
+          "NETWORK_IDENTITY": "PASS",
+          "FEE_ATTRIBUTION": "PASS",
+          "TRANSACTION_PLAN_AGREEMENT": "PASS",
+          "ORDER_OUTCOME": "PASS",
+          "COST_STATEMENT": "PASS",
+          "CURRENT_ELIGIBILITY": "NOT_EVALUATED"
+        },
+        "counts": {
+          "pass": 10,
+          "fail": 0,
+          "unverified": 0,
+          "notEvaluated": 1
+        }
+      },
+      "admission": {
+        "replayStatus": 200,
+        "sameRun": true
+      }
+    }
+  ],
+  "failure": null
+}
