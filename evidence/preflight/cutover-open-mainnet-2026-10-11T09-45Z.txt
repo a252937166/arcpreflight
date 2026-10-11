@@ -1,0 +1,4 @@
+evidence: evidence/selftest/mainnet-2026-10-11T09-19-32-130Z.json · evidence/selftest/mainnet-lifecycle-2026-10-11T09-36-07-576Z.json (release ab49fc7)
+== open public business execution on mainnet and flip the capability labels
+access {'selfService': True, 'session': '/v1/session', 'publicExecution': True, 'walletExecution': True, 'executionReady': True, 'operatorAcceptance': False, 'note': 'any visitor: anonymous session, own orders, paid checks, wallet execution with after-the-fact plan comparison, recovery, private passports'}
+['business-execution-recovery:MAINNET_VERIFIED', 'wallet-execution:MAINNET_VERIFIED']

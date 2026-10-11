@@ -15,8 +15,8 @@ Three moments make the story: **A** — the address stayed, the approval did not
 signing); **B** — the response disappeared, not necessarily the money (the original attempt is recovered, never
 repeated); **C** — a new reader finds the payment (the passport verifies in a clean process).
 
-Live: **https://arcpreflight.axiqo.xyz** — since 2026-10-11 the root is Arc **mainnet** (chain 5042); public execution there opens once the
-operator records the mainnet acceptance (until then checks, orders, recovery and passports are available and the gate answers 503 for runs).
+Live: **https://arcpreflight.axiqo.xyz** — since 2026-10-11 the root is Arc **mainnet** (chain 5042) with public execution open under daily caps
+(the operator recorded the mainnet acceptance the same day; project-funded demo runs, your own orders, paid checks, wallet execution, recovery and passports).
 The Arc **testnet** instance continues at **https://arcpreflight.axiqo.xyz/testnet** (free to try with your own wallet; the faucet gives
 testnet USDC); the network switch in the header only changes the API base path, explorer and wallet chain ·
 API: `/openapi.json` · Submission: Arc Microgrants (DoraHacks)
