@@ -1,0 +1,68 @@
+network=mainnet chainId=5042 mode=PREFLIGHT (read-only; nothing is signed)
+deployer 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 4.499159999957958 USDC · nonce 2 · runner 0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE · orderCreator 0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b
+fees: base 20 gwei · max fee sent 24.000001041 gwei · priority 0.000001041 gwei · ceiling 40 gwei
+caps: 0.05 USDC per transaction · 0.15 USDC total (gas included) · ledger <repo>/evidence/spend/mainnet-deploy.json (0 prior entries, 0 USDC committed)
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0 · remaining 0.69
+  deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (new record; a dry run does not write it: <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+journal <repo>/evidence/deploy-mainnet-journal.json (new):
+  deploy implementation A (DemoMerchantV1)     pending  
+  deploy implementation B (DemoMerchantV2)     pending  
+  deploy MAIN proxy on A                       pending  
+  deploy CHANGED proxy on A                    pending  
+  setOrderCreator on MAIN                      pending  
+  setOrderCreator on CHANGED                   pending  
+  upgrade CHANGED proxy A -> B                 pending  
+plan (7 unfinished steps):
+  deploy implementation A (DemoMerchantV1)     gas  1076707 (live estimate) · limit  1292049 · worst 0.031009177345023009 · expected 0.021534141120851987
+  deploy implementation B (DemoMerchantV2)     gas  1105057 (live estimate) · limit  1326069 · worst 0.031825657380437829 · expected 0.022101141150364337
+  deploy MAIN proxy on A                       gas   178416 (measured on testnet) · limit   214100 · worst 0.0051384002228781 · expected 0.003568320185731056
+  deploy CHANGED proxy on A                    gas   178416 (measured on testnet) · limit   214100 · worst 0.0051384002228781 · expected 0.003568320185731056
+  setOrderCreator on MAIN                      gas    52167 (measured on testnet) · limit    62601 · worst 0.001502424065167641 · expected 0.001043340054305847
+  setOrderCreator on CHANGED                   gas    52167 (measured on testnet) · limit    62601 · worst 0.001502424065167641 · expected 0.001043340054305847
+  upgrade CHANGED proxy A -> B                 gas    37633 (measured on testnet) · limit    45160 · worst 0.00108384004701156 · expected 0.000752660039175953
+  total worst 0.07720032334856388 USDC · expected 0.053611262790466083 USDC
+predicted addresses: implA 0x00e393aCDCD8cfBef4Ab5D0F826bEBD87bf4Ae14 · implB 0x816Ca9Da6D3A316D9b4cFf414890b07cBC95B399 · proxyMAIN 0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc · proxyCHANGED 0x3bc7340CfE664c3b09D4e64d1B7dE239F6748605
+PREFLIGHT OK: nothing was signed or sent.
+network=mainnet chainId=5042 mode=EXECUTE
+deployer 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 4.499159999957958 USDC · nonce 2 · runner 0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE · orderCreator 0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b
+fees: base 20 gwei · max fee sent 24.000001041 gwei · priority 0.000001041 gwei · ceiling 40 gwei
+caps: 0.05 USDC per transaction · 0.15 USDC total (gas included) · ledger <repo>/evidence/spend/mainnet-deploy.json (0 prior entries, 0 USDC committed)
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0 · remaining 0.69
+  deploy      pending  cap 0.15   outflow 0                    pending 0                    internal 0      invocations 0
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (new record: <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+journal <repo>/evidence/deploy-mainnet-journal.json (new):
+  deploy implementation A (DemoMerchantV1)     pending  
+  deploy implementation B (DemoMerchantV2)     pending  
+  deploy MAIN proxy on A                       pending  
+  deploy CHANGED proxy on A                    pending  
+  setOrderCreator on MAIN                      pending  
+  setOrderCreator on CHANGED                   pending  
+  upgrade CHANGED proxy A -> B                 pending  
+plan (7 unfinished steps):
+  deploy implementation A (DemoMerchantV1)     gas  1076707 (live estimate) · limit  1292049 · worst 0.031009177345023009 · expected 0.021534141120851987
+  deploy implementation B (DemoMerchantV2)     gas  1105057 (live estimate) · limit  1326069 · worst 0.031825657380437829 · expected 0.022101141150364337
+  deploy MAIN proxy on A                       gas   178416 (measured on testnet) · limit   214100 · worst 0.0051384002228781 · expected 0.003568320185731056
+  deploy CHANGED proxy on A                    gas   178416 (measured on testnet) · limit   214100 · worst 0.0051384002228781 · expected 0.003568320185731056
+  setOrderCreator on MAIN                      gas    52167 (measured on testnet) · limit    62601 · worst 0.001502424065167641 · expected 0.001043340054305847
+  setOrderCreator on CHANGED                   gas    52167 (measured on testnet) · limit    62601 · worst 0.001502424065167641 · expected 0.001043340054305847
+  upgrade CHANGED proxy A -> B                 gas    37633 (measured on testnet) · limit    45160 · worst 0.00108384004701156 · expected 0.000752660039175953
+  total worst 0.07720032334856388 USDC · expected 0.053611262790466083 USDC
+predicted addresses: implA 0x00e393aCDCD8cfBef4Ab5D0F826bEBD87bf4Ae14 · implB 0x816Ca9Da6D3A316D9b4cFf414890b07cBC95B399 · proxyMAIN 0xa09f5Dd3753823B4920CEa629e83fC481fe00EBc · proxyCHANGED 0x3bc7340CfE664c3b09D4e64d1B7dE239F6748605
+deploy implementation A (DemoMerchantV1): 0xd0acc97fb524c8a9e6c7e03dca6d9d8868155c2da639ca52c8ca7b862048a689 block 25380906 gas 1067071 cost 0.021341421110820911 USDC → 0x00e393acdcd8cfbef4ab5d0f826bebd87bf4ae14 · committed 0.021341421110820911/0.15
+deploy implementation B (DemoMerchantV2): 0x88e4276949056c2f2f1617c9aebb12aeba4632441663483e69c7b29b25108060 block 25380912 gas 1095198 cost 0.021903961140101118 USDC → 0x816ca9da6d3a316d9b4cff414890b07cbc95b399 · committed 0.043245382250922029/0.15
+deploy MAIN proxy on A: 0x6ad87b64e558ffaba002745772a31862725e84ac7d9bc81b5698f3649b83369d block 25380918 gas 178416 cost 0.003568320185731056 USDC → 0xa09f5dd3753823b4920cea629e83fc481fe00ebc · committed 0.046813702436653085/0.15
+deploy CHANGED proxy on A: 0x8446147500da2b92d53c62bb647b365a0115909f1ae64b0f7cc961137ddffe79 block 25380923 gas 178416 cost 0.003568320185731056 USDC → 0x3bc7340cfe664c3b09d4e64d1b7de239f6748605 · committed 0.050382022622384141/0.15
+setOrderCreator on MAIN: 0x68a2bd0e83f946c300bf15dd064e55397fb504e9db73d5c55933d9d59d71f818 block 25380928 gas 52167 cost 0.001043340054305847 USDC · committed 0.051425362676689988/0.15
+setOrderCreator on CHANGED: 0xd32afa1f9b3538202a2c196af02416da388a7812ce168af456c046ba0b3eb7d2 block 25380934 gas 52167 cost 0.001043340054305847 USDC · committed 0.052468702730995835/0.15
+upgrade CHANGED proxy A -> B: 0x553ccd22d6f52610f88fd0bbacf5032bae1457bfaa1651d4893b51518828b4f3 block 25380939 gas 37633 cost 0.000752660039175953 USDC · committed 0.053221362770171788/0.15
+wrote <repo>/fixtures/deployments-mainnet.json · spent 0.053221362770171788 USDC of the 0.15 USDC cap
+next: commit fixtures/deployments-mainnet.json and the deploy evidence before the server step (the bundle ships fixtures/)

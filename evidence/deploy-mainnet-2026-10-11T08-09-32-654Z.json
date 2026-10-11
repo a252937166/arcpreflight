@@ -1,0 +1,192 @@
+{
+  "network": "mainnet",
+  "chainId": 5042,
+  "deployer": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
+  "runner": "0xC6182D363D7c3Da6Db491f703C430Dc91d0e2ACE",
+  "orderCreator": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b",
+  "deployedAtUTC": "2026-10-11T08:09:32.653Z",
+  "implA": {
+    "address": "0x00e393acdcd8cfbef4ab5d0f826bebd87bf4ae14",
+    "tx": "0xd0acc97fb524c8a9e6c7e03dca6d9d8868155c2da639ca52c8ca7b862048a689",
+    "codeHash": "0xfaa42eab18286f80700e49fba2d1b862256e203ea8d1fa6b0d303225705ac1db",
+    "block": "25380906"
+  },
+  "implB": {
+    "address": "0x816ca9da6d3a316d9b4cff414890b07cbc95b399",
+    "tx": "0x88e4276949056c2f2f1617c9aebb12aeba4632441663483e69c7b29b25108060",
+    "codeHash": "0xd3c9062c241ec62baaf55fda55284918765deb9805364f054bdad7c730228b1f",
+    "block": "25380912"
+  },
+  "proxies": {
+    "MAIN": {
+      "address": "0xa09f5dd3753823b4920cea629e83fc481fe00ebc",
+      "tx": "0x6ad87b64e558ffaba002745772a31862725e84ac7d9bc81b5698f3649b83369d",
+      "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
+      "block": "25380918",
+      "setOrderCreatorTx": "0x68a2bd0e83f946c300bf15dd064e55397fb504e9db73d5c55933d9d59d71f818",
+      "setOrderCreatorBlock": "25380928"
+    },
+    "CHANGED": {
+      "address": "0x3bc7340cfe664c3b09d4e64d1b7de239f6748605",
+      "tx": "0x8446147500da2b92d53c62bb647b365a0115909f1ae64b0f7cc961137ddffe79",
+      "codeHash": "0x5caba9f05dcd26e5cfaa6b6c9092c7a51cce70676517a32b82e5c9e1b0e123aa",
+      "block": "25380923",
+      "setOrderCreatorTx": "0xd32afa1f9b3538202a2c196af02416da388a7812ce168af456c046ba0b3eb7d2",
+      "setOrderCreatorBlock": "25380934",
+      "upgradeTx": "0x553ccd22d6f52610f88fd0bbacf5032bae1457bfaa1651d4893b51518828b4f3",
+      "upgradeBlock": "25380939",
+      "currentImpl": "0x816ca9da6d3a316d9b4cff414890b07cbc95b399"
+    }
+  },
+  "compiler": {
+    "solc": "0.8.28",
+    "evm": "cancun",
+    "optimizerRuns": 200
+  },
+  "transactions": {
+    "implA": {
+      "tx": "0xd0acc97fb524c8a9e6c7e03dca6d9d8868155c2da639ca52c8ca7b862048a689",
+      "block": "25380906",
+      "gasUsed": "1067071",
+      "effectiveGasPrice": "20000001041",
+      "costUsdc": "0.021341421110820911",
+      "contractAddress": "0x00e393acdcd8cfbef4ab5d0f826bebd87bf4ae14"
+    },
+    "implB": {
+      "tx": "0x88e4276949056c2f2f1617c9aebb12aeba4632441663483e69c7b29b25108060",
+      "block": "25380912",
+      "gasUsed": "1095198",
+      "effectiveGasPrice": "20000001041",
+      "costUsdc": "0.021903961140101118",
+      "contractAddress": "0x816ca9da6d3a316d9b4cff414890b07cbc95b399"
+    },
+    "proxyMAIN": {
+      "tx": "0x6ad87b64e558ffaba002745772a31862725e84ac7d9bc81b5698f3649b83369d",
+      "block": "25380918",
+      "gasUsed": "178416",
+      "effectiveGasPrice": "20000001041",
+      "costUsdc": "0.003568320185731056",
+      "contractAddress": "0xa09f5dd3753823b4920cea629e83fc481fe00ebc"
+    },
+    "proxyCHANGED": {
+      "tx": "0x8446147500da2b92d53c62bb647b365a0115909f1ae64b0f7cc961137ddffe79",
+      "block": "25380923",
+      "gasUsed": "178416",
+      "effectiveGasPrice": "20000001041",
+      "costUsdc": "0.003568320185731056",
+      "contractAddress": "0x3bc7340cfe664c3b09d4e64d1b7de239f6748605"
+    },
+    "creatorMAIN": {
+      "tx": "0x68a2bd0e83f946c300bf15dd064e55397fb504e9db73d5c55933d9d59d71f818",
+      "block": "25380928",
+      "gasUsed": "52167",
+      "effectiveGasPrice": "20000001041",
+      "costUsdc": "0.001043340054305847",
+      "contractAddress": null
+    },
+    "creatorCHANGED": {
+      "tx": "0xd32afa1f9b3538202a2c196af02416da388a7812ce168af456c046ba0b3eb7d2",
+      "block": "25380934",
+      "gasUsed": "52167",
+      "effectiveGasPrice": "20000001041",
+      "costUsdc": "0.001043340054305847",
+      "contractAddress": null
+    },
+    "upgrade": {
+      "tx": "0x553ccd22d6f52610f88fd0bbacf5032bae1457bfaa1651d4893b51518828b4f3",
+      "block": "25380939",
+      "gasUsed": "37633",
+      "effectiveGasPrice": "20000001041",
+      "costUsdc": "0.000752660039175953",
+      "contractAddress": null
+    }
+  },
+  "spend": {
+    "label": "deploy",
+    "network": "mainnet",
+    "perTxCapUsdc": "0.05",
+    "totalCapUsdc": "0.15",
+    "maxFeeCeilingGwei": "40",
+    "committedUsdc": "0.053221362770171788",
+    "remainingUsdc": "0.096778637229828212",
+    "entries": [
+      {
+        "purpose": "deploy implementation A (DemoMerchantV1)",
+        "to": null,
+        "worstNativeAtomic": "31009177345023009",
+        "actualNativeAtomic": "21341421110820911",
+        "status": "settled",
+        "txHash": "0xd0acc97fb524c8a9e6c7e03dca6d9d8868155c2da639ca52c8ca7b862048a689",
+        "at": "2026-10-11T08:09:12.770Z"
+      },
+      {
+        "purpose": "deploy implementation B (DemoMerchantV2)",
+        "to": null,
+        "worstNativeAtomic": "31825657380437829",
+        "actualNativeAtomic": "21903961140101118",
+        "status": "settled",
+        "txHash": "0x88e4276949056c2f2f1617c9aebb12aeba4632441663483e69c7b29b25108060",
+        "at": "2026-10-11T08:09:15.850Z"
+      },
+      {
+        "purpose": "deploy MAIN proxy on A",
+        "to": null,
+        "worstNativeAtomic": "5212776226104159",
+        "actualNativeAtomic": "3568320185731056",
+        "status": "settled",
+        "txHash": "0x6ad87b64e558ffaba002745772a31862725e84ac7d9bc81b5698f3649b83369d",
+        "at": "2026-10-11T08:09:18.653Z"
+      },
+      {
+        "purpose": "deploy CHANGED proxy on A",
+        "to": null,
+        "worstNativeAtomic": "5212776226104159",
+        "actualNativeAtomic": "3568320185731056",
+        "status": "settled",
+        "txHash": "0x8446147500da2b92d53c62bb647b365a0115909f1ae64b0f7cc961137ddffe79",
+        "at": "2026-10-11T08:09:21.349Z"
+      },
+      {
+        "purpose": "setOrderCreator on MAIN",
+        "to": null,
+        "worstNativeAtomic": "1525176066154509",
+        "actualNativeAtomic": "1043340054305847",
+        "status": "settled",
+        "txHash": "0x68a2bd0e83f946c300bf15dd064e55397fb504e9db73d5c55933d9d59d71f818",
+        "at": "2026-10-11T08:09:24.024Z"
+      },
+      {
+        "purpose": "setOrderCreator on CHANGED",
+        "to": null,
+        "worstNativeAtomic": "1525176066154509",
+        "actualNativeAtomic": "1043340054305847",
+        "status": "settled",
+        "txHash": "0xd32afa1f9b3538202a2c196af02416da388a7812ce168af456c046ba0b3eb7d2",
+        "at": "2026-10-11T08:09:26.692Z"
+      },
+      {
+        "purpose": "upgrade CHANGED proxy A -> B",
+        "to": null,
+        "worstNativeAtomic": "1094352047467518",
+        "actualNativeAtomic": "752660039175953",
+        "status": "settled",
+        "txHash": "0x553ccd22d6f52610f88fd0bbacf5032bae1457bfaa1651d4893b51518828b4f3",
+        "at": "2026-10-11T08:09:29.384Z"
+      }
+    ]
+  },
+  "journal": {
+    "path": "/Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/deploy-mainnet-journal.json",
+    "startedAt": "2026-10-11T08:09:07.945Z",
+    "resumed": false
+  },
+  "plan": [
+    "plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.053221362770171788 · remaining 0.636778637229828212",
+    "  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1",
+    "  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0",
+    "  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0",
+    "  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0",
+    "  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0",
+    "  (new record: /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)"
+  ]
+}

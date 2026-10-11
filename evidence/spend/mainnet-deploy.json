@@ -1,0 +1,75 @@
+{
+  "updatedAt": "2026-10-11T08:09:31.369Z",
+  "label": "deploy",
+  "network": "mainnet",
+  "perTxCapUsdc": "0.05",
+  "totalCapUsdc": "0.15",
+  "maxFeeCeilingGwei": "40",
+  "committedUsdc": "0.053221362770171788",
+  "remainingUsdc": "0.096778637229828212",
+  "entries": [
+    {
+      "purpose": "deploy implementation A (DemoMerchantV1)",
+      "to": null,
+      "worstNativeAtomic": "31009177345023009",
+      "actualNativeAtomic": "21341421110820911",
+      "status": "settled",
+      "txHash": "0xd0acc97fb524c8a9e6c7e03dca6d9d8868155c2da639ca52c8ca7b862048a689",
+      "at": "2026-10-11T08:09:12.770Z"
+    },
+    {
+      "purpose": "deploy implementation B (DemoMerchantV2)",
+      "to": null,
+      "worstNativeAtomic": "31825657380437829",
+      "actualNativeAtomic": "21903961140101118",
+      "status": "settled",
+      "txHash": "0x88e4276949056c2f2f1617c9aebb12aeba4632441663483e69c7b29b25108060",
+      "at": "2026-10-11T08:09:15.850Z"
+    },
+    {
+      "purpose": "deploy MAIN proxy on A",
+      "to": null,
+      "worstNativeAtomic": "5212776226104159",
+      "actualNativeAtomic": "3568320185731056",
+      "status": "settled",
+      "txHash": "0x6ad87b64e558ffaba002745772a31862725e84ac7d9bc81b5698f3649b83369d",
+      "at": "2026-10-11T08:09:18.653Z"
+    },
+    {
+      "purpose": "deploy CHANGED proxy on A",
+      "to": null,
+      "worstNativeAtomic": "5212776226104159",
+      "actualNativeAtomic": "3568320185731056",
+      "status": "settled",
+      "txHash": "0x8446147500da2b92d53c62bb647b365a0115909f1ae64b0f7cc961137ddffe79",
+      "at": "2026-10-11T08:09:21.349Z"
+    },
+    {
+      "purpose": "setOrderCreator on MAIN",
+      "to": null,
+      "worstNativeAtomic": "1525176066154509",
+      "actualNativeAtomic": "1043340054305847",
+      "status": "settled",
+      "txHash": "0x68a2bd0e83f946c300bf15dd064e55397fb504e9db73d5c55933d9d59d71f818",
+      "at": "2026-10-11T08:09:24.024Z"
+    },
+    {
+      "purpose": "setOrderCreator on CHANGED",
+      "to": null,
+      "worstNativeAtomic": "1525176066154509",
+      "actualNativeAtomic": "1043340054305847",
+      "status": "settled",
+      "txHash": "0xd32afa1f9b3538202a2c196af02416da388a7812ce168af456c046ba0b3eb7d2",
+      "at": "2026-10-11T08:09:26.692Z"
+    },
+    {
+      "purpose": "upgrade CHANGED proxy A -> B",
+      "to": null,
+      "worstNativeAtomic": "1094352047467518",
+      "actualNativeAtomic": "752660039175953",
+      "status": "settled",
+      "txHash": "0x553ccd22d6f52610f88fd0bbacf5032bae1457bfaa1651d4893b51518828b4f3",
+      "at": "2026-10-11T08:09:29.384Z"
+    }
+  ]
+}
