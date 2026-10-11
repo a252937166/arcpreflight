@@ -1,0 +1,38 @@
+== build both bundles before changing the server
+$ esbuild src/server.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/server.mjs --external:node:sqlite --banner:js="import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
+
+
+⚡ Done in 191ms
+$ tsc --noEmit -p tsconfig.json && vite build
+vite v6.4.3 building for production...
+transforming...
+✓ 598 modules transformed.
+rendering chunks...
+computing gzip size...
+✓ built in 1.16s
+== mainnet env (root, port 4040): PUBLIC_EXECUTION=0 written explicitly; acceptance-sized daily caps; no faucet
+== testnet env (/testnet, port 4041): public, continuing the current public testnet database
+== server: stop the root instance (single sender), back up the env, install both envs, keys (order-creator on, deployer-admin off)
+demo-runner.json
+merchant-payto.json
+order-creator.json
+== release bundle (restarts the root and the testnet instance)
+{"ok":true,"release":"ab49fc7","profile":"SUBMISSION_RESTRICTED","network":"eip155:5042"}
+{"ok":true,"release":"ab49fc7","profile":"SUBMISSION_RESTRICTED","network":"eip155:5042002"}
+nginx: [warn] the "listen ... http2" directive is deprecated, use the "http2" directive instead in /etc/nginx/conf.d/arcpreflight.conf:8
+nginx: [warn] the "listen ... http2" directive is deprecated, use the "http2" directive instead in /etc/nginx/conf.d/codex.axiqo.xyz.conf:17
+nginx: [warn] protocol options redefined for 0.0.0.0:443 in /etc/nginx/conf.d/faktura.conf:10
+nginx: [warn] the "listen ... http2" directive is deprecated, use the "http2" directive instead in /etc/nginx/conf.d/jev.conf:8
+nginx: [warn] protocol options redefined for 0.0.0.0:443 in /etc/nginx/conf.d/jev.conf:8
+nginx: [warn] protocol options redefined for 0.0.0.0:443 in /etc/nginx/conf.d/personal-site.conf:11
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+deployed ab49fc7
+== verify the mainnet instance — any failure stops it
+network eip155:5042 release ab49fc7 orderSigner order-creator adminKeyInProcess False access {'selfService': True, 'session': '/v1/session', 'publicExecution': False, 'walletExecution': False, 'executionReady': True, 'operatorAcceptance': True, 'note': 'business execution on this instance is gated until the operator records the mainnet acceptance (PUBLIC_EXECUTION); checks, orders, recovery and passports stay available'}
+network eip155:5042 release ab49fc7 publicExecution False operatorAcceptance True executionReady True
+probe POST /v1/demo/run (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+probe POST /v1/demo/orders (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+probe POST /v1/wallet/attempts (visitor, no admin token, empty body) → 503 EXECUTION_GATED
+gate closed: only the operator's admin token passes
+testnet instance: eip155:5042002 release ab49fc7 publicExecution True
