@@ -122,6 +122,26 @@ case "$step" in
     [ -f fixtures/deployments-mainnet.json ] || stop "no mainnet deployments yet"
     clean_tree || stop "commit fixtures/deployments-mainnet.json (and any code) first: the bundle must match a commit"
     [ -f keys/env.server ] && [ -f keys/env.server-testnet ] && [ -f keys/order-creator.json ] || stop "keys/env.server, keys/env.server-testnet and keys/order-creator.json are required"
+    echo "== build both bundles before changing the server"; ops/deploy.sh "$HOST" --build-only
+    MENV="" TENV="" SERVER_MUTATING=0
+    server_cleanup() {
+      local rc=$?
+      trap - EXIT
+      set +e
+      rm -f "${MENV:-}" "${TENV:-}"
+      if [ "$rc" -ne 0 ] && [ "$SERVER_MUTATING" = 1 ]; then
+        if ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "systemctl stop arcpreflight" >/dev/null 2>&1; then
+          echo "STOP: server cutover failed; the mainnet service was stopped"
+        else
+          echo "STOP: server cutover failed; could not confirm the mainnet service was stopped"
+        fi
+        echo "Check the testnet service and /testnet route before retrying; their availability has not been confirmed."
+      fi
+      exit "$rc"
+    }
+    trap server_cleanup EXIT
+    TESTNET_DB=/opt/arcpreflight/data/arcpreflight-testnet-v33.sqlite
+    ssh "$HOST" "test -f '$TESTNET_DB'" || stop "the existing testnet database is missing; refusing to create an empty replacement"
     MAIN=$(python3 -c 'import json;print(json.load(open("fixtures/deployments-mainnet.json"))["proxies"]["MAIN"]["address"])')
     CH=$(python3 -c 'import json;print(json.load(open("fixtures/deployments-mainnet.json"))["proxies"]["CHANGED"]["address"])')
     STAMP=$(date -u +%Y%m%dT%H%M%SZ); MENV=$(mktemp "${TMPDIR:-/tmp}/arcpf-mainnet-env.XXXXXX"); TENV=$(mktemp "${TMPDIR:-/tmp}/arcpf-testnet-env.XXXXXX")
@@ -136,17 +156,18 @@ case "$step" in
     set_env "$MENV" FUNDS_WARN_MERCHANT_PAYTO_ATOMIC 100000000000000000; set_env "$MENV" FUNDS_WARN_DEPLOYER_ADMIN_ATOMIC 100000000000000000
     grep -q '^PUBLIC_EXECUTION=0$' "$MENV" || stop "the mainnet env does not say PUBLIC_EXECUTION=0"
     echo "== testnet env (/testnet, port 4041): public, continuing the current public testnet database"
-    set_env "$TENV" PORT 4041; set_env "$TENV" PUBLIC_BASE_URL "$API/testnet"; set_env "$TENV" DB_PATH /opt/arcpreflight/data/arcpreflight-testnet-v33.sqlite
+    set_env "$TENV" PORT 4041; set_env "$TENV" PUBLIC_BASE_URL "$API/testnet"; set_env "$TENV" DB_PATH "$TESTNET_DB"
     set_env "$TENV" PUBLIC_EXECUTION 1; set_env "$TENV" RECOVERY_INTERVAL_MS 30000
     grep -q '^ARC_NET=testnet$' "$TENV" || stop "the testnet env must be ARC_NET=testnet"
     echo "== server: stop the root instance (single sender), back up the env, install both envs, keys (order-creator on, deployer-admin off)"
-    ssh "$HOST" "systemctl stop arcpreflight; cp /opt/arcpreflight/arcpreflight.env /opt/arcpreflight/arcpreflight.env.bak-$STAMP"
+    SERVER_MUTATING=1
+    ssh "$HOST" "systemctl stop arcpreflight && cp /opt/arcpreflight/arcpreflight.env /opt/arcpreflight/arcpreflight.env.bak-$STAMP"
     scp -q "$MENV" "$HOST:/opt/arcpreflight/arcpreflight.env"; scp -q "$TENV" "$HOST:/opt/arcpreflight/arcpreflight-testnet.env"; rm -f "$MENV" "$TENV"
     scp -q keys/order-creator.json "$HOST:/opt/arcpreflight/keys/order-creator.json"
     scp -q ops/arcpreflight-testnet.service "$HOST:/etc/systemd/system/arcpreflight-testnet.service"
     scp -q ops/nginx-arcpreflight.conf "$HOST:/etc/nginx/conf.d/arcpreflight.conf"
     ssh "$HOST" "chmod 600 /opt/arcpreflight/arcpreflight.env /opt/arcpreflight/arcpreflight-testnet.env /opt/arcpreflight/keys/order-creator.json && rm -f /opt/arcpreflight/keys/deployer-admin.json && systemctl daemon-reload && ls /opt/arcpreflight/keys/"
-    echo "== release bundle (restarts the root and the testnet instance)"; ops/deploy.sh "$HOST"
+    echo "== release bundle (restarts the root and the testnet instance)"; ops/deploy.sh "$HOST" --skip-build
     REL=$(release); sleep 5
     echo "== verify the mainnet instance — any failure stops it"
     curl -s -m 15 "$API/v1/network" | python3 -c "
@@ -154,13 +175,20 @@ import sys,json; d=json.load(sys.stdin); a=d['accounts']; x=d.get('access',{})
 problems=[]
 if d['chainId']!=5042 or d['network']!='mainnet': problems.append(f\"network {d['network']} chain {d['chainId']}\")
 if d['release']!='$REL': problems.append(f\"release {d['release']} != $REL\")
-if a.get('orderSignerRole')!='order-creator' or a.get('adminKeyInProcess'): problems.append(f\"order signer {a.get('orderSignerRole')} adminKeyInProcess {a.get('adminKeyInProcess')}\")
+if a.get('orderSignerRole')!='order-creator' or a.get('adminKeyInProcess') is not False: problems.append(f\"order signer {a.get('orderSignerRole')} adminKeyInProcess {a.get('adminKeyInProcess')}\")
 if x.get('publicExecution') is not False: problems.append('publicExecution is not false')
 if x.get('executionReady') is not True: problems.append('executionReady is not true')
 print('network',d['caip2'],'release',d['release'],'orderSigner',a.get('orderSignerRole'),'adminKeyInProcess',a.get('adminKeyInProcess'),'access',x)
-if problems: print('PROBLEMS: '+'; '.join(problems)); sys.exit(1)" && gatecheck "$API" 5042 || { ssh "$HOST" "systemctl stop arcpreflight"; stop "post-cutover verification failed — the mainnet service was stopped; the testnet instance keeps running"; }
-    ssh "$HOST" "ls /opt/arcpreflight/keys/ | grep -q deployer-admin && echo 'deployer-admin key PRESENT' || echo 'deployer-admin key absent (as required)'"
-    curl -s -m 15 "$API/testnet/v1/network" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("testnet instance:",d["caip2"],"release",d["release"],"publicExecution",d.get("access",{}).get("publicExecution"),"fixtures",[(f["id"],(f["baselineDigest"] or "none")[:10]) for f in d["fixtures"]])' || echo "testnet instance not answering yet"
+if problems: print('PROBLEMS: '+'; '.join(problems)); sys.exit(1)" && gatecheck "$API" 5042 || stop "post-cutover mainnet verification failed"
+    ssh "$HOST" "test ! -e /opt/arcpreflight/keys/deployer-admin.json && grep -qx 'DB_PATH=$TESTNET_DB' /opt/arcpreflight/arcpreflight-testnet.env && test -f '$TESTNET_DB'" || stop "deployer key absence or preserved testnet database verification failed"
+    curl -s -m 15 "$API/testnet/v1/network" | python3 -c "
+import sys,json; d=json.load(sys.stdin); x=d.get('access',{})
+problems=[]
+if d.get('chainId')!=5042002 or d.get('network')!='testnet': problems.append(f\"network {d.get('network')} chain {d.get('chainId')}\")
+if d.get('release')!='$REL': problems.append(f\"release {d.get('release')} != $REL\")
+if x.get('publicExecution') is not True: problems.append('publicExecution is not true')
+print('testnet instance:',d.get('caip2'),'release',d.get('release'),'publicExecution',x.get('publicExecution'))
+if problems: print('PROBLEMS: '+'; '.join(problems)); sys.exit(1)" || stop "post-cutover testnet verification failed"
     ;;
   baselines)
     require_go baselines
