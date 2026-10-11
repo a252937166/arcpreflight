@@ -1,8 +1,10 @@
 # Arc mainnet execution plan (Gate D)
 
-**Status: proposed, awaiting the operator's approval of this plan and its budget.** No mainnet transaction has been sent by this
-project since the 2026-10-07 funding split (deployer-admin nonce 2). Every spending or server-changing step below additionally needs
-its own typed go (`export CUTOVER_GO=<step>`). Public mainnet execution stays closed (`PUBLIC_EXECUTION=0`) until the acceptance
+**Status: plan and budget approved by the operator's typed "go" on 2026-10-11 (≈07:55Z); the steps now wait for their own typed go, one at a
+time, in order.** No mainnet transaction has been sent by this project since the 2026-10-07 funding split (deployer-admin nonce 2). Every
+spending or server-changing step below additionally needs its own typed go (`export CUTOVER_GO=<step>`). The read-only preflight was repeated
+right after the approval (2026-10-11 08:01Z, release `ab49fc7`, head 25,379,954, gas 20 gwei): balances, nonces, worst cases and predicted
+addresses unchanged; fund, deploy and probe preflights OK; nothing signed. Public mainnet execution stays closed (`PUBLIC_EXECUTION=0`) until the acceptance
 evidence is recorded; opening it is a separate approval (the GitHub push was approved and done on 2026-10-11).
 
 ## Release
@@ -89,6 +91,6 @@ Any of these stops the plan; nothing further is sent, the evidence (including `-
 ## Approvals needed
 
 0. The server keys after the evidence-route incident (audit API-01): the access logs show no read of a key file through the route; rotating the three server keys (demo-runner, merchant-payto, order-creator) before the cutover is the conservative option and would need new keys, testnet re-pointing and two mainnet fund moves (demo-runner 5.0 and merchant-payto 0.5 USDC) under their own approval. Decide: rotate first, or proceed with the current keys.
-1. This plan and budget: a **0.69 USDC budget cap** out of the project's keys (the **0.84 USDC sum of step caps** minus the 0.15 internal funding); expected ≈ 0.31 (gas ≈ 0.105 + 0.205 into our own merchant contract), plus 0.27 moved between our own keys.
+1. **Given 2026-10-11 (typed "go").** This plan and budget: a **0.69 USDC budget cap** out of the project's keys (the **0.84 USDC sum of step caps** minus the 0.15 internal funding); expected ≈ 0.31 (gas ≈ 0.105 + 0.205 into our own merchant contract), plus 0.27 moved between our own keys. The go named no key rotation (approval 0): the plan proceeds with the current keys unless the operator asks for a rotation before the `server` step, which is where the server keys start signing on mainnet.
 2. Then one typed go per step, in order: `deploy`, `fund`, `probe`, `server`, `baselines`, `acceptance`, `lifecycle`.
 3. Separately, later: `open` (public mainnet execution). The GitHub push was approved by the user's typed "go push" and done on 2026-10-11: a force-with-lease that replaced the remote `main` (`2dc55aa`) with the local history, every remote commit having a local equivalent (step 12).
