@@ -2,7 +2,7 @@
 
 What exists, what it proves, and what does not exist yet. Nothing here is a mainnet product claim unless its row says **mainnet**.
 
-As of **2026-10-09** the public site runs the **testnet preview** of release `78c8dc2` (Gate D preparation; release label = last code commit) on the fixtures
+As of **2026-10-11** the public root runs **Arc mainnet** (release `ab49fc7`; Gate D steps 1–10 done, execution closed until the separate `open` approval), and the testnet instance continues under `/testnet` with its public database. The paragraph that follows describes the site as it was on 2026-10-09: As of **2026-10-09** the public site runs the **testnet preview** of release `78c8dc2` (Gate D preparation; release label = last code commit) on the fixtures
 redeployed on 2026-10-07 with the `orderCreator` role, with the order-creator key on the server and the owner key removed from it;
 the Arc mainnet cutover has not happened.
 Rows under "Not produced yet" are deliberately empty: no transaction hash is listed because none exists.
