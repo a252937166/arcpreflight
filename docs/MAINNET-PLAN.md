@@ -3,7 +3,7 @@
 **Status: proposed, awaiting the operator's approval of this plan and its budget.** No mainnet transaction has been sent by this
 project since the 2026-10-07 funding split (deployer-admin nonce 2). Every spending or server-changing step below additionally needs
 its own typed go (`export CUTOVER_GO=<step>`). Public mainnet execution stays closed (`PUBLIC_EXECUTION=0`) until the acceptance
-evidence is recorded; opening it and pushing to GitHub are separate approvals.
+evidence is recorded; opening it is a separate approval (the GitHub push was approved and done on 2026-10-11).
 
 ## Release
 
@@ -44,7 +44,7 @@ signs is capped at a 40 gwei max fee; above it nothing is sent.
 | 9 | `lifecycle` | visitor-rehearsal (laptop); server keys | the wallet scenario (order, paid check, validated attempt, the wallet's own broadcast, passport) and the labelled interruption (recovery adds 0 orders, 0 signatures) through the closed gate; cumulative across restarts under the plan record, the visitor key's ledger persisted (AP33-76) | business 0.055 into the MAIN proxy, fees 0.02 inside, gas ≈ 0.012 | visitor key 0.03 per transaction, 0.05 total; project outflow 0.12 measured |
 | 10 | record | — | evidence rows in `docs/EVIDENCE.md`, `docs/ACCEPTANCE.md` mainnet columns | — | — |
 | 11 | `open` — **separate approval** | — | `PUBLIC_EXECUTION=1`, `MAINNET_VERIFIED=1`; refused unless PASS acceptance and lifecycle evidence for the running release is recorded | — | — |
-| 12 | push — **separate approval, a FORCE-PUSH** | — | GitHub `main` is `2dc55aa` (read again 2026-10-09), which is not in the local history (rewritten on 2026-10-07 to the project identity). Publishing therefore **replaces the remote history**: `git push --force-with-lease=main:2dc55aa origin main`. It needs its own explicit approval naming the force-push | — | — |
+| 12 | push — **done 2026-10-11** (the user's typed "go push" approved the force-push named here) | — | GitHub `main` was `2dc55aa`: the pre-rewrite history of 2026-10-07 plus three later commits (submodule pins, the licence, the untracked database), every one of whose patches already existed in the local history (`git cherry main origin/main`: 22 remote-only commits, all with a local equivalent; `git diff --name-status origin/main main`: no file present only on the remote; `.gitmodules` identical; no key, database or local artifact tracked). Pushed with `git push --force-with-lease=refs/heads/main:2dc55aa41a52d7a45b8ca6a9ef434f230d6c36eb origin main` from the local `main` at this record | — | — |
 
 ## Money
 
@@ -91,4 +91,4 @@ Any of these stops the plan; nothing further is sent, the evidence (including `-
 0. The server keys after the evidence-route incident (audit API-01): the access logs show no read of a key file through the route; rotating the three server keys (demo-runner, merchant-payto, order-creator) before the cutover is the conservative option and would need new keys, testnet re-pointing and two mainnet fund moves (demo-runner 5.0 and merchant-payto 0.5 USDC) under their own approval. Decide: rotate first, or proceed with the current keys.
 1. This plan and budget: a **0.69 USDC budget cap** out of the project's keys (the **0.84 USDC sum of step caps** minus the 0.15 internal funding); expected ≈ 0.31 (gas ≈ 0.105 + 0.205 into our own merchant contract), plus 0.27 moved between our own keys.
 2. Then one typed go per step, in order: `deploy`, `fund`, `probe`, `server`, `baselines`, `acceptance`, `lifecycle`.
-3. Separately, later: `open` (public mainnet execution), and the GitHub push — which is a force-push that replaces the remote `main` (`2dc55aa`) with the rewritten local history and needs its own approval naming it.
+3. Separately, later: `open` (public mainnet execution). The GitHub push was approved by the user's typed "go push" and done on 2026-10-11: a force-with-lease that replaced the remote `main` (`2dc55aa`) with the local history, every remote commit having a local equivalent (step 12).
