@@ -1,0 +1,67 @@
+{
+  "network": "mainnet",
+  "from": "deployer-admin",
+  "sender": "0xDBb3598F78A9a8888d89E96F938aB0A719b075aA",
+  "transfers": [
+    {
+      "role": "order-creator",
+      "to": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b",
+      "valueUsdc": "0.1",
+      "tx": "0x1ea8d6bbc271406f484d8f5d4114fa828cec701b8ac805d7ef43630076fc3da7",
+      "block": "25381331",
+      "gasUsed": "21000",
+      "costUsdc": "0.100420000021861",
+      "receivedUsdc": "0.1",
+      "ok": true
+    },
+    {
+      "role": "visitor-rehearsal",
+      "to": "0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2",
+      "valueUsdc": "0.05",
+      "tx": "0xea084853cb3461db612f3deb7ff509f0426d084cd6a94b6e6f945b2f524a3553",
+      "block": "25381335",
+      "gasUsed": "21000",
+      "costUsdc": "0.050420000021861",
+      "receivedUsdc": "0.05",
+      "ok": true
+    }
+  ],
+  "spend": {
+    "label": "fund",
+    "network": "mainnet",
+    "perTxCapUsdc": "0.2",
+    "totalCapUsdc": "0.2",
+    "maxFeeCeilingGwei": "40",
+    "committedUsdc": "0.150840000043722",
+    "remainingUsdc": "0.049159999956278",
+    "entries": [
+      {
+        "purpose": "fund order-creator",
+        "to": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b",
+        "worstNativeAtomic": "100604800026233200",
+        "actualNativeAtomic": "100420000021861000",
+        "status": "settled",
+        "txHash": "0x1ea8d6bbc271406f484d8f5d4114fa828cec701b8ac805d7ef43630076fc3da7",
+        "at": "2026-10-11T08:12:48.561Z"
+      },
+      {
+        "purpose": "fund visitor-rehearsal",
+        "to": "0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2",
+        "worstNativeAtomic": "50604800026233200",
+        "actualNativeAtomic": "50420000021861000",
+        "status": "settled",
+        "txHash": "0xea084853cb3461db612f3deb7ff509f0426d084cd6a94b6e6f945b2f524a3553",
+        "at": "2026-10-11T08:12:50.396Z"
+      }
+    ]
+  },
+  "plan": [
+    "plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.054061362813893788 · remaining 0.635938637186106212",
+    "  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1",
+    "  fund        done     cap 0.2    outflow 0.000840000043722    pending 0                    internal 0.15   invocations 1",
+    "  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0",
+    "  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0",
+    "  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0",
+    "  (record /Users/ouyangduning/Documents/project/interesting/dorahacks/microgrants/arcpreflight/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)"
+  ]
+}

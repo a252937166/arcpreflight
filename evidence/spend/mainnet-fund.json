@@ -1,0 +1,30 @@
+{
+  "updatedAt": "2026-10-11T08:12:52.210Z",
+  "label": "fund",
+  "network": "mainnet",
+  "perTxCapUsdc": "0.2",
+  "totalCapUsdc": "0.2",
+  "maxFeeCeilingGwei": "40",
+  "committedUsdc": "0.150840000043722",
+  "remainingUsdc": "0.049159999956278",
+  "entries": [
+    {
+      "purpose": "fund order-creator",
+      "to": "0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b",
+      "worstNativeAtomic": "100604800026233200",
+      "actualNativeAtomic": "100420000021861000",
+      "status": "settled",
+      "txHash": "0x1ea8d6bbc271406f484d8f5d4114fa828cec701b8ac805d7ef43630076fc3da7",
+      "at": "2026-10-11T08:12:48.561Z"
+    },
+    {
+      "purpose": "fund visitor-rehearsal",
+      "to": "0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2",
+      "worstNativeAtomic": "50604800026233200",
+      "actualNativeAtomic": "50420000021861000",
+      "status": "settled",
+      "txHash": "0xea084853cb3461db612f3deb7ff509f0426d084cd6a94b6e6f945b2f524a3553",
+      "at": "2026-10-11T08:12:50.396Z"
+    }
+  ]
+}

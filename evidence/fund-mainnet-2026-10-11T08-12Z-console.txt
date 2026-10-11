@@ -1,0 +1,28 @@
+network=mainnet chainId=5042 mode=PREFLIGHT (read-only; nothing is signed)
+from deployer-admin 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 4.445938637187786212 USDC nonce 9 · max fee 24.000001041 gwei · caps 0.2 per transfer, 0.2 total (gas included) · ledger <repo>/evidence/spend/mainnet-fund.json (0 committed)
+  → order-creator      0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b +0.1 USDC · gas 21000 (limit 25200) · worst 0.1006048000262332 · balance now 0
+  → visitor-rehearsal  0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2 +0.05 USDC · gas 21000 (limit 25200) · worst 0.0506048000262332 · balance now 0
+  total worst 0.1512096000524664 USDC
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.053221362770171788 · remaining 0.636778637229828212
+  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+PREFLIGHT OK: nothing was signed or sent.
+network=mainnet chainId=5042 mode=EXECUTE
+from deployer-admin 0xDBb3598F78A9a8888d89E96F938aB0A719b075aA balance 4.445938637187786212 USDC nonce 9 · max fee 24.000001041 gwei · caps 0.2 per transfer, 0.2 total (gas included) · ledger <repo>/evidence/spend/mainnet-fund.json (0 committed)
+  → order-creator      0xb6eEF219F86ae75FFc3aF9eF3cAdE49F89a7582b +0.1 USDC · gas 21000 (limit 25200) · worst 0.1006048000262332 · balance now 0
+  → visitor-rehearsal  0xA71138FF271DB9A18D2B216cAF13b830Eeab3FF2 +0.05 USDC · gas 21000 (limit 25200) · worst 0.0506048000262332 · balance now 0
+  total worst 0.1512096000524664 USDC
+plan gate-d-mainnet-2026-10 (mainnet) · budget cap 0.69 USDC · fee ceiling 40 gwei · committed 0.053221362770171788 · remaining 0.636778637229828212
+  deploy      done     cap 0.15   outflow 0.053221362770171788 pending 0                    internal 0      invocations 1
+  fund        pending  cap 0.2    outflow 0                    pending 0                    internal 0      invocations 0
+  probe       pending  cap 0.02   outflow 0                    pending 0                    internal 0      invocations 0
+  acceptance  pending  cap 0.35   outflow 0                    pending 0                    internal 0      invocations 0
+  lifecycle   pending  cap 0.12   outflow 0                    pending 0                    internal 0      invocations 0
+  (record <repo>/evidence/spend/mainnet-plan-gate-d-mainnet-2026-10.json)
+  order-creator: 0x1ea8d6bbc271406f484d8f5d4114fa828cec701b8ac805d7ef43630076fc3da7 block 25381331 gas 21000 · received 0.1 USDC (expected 0.1)
+  visitor-rehearsal: 0xea084853cb3461db612f3deb7ff509f0426d084cd6a94b6e6f945b2f524a3553 block 25381335 gas 21000 · received 0.05 USDC (expected 0.05)
+done · committed 0.150840000043722 USDC of 0.2

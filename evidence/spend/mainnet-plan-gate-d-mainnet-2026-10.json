@@ -3,7 +3,7 @@
   "planId": "gate-d-mainnet-2026-10",
   "network": "mainnet",
   "createdAt": "2026-10-11T08:09:06.723Z",
-  "updatedAt": "2026-10-11T08:09:32.654Z",
+  "updatedAt": "2026-10-11T08:12:52.510Z",
   "approved": {
     "budgetCapNativeAtomic": "690000000000000000",
     "maxFeePerGasCeiling": "40000000000",
@@ -45,17 +45,17 @@
       "updatedAt": "2026-10-11T08:09:32.654Z"
     },
     "fund": {
-      "status": "pending",
-      "outflowNativeAtomic": "0",
+      "status": "done",
+      "outflowNativeAtomic": "840000043722000",
       "pendingNativeAtomic": "0",
-      "internalNativeAtomic": "0",
+      "internalNativeAtomic": "150000000000000000",
       "baselineTotalNativeAtomic": null,
       "measuredAddresses": null,
       "openRuns": [],
       "settledRuns": [],
       "releasedRuns": [],
-      "invocations": 0,
-      "updatedAt": null
+      "invocations": 1,
+      "updatedAt": "2026-10-11T08:12:52.510Z"
     },
     "probe": {
       "status": "pending",
